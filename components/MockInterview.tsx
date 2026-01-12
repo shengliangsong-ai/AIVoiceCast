@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { MockInterviewRecording, TranscriptItem, CodeFile, UserProfile, Channel, CodeProject } from '../types';
 import { auth } from '../services/firebaseConfig';
@@ -178,7 +179,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       
       const localBackupsRaw = localStorage.getItem('mock_interview_backups') || '[]';
       const localBackups = (JSON.parse(localBackupsRaw) as MockInterviewRecording[])
-          .filter(b => b && b.id && b.id.trim() !== ""); // HARD FILTER: Remove ID-less local ghosts
+          .filter(b => b && b.id && b.id.trim() !== "");
       
       const myFilteredBackups = localBackups.filter(b => b.userId === (currentUser?.uid || 'guest'));
       
@@ -194,7 +195,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       setMyInterviews(combined.sort((a, b) => b.timestamp - a.timestamp));
       setPublicInterviews(publicData.sort((a, b) => b.timestamp - a.timestamp));
       
-      // Cleanup ghost local storage
       if (localBackups.length !== JSON.parse(localBackupsRaw).length) {
           localStorage.setItem('mock_interview_backups', JSON.stringify(localBackups));
       }
@@ -214,7 +214,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
 
   const handleSelectAll = () => {
       const list = hubTab === 'history' ? myInterviews : publicInterviews;
-      // Filter out any potential ID-less items from the list itself
       const validIds = list.filter(i => i.id && i.id.trim() !== "").map(i => i.id);
       
       if (selectedIds.size === validIds.length) {
@@ -225,8 +224,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
   };
 
   const handleDeleteSelected = async () => {
-      // Fix: Filter selected IDs and use a type guard to ensure 'idsToPurge' is string[].
-      // This correctly handles the 'unknown' inference that can occur when converting a Set.
       const idsToPurge = Array.from(selectedIds).filter((id): id is string => typeof id === 'string' && id.trim() !== "");
       if (idsToPurge.length === 0) return;
       
@@ -241,7 +238,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       try {
           for (const id of idsToPurge) {
               try {
-                  // Fix: 'id' is now correctly inferred as a string.
                   await deleteInterview(id);
               } catch (e: any) {
                   console.error(`Failed to purge doc ${id}:`, e);
@@ -250,7 +246,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
               }
           }
           
-          // Update local history cache
           const localBackupsRaw = localStorage.getItem('mock_interview_backups') || '[]';
           const localBackups = JSON.parse(localBackupsRaw) as MockInterviewRecording[];
           const nextLocal = localBackups.filter(b => !selectedIds.has(b.id));
@@ -295,25 +290,27 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
     const backoffTime = isAuto ? Math.min(2000 * Math.pow(2, reconnectAttemptsRef.current), 10000) : 0;
     if (isAuto) logApi(`Neural Link Retrying in ${backoffTime}ms...`, "warn");
 
-    // Capture current state to avoid closure issues and help TS inference
+    // Capture current values in local variables to avoid stale closure issues
     const currentView = view;
     const currentMode = mode;
-    const currentCoachingTranscript = coachingTranscript;
-    const currentTranscript = transcript;
+    const currentTranscriptSnapshot = [...transcript];
+    const currentCoachSnapshot = [...coachingTranscript];
     const currentReport = report;
     const currentDisplayName = currentUser?.displayName || 'Candidate';
 
     setTimeout(async () => {
       if (isEndingRef.current) return;
       
-      const activeTranscriptList = currentView === 'coaching' ? currentCoachingTranscript : currentTranscript;
+      const activeTranscriptList = currentView === 'coaching' ? currentCoachSnapshot : currentTranscriptSnapshot;
       const historyText = activeTranscriptList.map(t => `${String(t.role).toUpperCase()}: ${t.text}`).join('\n');
       
       let prompt: string = "";
       if (currentView === 'coaching') {
-          prompt = `RESUMING COACHING SESSION. You are a supportive Senior Career Coach. Reviewing report for ${currentDisplayName}. Evaluation Score: ${currentReport?.score}. Summary: ${currentReport?.summary}. History recap: ${historyText.substring(Math.max(0, historyText.length - 2000))}`;
+          prompt = `RESUMING COACHING SESSION. You are a supportive Senior Career Coach. Reviewing report for ${currentDisplayName}. Evaluation Score: ${currentReport?.score}. Summary: ${currentReport?.summary}. COMPLETE HISTORY SO FAR:\n${historyText}\n\nContinue helping the candidate understand their feedback.`;
       } else {
-          prompt = `RESUMING INTERVIEW SESSION. Role: Senior Interviewer. Mode: ${String(currentMode)}. History recap: ${historyText.substring(Math.max(0, historyText.length - 2000))}. IMPORTANT: Monitor and acknowledge messages typed in the chat box. Use 'create_interview_file' to provide a new technical challenge to the candidate without overwriting previous work. Use 'update_active_file' to modify the focused file.`;
+          prompt = `RESUMING INTERVIEW SESSION. Role: Senior Interviewer. Mode: ${currentMode}. Candidate: ${currentDisplayName}. 
+          STRICT INSTRUCTION: You MUST stay in ${currentMode} mode. Do NOT switch to other interview types (e.g., if in behavioral, do NOT ask technical/coding questions like TinyURL). 
+          COMPLETE HISTORY SO FAR:\n${historyText}\n\nPick up exactly where the last message ended. If a technical question was already asked, continue discussing it. If the candidate was telling a story, ask a follow-up.`;
       }
       
       const service = new GeminiLiveService();
@@ -345,7 +342,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
             const setter = currentView === 'coaching' ? setCoachingTranscript : setTranscript;
             setter(prev => {
               const role = isUser ? 'user' : 'ai';
-              // Fix: cast text to string to prevent unknown type errors
               const textStr = text as string;
               if (prev.length > 0 && prev[prev.length - 1].role === role) {
                 const last = prev[prev.length - 1];
@@ -361,14 +357,12 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                       service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: code } }]);
                       logApi("AI Read Candidate Code");
                   } else if (fc.name === 'update_active_file') {
-                      // Fix: cast fc.args to any to prevent unknown type errors on destructuring
                       const { new_content } = fc.args as any;
                       setInitialStudioFiles(prev => prev.map((f, i) => i === 0 ? { ...f, content: new_content } : f));
                       if (activeCodeFilesRef.current[0]) activeCodeFilesRef.current[0].content = new_content;
                       service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: "Editor updated successfully." } }]);
                       logApi("AI Updated Solution File");
                   } else if (fc.name === 'create_interview_file') {
-                      // Fix: cast fc.args to any
                       const { filename, content } = fc.args as any;
                       const newFile: CodeFile = {
                         name: filename, path: `drive://${currentSessionId}/${filename}`, 
@@ -426,7 +420,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                   if (!isUser) setIsAiThinking(false);
                   setCoachingTranscript(prev => {
                       const role = isUser ? 'user' : 'ai';
-                      // Fix: cast text to string
                       const textStr = text as string;
                       if (prev.length > 0 && prev[prev.length - 1].role === role) {
                           const last = prev[prev.length - 1];
@@ -559,9 +552,11 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       const service = new GeminiLiveService();
       activeServiceIdRef.current = service.id;
       liveServiceRef.current = service;
+      
       const sysPrompt = `Role: Senior Interviewer. Mode: ${mode}. Candidate: ${currentUser?.displayName}. Resume: ${resumeText}. Job: ${jobDesc}. 
-      GOAL: Greet the candidate. 
-      IMPORTANT: You MUST write the technical challenge, clear examples, and an empty function template with standard headers for ${language} directly into a solution file using the 'update_active_file' or 'create_interview_file' tool. Do not just speak the problem description. Use 'create_interview_file' for each distinct part of the interview to keep history preserved.`;
+      STRICT MODE LOCK: You are currently in ${mode} mode. Do NOT switch to technical coding questions if you are in behavioral mode. If you are in system design mode, focus on architecture.
+      GOAL: Greet the candidate. For ${mode} mode, begin your evaluation sequence.
+      INSTRUCTIONS: For technical modes, you MUST write the technical challenge directly into a solution file using 'update_active_file' or 'create_interview_file'. For behavioral mode, do NOT use the coding files unless the user wants to take notes.`;
       
       await service.connect(mode === 'behavioral' ? 'Zephyr' : 'Software Interview Voice', sysPrompt, {
         onOpen: () => {
@@ -576,7 +571,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         onVolumeUpdate: () => {},
         onTranscript: (text, isUser) => {
           const role = isUser ? 'user' : 'ai';
-          // Fix: cast text to string
           const textStr = text as string;
           setTranscript(prev => {
             if (prev.length > 0 && prev[prev.length - 1].role === role) {
@@ -592,14 +586,11 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                   const code = activeCodeFilesRef.current[0]?.content || "// No code written yet.";
                   service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: code } }]);
               } else if (fc.name === 'update_active_file') {
-                  // Fix: cast fc.args to any
                   const { new_content } = fc.args as any;
                   setInitialStudioFiles(prev => prev.map((f, i) => i === 0 ? { ...f, content: new_content } : f));
                   if (activeCodeFilesRef.current[0]) activeCodeFilesRef.current[0].content = new_content;
                   service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: "Editor updated." } }]);
-                  logApi("AI Wrote Problem Specification");
               } else if (fc.name === 'create_interview_file') {
-                  // Fix: cast fc.args to any
                   const { filename, content } = fc.args as any;
                   const newFile: CodeFile = {
                     name: filename, path: `drive://${uuid}/${filename}`, 
@@ -609,7 +600,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                   setInitialStudioFiles(prev => [newFile, ...prev]);
                   activeCodeFilesRef.current = [newFile, ...activeCodeFilesRef.current];
                   service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Created new file: ${filename}` } }]);
-                  logApi(`AI Created New File: ${filename}`);
               }
           }
         }
@@ -667,10 +657,17 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
     const tryEvaluate = async (attempt: number): Promise<MockInterviewReport | null> => {
         try {
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-            const prompt = `AUDIT REPORT: Technical Interview. 
-            MODE: ${mode} JOB_SPEC: ${jobDesc}
+            const prompt = `AUDIT REPORT: Technical Mock Interview Evaluation. 
+            MODE: ${mode} 
+            JOB_SPEC: ${jobDesc}
             TRANSCRIPT: ${transcriptText}
-            ARTIFACTS: ${projectFilesContext}
+            ARTIFACTS (CODE/DOCS): ${projectFilesContext}
+
+            EVALUATION CRITERIA:
+            1. CRITICAL: If mode is 'behavioral', ignore the lack of code artifacts. Evaluate SOLELY based on the candidate's conversation, STAR method adherence, and communication skills.
+            2. SCORE RANGE: 0-100. A score of 0 is reserved for NO engagement. If the candidate spoke meaningfully, they must receive a representative score based on their answers.
+            3. ANALYSIS: For technical modes, evaluate both code quality and verbal reasoning.
+            
             Return ONLY JSON: score(0-100), technicalSkills, communication, collaboration, strengths[], areasForImprovement[], verdict, summary, learningMaterial(Markdown).`;
 
             const response = await ai.models.generateContent({
