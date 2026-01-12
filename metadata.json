@@ -1,0 +1,9 @@
+{
+  "name": "Neural Prism Platform",
+  "description": "Making AI super-intelligence truly accessible. A spectrum of 20+ specialized tools designed for your daily human activities.",
+  "requestFramePermissions": [
+    "microphone",
+    "camera",
+    "geolocation"
+  ]
+}

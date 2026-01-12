@@ -1,0 +1,23 @@
+{
+  "name": "Neural Prism Platform",
+  "short_name": "Neural Prism",
+  "description": "Making AI super-intelligence beautifully accessible. A spectrum of 20+ specialized tools for daily human activities.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#6366f1",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='192' height='192' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='128' fill='%23020617' /%3E%3Cg transform='translate(106, 106) scale(1.2)'%3E%3Cpath d='M125 40 L210 180 L125 210 L40 180 Z' fill='none' stroke='%236366f1' stroke-width='12' stroke-linejoin='round' /%3E%3Cpath d='M40 130 h40 l10 -30 l15 60 l15 -80 l15 100 l15 -80 l15 60 l10 -30 h40' fill='none' stroke='%2300f2ff' stroke-width='10' stroke-linecap='round' stroke-linejoin='round' /%3E%3C/g%3E%3C/svg%3E",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='512' height='512' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='128' fill='%23020617' /%3E%3Cg transform='translate(106, 106) scale(1.2)'%3E%3Cpath d='M125 40 L210 180 L125 210 L40 180 Z' fill='none' stroke='%236366f1' stroke-width='12' stroke-linejoin='round' /%3E%3Cpath d='M40 130 h40 l10 -30 l15 60 l15 -80 l15 100 l15 -80 l15 60 l10 -30 h40' fill='none' stroke='%2300f2ff' stroke-width='10' stroke-linecap='round' stroke-linejoin='round' /%3E%3C/g%3E%3C/svg%3E",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
