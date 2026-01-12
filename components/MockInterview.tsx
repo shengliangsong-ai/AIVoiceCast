@@ -8,8 +8,17 @@ import { GoogleGenAI, Type } from '@google/genai';
 import { generateSecureId } from '../utils/idUtils';
 import CodeStudio from './CodeStudio';
 import { MarkdownView } from './MarkdownView';
-import { ArrowLeft, Video, Mic, Monitor, Play, Save, Loader2, Search, Trash2, CheckCircle, X, Download, ShieldCheck, User, Users, Building, FileText, ChevronRight, Zap, SidebarOpen, SidebarClose, Code, MessageSquare, Sparkles, Languages, Clock, Camera, Bot, CloudUpload, Trophy, BarChart3, ClipboardCheck, Star, Upload, FileUp, Linkedin, FileCheck, Edit3, BookOpen, Lightbulb, Target, ListChecks, MessageCircleCode, GraduationCap, Lock, Globe, ExternalLink, PlayCircle, RefreshCw, FileDown, Briefcase, Package, Code2, StopCircle, Youtube, AlertCircle, Eye, EyeOff, SaveAll, Wifi, WifiOff, Activity, ShieldAlert, Timer, FastForward, ClipboardList, Layers, Bug, Flag, Minus, Fingerprint, FileSearch, RefreshCcw, HeartHandshake, Speech, Send, History, Compass, Square, CheckSquare } from 'lucide-react';
+import { ArrowLeft, Video, Mic, Monitor, Play, Save, Loader2, Search, Trash2, CheckCircle, X, Download, ShieldCheck, User, Users, Building, FileText, ChevronRight, Zap, SidebarOpen, SidebarClose, Code, MessageSquare, Sparkles, Languages, Clock, Camera, Bot, CloudUpload, Trophy, BarChart3, ClipboardCheck, Star, Upload, FileUp, Linkedin, FileCheck, Edit3, BookOpen, Lightbulb, Target, ListChecks, MessageCircleCode, GraduationCap, Lock, Globe, ExternalLink, PlayCircle, RefreshCw, FileDown, Briefcase, Package, Code2, StopCircle, Youtube, AlertCircle, Eye, EyeOff, SaveAll, Wifi, WifiOff, Activity, ShieldAlert, Timer, FastForward, ClipboardList, Layers, Bug, Flag, Minus, Fingerprint, FileSearch, RefreshCcw, HeartHandshake, Speech, Send, History, Compass, Square, CheckSquare, Cloud, Award } from 'lucide-react';
 import { getGlobalAudioContext, getGlobalMediaStreamDest, warmUpAudioContext, stopAllPlatformAudio } from '../utils/audioUtils';
+
+interface OptimizedStarStory {
+  title: string;
+  situation: string;
+  task: string;
+  action: string;
+  result: string;
+  coachTip: string;
+}
 
 interface MockInterviewReport {
   score: number;
@@ -20,6 +29,7 @@ interface MockInterviewReport {
   areasForImprovement: string[];
   verdict: 'Strong Hire' | 'Hire' | 'No Hire' | 'Strong No Hire' | 'Move Forward' | 'Reject';
   summary: string;
+  optimizedStarStories?: OptimizedStarStory[];
   idealAnswers?: { question: string, expectedAnswer: string, rationale: string }[];
   learningMaterial: string; 
   todoList?: string[];
@@ -105,6 +115,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
   
   const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
   const [coachingTranscript, setCoachingTranscript] = useState<TranscriptItem[]>([]);
+  const [isCoachingSyncing, setIsCoachingSyncing] = useState(false);
   const [initialStudioFiles, setInitialStudioFiles] = useState<CodeFile[]>([]);
   
   const [currentSessionId, setCurrentSessionId] = useState<string>('');
@@ -168,6 +179,39 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         if (liveServiceRef.current) liveServiceRef.current.disconnect();
     };
   }, [currentUser]);
+
+  // PERSISTENCE: Automatic background sync for coaching transcripts
+  useEffect(() => {
+    if (view !== 'coaching' || coachingTranscript.length === 0) return;
+    
+    const targetId = activeRecording?.id || currentSessionId;
+    if (!targetId) return;
+
+    const syncCoachingTranscript = async () => {
+        setIsCoachingSyncing(true);
+        try {
+            await updateInterviewMetadata(targetId, {
+                coachingTranscript: coachingTranscript
+            });
+            // Also update local storage backup for offline consistency
+            const localBackupsRaw = localStorage.getItem('mock_interview_backups') || '[]';
+            const localBackups = JSON.parse(localBackupsRaw) as MockInterviewRecording[];
+            const idx = localBackups.findIndex(b => b.id === targetId);
+            if (idx !== -1) {
+                localBackups[idx].coachingTranscript = coachingTranscript;
+                localStorage.setItem('mock_interview_backups', JSON.stringify(localBackups));
+            }
+        } catch (e) {
+            console.error("Coaching sync failed", e);
+        } finally {
+            setIsCoachingSyncing(false);
+        }
+    };
+
+    // Debounce sync to avoid spamming Firestore on every character chunk
+    const timer = setTimeout(syncCoachingTranscript, 2000);
+    return () => clearTimeout(timer);
+  }, [coachingTranscript, view, activeRecording?.id, currentSessionId]);
 
   const loadInterviews = async () => {
     setLoading(true);
@@ -386,7 +430,8 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       if (liveServiceRef.current) { await liveServiceRef.current.disconnect(); }
       
       setView('coaching');
-      setCoachingTranscript([]);
+      // If the recording already has a coaching transcript, load it
+      setCoachingTranscript(activeRecording?.coachingTranscript || []);
       setIsAiConnected(false);
       logApi("Initializing AI Coaching Session...");
 
@@ -394,9 +439,14 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       activeServiceIdRef.current = service.id;
       liveServiceRef.current = service;
 
+      const historyContext = activeRecording?.coachingTranscript && activeRecording.coachingTranscript.length > 0
+        ? `RESUMING COACHING SESSION. PREVIOUS DISCUSSION HISTORY:\n${activeRecording.coachingTranscript.map(t => `${t.role.toUpperCase()}: ${t.text}`).join('\n')}`
+        : `STARTING NEW COACHING SESSION.`;
+
       const coachPrompt = `Role: Senior Career Coach. 
       Candidate: ${currentUser?.displayName}. 
       Context: You just finished a technical mock interview (${mode}). 
+      ${historyContext}
       EVALUATION REPORT:
       Score: ${report.score}/100
       Verdict: ${report.verdict}
@@ -469,6 +519,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
 
     reconnectAttemptsRef.current = 0;
     setTranscript([]);
+    setCoachingTranscript([]);
     setReport(null);
     setApiLogs([]);
     videoChunksRef.current = [];
@@ -667,8 +718,10 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
             1. CRITICAL: If mode is 'behavioral', ignore the lack of code artifacts. Evaluate SOLELY based on the candidate's conversation, STAR method adherence, and communication skills.
             2. SCORE RANGE: 0-100. A score of 0 is reserved for NO engagement. If the candidate spoke meaningfully, they must receive a representative score based on their answers.
             3. ANALYSIS: For technical modes, evaluate both code quality and verbal reasoning.
+            4. STAR EXTRACTION: Scan the transcript for any specific stories or anecdotes shared by the candidate. Re-structure them into highly optimized STAR (Situation, Task, Action, Result) answers. These should represent the 'ideal' version of the candidate's own experience.
             
-            Return ONLY JSON: score(0-100), technicalSkills, communication, collaboration, strengths[], areasForImprovement[], verdict, summary, learningMaterial(Markdown).`;
+            Return ONLY JSON: score(0-100), technicalSkills, communication, collaboration, strengths[], areasForImprovement[], verdict, summary, learningMaterial(Markdown), 
+            optimizedStarStories: Array<{ title: string, situation: string, task: string, action: string, result: string, coachTip: string }>.`;
 
             const response = await ai.models.generateContent({
                 model: attempt === 1 ? 'gemini-3-pro-preview' : 'gemini-3-flash-preview',
@@ -689,6 +742,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         id: currentSessionId, userId: currentUser?.uid || 'guest', userName: currentUser?.displayName || 'Guest',
         mode, language, jobDescription: jobDesc, timestamp: Date.now(), videoUrl: "", 
         transcript: transcript.map(t => ({ role: t.role, text: t.text, timestamp: t.timestamp })),
+        coachingTranscript: [],
         feedback: JSON.stringify(reportData), visibility
       };
       
@@ -762,7 +816,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
             </h1>
             {(view === 'interview' || view === 'coaching') && (
                 <div className="flex items-center gap-1.5 text-[9px] font-black text-indigo-400 uppercase tracking-widest mt-0.5">
-                    <Fingerprint size={10}/> Session Ledger: {currentSessionId.substring(0, 12)}...
+                    <Fingerprint size={10}/> Session Ledger: {(activeRecording?.id || currentSessionId).substring(0, 12)}...
                 </div>
             )}
           </div>
@@ -929,6 +983,57 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                         <button onClick={handleStartCoaching} className="px-8 py-3 bg-white text-indigo-600 font-black uppercase tracking-widest rounded-xl hover:scale-105 transition-all shadow-xl active:scale-95">Begin Coaching</button>
                     </div>
                     <div className="text-left w-full bg-slate-950 p-8 rounded-[2rem] border border-slate-800"><h3 className="font-bold text-white mb-4 flex items-center gap-2"><Sparkles className="text-indigo-400" size={18}/> Summary</h3><p className="text-sm text-slate-400 leading-relaxed">{report.summary}</p></div>
+                    
+                    {report.optimizedStarStories && report.optimizedStarStories.length > 0 && (
+                        <div className="w-full space-y-6">
+                            <h3 className="text-xl font-black text-white italic tracking-tighter uppercase flex items-center gap-3">
+                                <Award className="text-amber-500" size={24}/> Neural STAR Refinement
+                            </h3>
+                            <div className="grid grid-cols-1 gap-6">
+                                {report.optimizedStarStories.map((story, idx) => (
+                                    <div key={idx} className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-8 shadow-xl space-y-6 relative overflow-hidden group">
+                                        <div className="absolute top-0 right-0 p-12 bg-indigo-500/5 blur-3xl rounded-full"></div>
+                                        <div className="relative z-10">
+                                            <h4 className="text-lg font-bold text-indigo-300 mb-6 flex items-center gap-2">
+                                                <span className="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center text-xs font-black">{idx + 1}</span>
+                                                {story.title}
+                                            </h4>
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                <div className="space-y-4">
+                                                    <div className="bg-slate-950/50 p-4 rounded-2xl border border-slate-800">
+                                                        <span className="text-[10px] font-black text-emerald-400 bg-emerald-950/50 px-2 py-0.5 rounded uppercase tracking-widest mb-2 inline-block">Situation</span>
+                                                        <p className="text-xs text-slate-300 leading-relaxed">{story.situation}</p>
+                                                    </div>
+                                                    <div className="bg-slate-950/50 p-4 rounded-2xl border border-slate-800">
+                                                        <span className="text-[10px] font-black text-indigo-400 bg-indigo-950/50 px-2 py-0.5 rounded uppercase tracking-widest mb-2 inline-block">Task</span>
+                                                        <p className="text-xs text-slate-300 leading-relaxed">{story.task}</p>
+                                                    </div>
+                                                </div>
+                                                <div className="space-y-4">
+                                                    <div className="bg-slate-950/50 p-4 rounded-2xl border border-slate-800">
+                                                        <span className="text-[10px] font-black text-purple-400 bg-purple-950/50 px-2 py-0.5 rounded uppercase tracking-widest mb-2 inline-block">Action</span>
+                                                        <p className="text-xs text-slate-300 leading-relaxed">{story.action}</p>
+                                                    </div>
+                                                    <div className="bg-slate-950/50 p-4 rounded-2xl border border-slate-800">
+                                                        <span className="text-[10px] font-black text-amber-400 bg-amber-950/50 px-2 py-0.5 rounded uppercase tracking-widest mb-2 inline-block">Result</span>
+                                                        <p className="text-xs text-slate-300 leading-relaxed font-bold">{story.result}</p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div className="mt-6 p-4 bg-indigo-600/10 border border-indigo-500/20 rounded-2xl flex items-start gap-3">
+                                                <Lightbulb className="text-indigo-400 shrink-0 mt-0.5" size={18}/>
+                                                <div>
+                                                    <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1">Coach's Optimization</p>
+                                                    <p className="text-xs text-slate-400 italic leading-relaxed">{story.coachTip}</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full text-left">
                         <div className="bg-slate-900/50 p-6 rounded-2xl border border-slate-800"><h4 className="text-xs font-black text-emerald-400 uppercase tracking-widest mb-4 flex items-center gap-2"><Trophy size={14}/> Key Strengths</h4><ul className="space-y-2">{report.strengths.map((s, i) => (<li key={i} className="text-xs text-slate-300 flex items-start gap-2"><CheckCircle size={14} className="text-emerald-500 shrink-0 mt-0.5"/> {s}</li>))}</ul></div>
                         <div className="bg-slate-900/50 p-6 rounded-2xl border border-slate-800"><h4 className="text-xs font-black text-amber-400 uppercase tracking-widest mb-4 flex items-center gap-2"><AlertCircle size={14}/> Growth Areas</h4><ul className="space-y-2">{report.areasForImprovement.map((s, i) => (<li key={i} className="text-xs text-slate-300 flex items-start gap-2"><Minus size={14} className="text-amber-500 shrink-0 mt-0.5"/> {s}</li>))}</ul></div>
@@ -944,7 +1049,17 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         {view === 'coaching' && (
             <div className="h-full flex flex-col md:flex-row overflow-hidden bg-slate-950">
                 <div className="w-full md:w-1/3 bg-slate-900 border-r border-slate-800 flex flex-col overflow-hidden shrink-0">
-                    <div className="p-6 border-b border-slate-800 bg-slate-950/50"><h3 className="text-xs font-black text-indigo-400 uppercase tracking-[0.2em] mb-4">Evaluation Reference</h3><div className="flex items-center gap-3 mb-6"><div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-black text-sm">{report?.score}</div><div><p className="text-xs font-bold text-white uppercase">{report?.verdict}</p><p className="text-[10px] text-slate-500">Discussion Context</p></div></div></div>
+                    <div className="p-6 border-b border-slate-800 bg-slate-950/50">
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-xs font-black text-indigo-400 uppercase tracking-[0.2em]">Evaluation Reference</h3>
+                            {isCoachingSyncing && (
+                                <div className="flex items-center gap-1 text-[8px] font-black text-emerald-400 uppercase animate-pulse">
+                                    <Cloud size={10}/> Syncing...
+                                </div>
+                            )}
+                        </div>
+                        <div className="flex items-center gap-3 mb-6"><div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-black text-sm">{report?.score}</div><div><p className="text-xs font-bold text-white uppercase">{report?.verdict}</p><p className="text-[10px] text-slate-500">Discussion Context</p></div></div>
+                    </div>
                     <div className="flex-1 overflow-y-auto p-6 space-y-8 scrollbar-hide">
                         <section><h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3 flex items-center gap-2"><Sparkles size={12}/> Summary</h4><p className="text-xs text-slate-400 leading-relaxed italic">"{report?.summary}"</p></section>
                         <section><h4 className="text-[10px] font-black text-emerald-400 uppercase tracking-widest mb-3 flex items-center gap-2"><Trophy size={12}/> Strengths</h4><ul className="space-y-1.5">{report?.strengths.map((s, i) => (<li key={i} className="text-[10px] text-slate-300 flex items-start gap-2"><CheckCircle size={12} className="text-emerald-500 shrink-0 mt-0.5"/> {s}</li>))}</ul></section>
