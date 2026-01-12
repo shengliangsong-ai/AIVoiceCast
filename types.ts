@@ -515,6 +515,7 @@ export interface MockInterviewRecording {
   mode: 'coding' | 'system_design' | 'behavioral' | 'quick_screen' | 'assessment_30' | 'assessment_60';
   language?: string;
   jobDescription: string;
+  interviewerInfo?: string; // Target interviewer profile
   timestamp: number;
   videoUrl: string; // Drive Link
   transcript?: TranscriptItem[];

@@ -110,6 +110,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
   const [mode, setMode] = useState<'coding' | 'system_design' | 'behavioral' | 'quick_screen' | 'assessment_30' | 'assessment_60'>('coding');
   const [language, setLanguage] = useState(userProfile?.defaultLanguage || 'C++');
   const [jobDesc, setJobDesc] = useState('');
+  const [interviewerInfo, setInterviewerInfo] = useState('');
   const [resumeText, setResumeText] = useState(userProfile?.resumeText || '');
   const [visibility, setVisibility] = useState<'public' | 'private'>('public');
   
@@ -337,6 +338,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
     // Capture current values in local variables to avoid stale closure issues
     const currentView = view;
     const currentMode = mode;
+    const currentInterviewer = interviewerInfo;
     const currentTranscriptSnapshot = [...transcript];
     const currentCoachSnapshot = [...coachingTranscript];
     const currentReport = report;
@@ -353,6 +355,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
           prompt = `RESUMING COACHING SESSION. You are a supportive Senior Career Coach. Reviewing report for ${currentDisplayName}. Evaluation Score: ${currentReport?.score}. Summary: ${currentReport?.summary}. COMPLETE HISTORY SO FAR:\n${historyText}\n\nContinue helping the candidate understand their feedback.`;
       } else {
           prompt = `RESUMING INTERVIEW SESSION. Role: Senior Interviewer. Mode: ${currentMode}. Candidate: ${currentDisplayName}. 
+          ${currentInterviewer ? `STRICT PERSONA LOCK: You are simulating this specific interviewer: "${currentInterviewer}". Adopt their tone, expertise level, and likely priorities.` : ''}
           STRICT INSTRUCTION: You MUST stay in ${currentMode} mode. Do NOT switch to other interview types (e.g., if in behavioral, do NOT ask technical/coding questions like TinyURL). 
           COMPLETE HISTORY SO FAR:\n${historyText}\n\nPick up exactly where the last message ended. If a technical question was already asked, continue discussing it. If the candidate was telling a story, ask a follow-up.`;
       }
@@ -605,6 +608,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       liveServiceRef.current = service;
       
       const sysPrompt = `Role: Senior Interviewer. Mode: ${mode}. Candidate: ${currentUser?.displayName}. Resume: ${resumeText}. Job: ${jobDesc}. 
+      ${interviewerInfo ? `STRICT PERSONA LOCK: You are simulating this specific interviewer: "${interviewerInfo}". Adopt their tone, expertise level, and likely priorities.` : ''}
       STRICT MODE LOCK: You are currently in ${mode} mode. Do NOT switch to technical coding questions if you are in behavioral mode. If you are in system design mode, focus on architecture.
       GOAL: Greet the candidate. For ${mode} mode, begin your evaluation sequence.
       INSTRUCTIONS: For technical modes, you MUST write the technical challenge directly into a solution file using 'update_active_file' or 'create_interview_file'. For behavioral mode, do NOT use the coding files unless the user wants to take notes.`;
@@ -711,6 +715,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
             const prompt = `AUDIT REPORT: Technical Mock Interview Evaluation. 
             MODE: ${mode} 
             JOB_SPEC: ${jobDesc}
+            INTERVIEWER_PROFILE: ${interviewerInfo}
             TRANSCRIPT: ${transcriptText}
             ARTIFACTS (CODE/DOCS): ${projectFilesContext}
 
@@ -719,6 +724,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
             2. SCORE RANGE: 0-100. A score of 0 is reserved for NO engagement. If the candidate spoke meaningfully, they must receive a representative score based on their answers.
             3. ANALYSIS: For technical modes, evaluate both code quality and verbal reasoning.
             4. STAR EXTRACTION: Scan the transcript for any specific stories or anecdotes shared by the candidate. Re-structure them into highly optimized STAR (Situation, Task, Action, Result) answers. These should represent the 'ideal' version of the candidate's own experience.
+            5. PERSONA ADAPTATION: If an Interviewer Profile was provided, evaluate how well the candidate tailored their answers to that specific interviewer's likely expectations or technical focus.
             
             Return ONLY JSON: score(0-100), technicalSkills, communication, collaboration, strengths[], areasForImprovement[], verdict, summary, learningMaterial(Markdown), 
             optimizedStarStories: Array<{ title: string, situation: string, task: string, action: string, result: string, coachTip: string }>.`;
@@ -740,7 +746,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       setSynthesisStep('Saving to Cloud Ledger...');
       const rec: MockInterviewRecording = {
         id: currentSessionId, userId: currentUser?.uid || 'guest', userName: currentUser?.displayName || 'Guest',
-        mode, language, jobDescription: jobDesc, timestamp: Date.now(), videoUrl: "", 
+        mode, language, jobDescription: jobDesc, interviewerInfo, timestamp: Date.now(), videoUrl: "", 
         transcript: transcript.map(t => ({ role: t.role, text: t.text, timestamp: t.timestamp })),
         coachingTranscript: [],
         feedback: JSON.stringify(reportData), visibility
@@ -932,6 +938,11 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                     <div className="grid grid-cols-1 gap-2">
                       {[{ id: 'coding', icon: Code, label: 'Algorithm & DS' }, { id: 'system_design', icon: Layers, label: 'System Design' }, { id: 'behavioral', icon: MessageSquare, label: 'Behavioral' }].map(m => (<button key={m.id} onClick={() => setMode(m.id as any)} className={`p-4 rounded-2xl border text-left flex items-center justify-between transition-all ${mode === m.id ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg' : 'bg-slate-950 border border-slate-800 text-slate-50'}`}><div className="flex items-center gap-2"><m.icon size={14}/><span className="text-[10px] font-bold uppercase">{m.label}</span></div>{mode === m.id && <CheckCircle size={14}/>}</button>))}
                     </div>
+                  </div>
+                  <div className="bg-slate-950 p-6 rounded-3xl border border-slate-800 space-y-4 shadow-inner">
+                    <h3 className="text-xs font-black text-indigo-500 uppercase tracking-widest flex items-center gap-2"><Briefcase size={14}/> Simulated Interviewer Profile</h3>
+                    <textarea value={interviewerInfo} onChange={e => setInterviewerInfo(e.target.value)} placeholder="Simulate a specific interviewer (e.g. 'I will have an interview with John Doe at Google. He is a Staff Engineer with expertise in SRE...')" className="w-full h-24 bg-slate-950 border border-slate-800 rounded-2xl p-4 text-xs text-slate-300 outline-none resize-none focus:border-indigo-500/50 transition-all shadow-inner"/>
+                    <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest px-1 italic">AI adopts this persona's tone, title, and expertise focus</p>
                   </div>
                   <div className="bg-slate-950 p-6 rounded-3xl border border-slate-800 space-y-4 shadow-inner">
                     <h3 className="text-xs font-black text-indigo-500 uppercase tracking-widest flex items-center gap-2"><Globe size={14}/> Visibility</h3>
