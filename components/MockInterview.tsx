@@ -8,7 +8,7 @@ import { GoogleGenAI, Type } from '@google/genai';
 import { generateSecureId } from '../utils/idUtils';
 import CodeStudio from './CodeStudio';
 import { MarkdownView } from './MarkdownView';
-import { ArrowLeft, Video, Mic, Monitor, Play, Save, Loader2, Search, Trash2, CheckCircle, X, Download, ShieldCheck, User, Users, Building, FileText, ChevronRight, Zap, SidebarOpen, SidebarClose, Code, MessageSquare, Sparkles, Languages, Clock, Camera, Bot, CloudUpload, Trophy, BarChart3, ClipboardCheck, Star, Upload, FileUp, Linkedin, FileCheck, Edit3, BookOpen, Lightbulb, Target, ListChecks, MessageCircleCode, GraduationCap, Lock, Globe, ExternalLink, PlayCircle, RefreshCw, FileDown, Briefcase, Package, Code2, StopCircle, Youtube, AlertCircle, Eye, EyeOff, SaveAll, Wifi, WifiOff, Activity, ShieldAlert, Timer, FastForward, ClipboardList, Layers, Bug, Flag, Minus, Fingerprint, FileSearch, RefreshCcw, HeartHandshake, Speech, Send, History, Compass, Square, CheckSquare, Cloud, Award } from 'lucide-react';
+import { ArrowLeft, Video, Mic, Monitor, Play, Save, Loader2, Search, Trash2, CheckCircle, X, Download, ShieldCheck, User, Users, Building, FileText, ChevronRight, Zap, SidebarOpen, SidebarClose, Code, MessageSquare, Sparkles, Languages, Clock, Camera, Bot, CloudUpload, Trophy, BarChart3, ClipboardCheck, Star, Upload, FileUp, Linkedin, FileCheck, Edit3, BookOpen, Lightbulb, Target, ListChecks, MessageCircleCode, GraduationCap, Lock, Globe, ExternalLink, PlayCircle, RefreshCw, FileDown, Briefcase, Package, Code2, StopCircle, Youtube, AlertCircle, Eye, EyeOff, SaveAll, Wifi, WifiOff, Activity, ShieldAlert, Timer, FastForward, ClipboardList, Layers, Bug, Flag, Minus, Fingerprint, FileSearch, RefreshCcw, HeartHandshake, Speech, Send, History, Compass, Square, CheckSquare, Cloud, Award, Terminal } from 'lucide-react';
 import { getGlobalAudioContext, getGlobalMediaStreamDest, warmUpAudioContext, stopAllPlatformAudio } from '../utils/audioUtils';
 
 interface OptimizedStarStory {
@@ -99,6 +99,9 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [apiLogs, setApiLogs] = useState<{timestamp: number, msg: string, type: 'info' | 'error' | 'warn'}[]>([]);
+  const [coachingLogs, setCoachingLogs] = useState<{time: string, msg: string, type: 'info' | 'error' | 'warn'}[]>([]);
+  const [showCoachingDiagnostics, setShowCoachingDiagnostics] = useState(false);
+  
   const reconnectAttemptsRef = useRef(0);
   const activeServiceIdRef = useRef<string | null>(null);
   const isEndingRef = useRef(false);
@@ -137,6 +140,11 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
 
   const logApi = (msg: string, type: 'info' | 'error' | 'warn' = 'info') => {
     setApiLogs(prev => [{timestamp: Date.now(), msg, type}, ...prev].slice(0, 50));
+  };
+
+  const logCoach = (msg: string, type: 'info' | 'error' | 'warn' = 'info') => {
+    const time = new Date().toLocaleTimeString();
+    setCoachingLogs(prev => [{time, msg, type}, ...prev].slice(0, 50));
   };
 
   useEffect(() => {
@@ -318,6 +326,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         const userMsg: TranscriptItem = { role: 'user', text, timestamp: Date.now() };
         if (view === 'coaching') {
             setCoachingTranscript(prev => [...prev, userMsg]);
+            logCoach(`Transmitted message packet: ${text.substring(0, 20)}...`);
         } else {
             setTranscript(prev => [...prev, userMsg]);
         }
@@ -333,26 +342,33 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
     if (liveServiceRef.current) liveServiceRef.current.disconnect();
 
     const backoffTime = isAuto ? Math.min(2000 * Math.pow(2, reconnectAttemptsRef.current), 10000) : 0;
-    if (isAuto) logApi(`Neural Link Retrying in ${backoffTime}ms...`, "warn");
-
-    // Capture current values in local variables to avoid stale closure issues
-    const currentView = view;
-    const currentMode = mode;
-    const currentInterviewer = interviewerInfo;
-    const currentTranscriptSnapshot = [...transcript];
-    const currentCoachSnapshot = [...coachingTranscript];
-    const currentReport = report;
-    const currentDisplayName = currentUser?.displayName || 'Candidate';
+    if (isAuto) {
+        logApi(`Neural Link Retrying in ${backoffTime}ms...`, "warn");
+        if (view === 'coaching') logCoach(`Neural Link dropped. Retrying in ${backoffTime}ms...`, "warn");
+    }
 
     setTimeout(async () => {
       if (isEndingRef.current) return;
       
+      const currentView = view;
+      const currentMode = mode;
+      const currentInterviewer = interviewerInfo;
+      const currentTranscriptSnapshot = [...transcript];
+      const currentCoachSnapshot = [...coachingTranscript];
+      const currentReport = report;
+      const currentDisplayName = currentUser?.displayName || 'Candidate';
+
       const activeTranscriptList = currentView === 'coaching' ? currentCoachSnapshot : currentTranscriptSnapshot;
       const historyText = activeTranscriptList.map(t => `${String(t.role).toUpperCase()}: ${t.text}`).join('\n');
       
       let prompt: string = "";
       if (currentView === 'coaching') {
-          prompt = `RESUMING COACHING SESSION. You are a supportive Senior Career Coach. Reviewing report for ${currentDisplayName}. Evaluation Score: ${currentReport?.score}. Summary: ${currentReport?.summary}. COMPLETE HISTORY SO FAR:\n${historyText}\n\nContinue helping the candidate understand their feedback.`;
+          prompt = `RESUMING COACHING SESSION. You are a supportive Senior Career Coach. Reviewing report for ${currentDisplayName}. Evaluation Score: ${currentReport?.score}. Summary: ${currentReport?.summary}. 
+          [HISTORY_LEDGER]:
+          ${historyText}
+          
+          GOAL: Continue helping the candidate understand their feedback based on the above history.`;
+          logCoach("Initiating recovery handshake...");
       } else {
           prompt = `RESUMING INTERVIEW SESSION. Role: Senior Interviewer. Mode: ${currentMode}. Candidate: ${currentDisplayName}. 
           ${currentInterviewer ? `STRICT PERSONA LOCK: You are simulating this specific interviewer: "${currentInterviewer}". Adopt their tone, expertise level, and likely priorities.` : ''}
@@ -372,16 +388,23 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
             setIsAiConnected(true);
             reconnectAttemptsRef.current = 0;
             logApi("Link Active.");
+            if (currentView === 'coaching') logCoach("Neural Link Restored.", "info");
           },
           onClose: (r) => {
             if (activeServiceIdRef.current !== service.id) return;
             setIsAiConnected(false);
+            if (currentView === 'coaching') logCoach(`Neural Link Severed: ${r}`, "warn");
             if (!isEndingRef.current && isAuto && reconnectAttemptsRef.current < 5) {
               reconnectAttemptsRef.current++;
               handleReconnectAi(true);
             }
           },
-          onError: (e: any) => { if (activeServiceIdRef.current === service.id) handleReconnectAi(true); },
+          onError: (e: any) => { 
+            if (activeServiceIdRef.current === service.id) {
+                if (currentView === 'coaching') logCoach(`Handshake Error: ${e}`, "error");
+                handleReconnectAi(true); 
+            }
+          },
           onVolumeUpdate: () => {},
           onTranscript: (text, isUser) => {
             if (activeServiceIdRef.current !== service.id) return;
@@ -424,7 +447,10 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
               }
           }
         }, [{ functionDeclarations: [getCodeTool, updateActiveFileTool, createInterviewFileTool] }]);
-      } catch (err: any) { logApi(`Init Failure: ${err.message}`, "error"); }
+      } catch (err: any) { 
+          logApi(`Init Failure: ${err.message}`, "error"); 
+          if (currentView === 'coaching') logCoach(`Critical Init Failure: ${err.message}`, "error");
+      }
     }, backoffTime);
   };
 
@@ -433,10 +459,11 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       if (liveServiceRef.current) { await liveServiceRef.current.disconnect(); }
       
       setView('coaching');
+      setCoachingLogs([]);
       // If the recording already has a coaching transcript, load it
       setCoachingTranscript(activeRecording?.coachingTranscript || []);
       setIsAiConnected(false);
-      logApi("Initializing AI Coaching Session...");
+      logCoach("Initializing AI Coaching Session...");
 
       const service = new GeminiLiveService();
       activeServiceIdRef.current = service.id;
@@ -463,10 +490,20 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
           await service.connect('Zephyr', coachPrompt, {
               onOpen: () => {
                   setIsAiConnected(true);
-                  logApi("Coaching Link Active.");
+                  logCoach("Coaching Link Active.", "info");
               },
-              onClose: () => { if (activeServiceIdRef.current === service.id) setIsAiConnected(false); },
-              onError: (e) => { if (activeServiceIdRef.current === service.id) setIsAiConnected(false); },
+              onClose: (r) => { 
+                if (activeServiceIdRef.current === service.id) {
+                    setIsAiConnected(false);
+                    logCoach(`Link closed: ${r}`, "warn");
+                }
+              },
+              onError: (e) => { 
+                if (activeServiceIdRef.current === service.id) {
+                    setIsAiConnected(false);
+                    logCoach(`WebSocket Error: ${e}`, "error");
+                }
+              },
               onVolumeUpdate: () => {},
               onTranscript: (text, isUser) => {
                   if (activeServiceIdRef.current !== service.id) return;
@@ -482,8 +519,8 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                   });
               }
           });
-      } catch (e) {
-          logApi("Coach link failed.", "error");
+      } catch (e: any) {
+          logCoach(`Fatal connection failure: ${e.message}`, "error");
           setView('report');
       }
   };
@@ -1058,16 +1095,21 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         )}
 
         {view === 'coaching' && (
-            <div className="h-full flex flex-col md:flex-row overflow-hidden bg-slate-950">
+            <div className="h-full flex flex-col md:flex-row overflow-hidden bg-slate-950 relative">
                 <div className="w-full md:w-1/3 bg-slate-900 border-r border-slate-800 flex flex-col overflow-hidden shrink-0">
                     <div className="p-6 border-b border-slate-800 bg-slate-950/50">
                         <div className="flex items-center justify-between mb-4">
                             <h3 className="text-xs font-black text-indigo-400 uppercase tracking-[0.2em]">Evaluation Reference</h3>
-                            {isCoachingSyncing && (
-                                <div className="flex items-center gap-1 text-[8px] font-black text-emerald-400 uppercase animate-pulse">
-                                    <Cloud size={10}/> Syncing...
-                                </div>
-                            )}
+                            <div className="flex items-center gap-3">
+                                {isCoachingSyncing && (
+                                    <div className="flex items-center gap-1 text-[8px] font-black text-emerald-400 uppercase animate-pulse">
+                                        <Cloud size={10}/> Syncing...
+                                    </div>
+                                )}
+                                <button onClick={() => setShowCoachingDiagnostics(!showCoachingDiagnostics)} className={`p-1.5 rounded transition-all ${showCoachingDiagnostics ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-white'}`} title="Handshake Logs">
+                                    <Terminal size={14}/>
+                                </button>
+                            </div>
                         </div>
                         <div className="flex items-center gap-3 mb-6"><div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-black text-sm">{report?.score}</div><div><p className="text-xs font-bold text-white uppercase">{report?.verdict}</p><p className="text-[10px] text-slate-500">Discussion Context</p></div></div>
                     </div>
@@ -1097,7 +1139,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                         <div className="p-6 border-t border-slate-800 bg-slate-900/50">
                             <form className="flex gap-4 max-w-4xl mx-auto" onSubmit={(e) => { e.preventDefault(); const form = e.target as HTMLFormElement; const input = form.elements.namedItem('message') as HTMLInputElement; if(input.value && input.value.trim()) { handleSendTextMessage(input.value); input.value = ''; } }}>
                                 <input name="message" type="text" className="flex-1 bg-slate-950 border border-slate-800 rounded-2xl px-6 py-4 text-sm text-white focus:ring-2 focus:ring-indigo-500 outline-none shadow-inner" placeholder="Discuss feedback with the coach..."/>
-                                <button type="submit" className="p-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl shadow-xl transition-all active:scale-95 flex items-center justify-center"><Send size={24}/></button>
+                                <button type="submit" disabled={!isAiConnected} className="p-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:grayscale text-white rounded-2xl shadow-xl transition-all active:scale-95 flex items-center justify-center"><Send size={24}/></button>
                             </form>
                             <div className="mt-4 flex justify-center items-center gap-6">
                                 <div className="flex items-center gap-2"><div className={`w-2 h-2 rounded-full ${isAiConnected ? 'bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.4)]' : 'bg-red-500'}`}></div><span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Neural Link: {isAiConnected ? 'Active' : 'Offline'}</span></div>
@@ -1106,6 +1148,37 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                         </div>
                     </div>
                 </div>
+
+                {/* Coaching Diagnostics Modal */}
+                {showCoachingDiagnostics && (
+                    <div className="absolute inset-0 z-[100] flex items-center justify-center p-8 bg-slate-950/60 backdrop-blur-sm animate-fade-in">
+                        <div className="bg-slate-900 border border-slate-800 rounded-[2rem] w-full max-w-2xl h-[500px] flex flex-col shadow-2xl overflow-hidden">
+                            <div className="p-5 border-b border-slate-800 bg-slate-950/50 flex justify-between items-center">
+                                <h3 className="text-sm font-black text-indigo-400 uppercase tracking-widest flex items-center gap-2"><Activity size={16}/> Handshake Diagnostics</h3>
+                                <button onClick={() => setShowCoachingDiagnostics(false)} className="p-1 hover:bg-slate-800 rounded-full"><X size={20}/></button>
+                            </div>
+                            <div className="flex-1 overflow-y-auto p-6 space-y-2 font-mono text-[11px] scrollbar-hide bg-black/40">
+                                {coachingLogs.length === 0 ? (
+                                    <p className="text-slate-700 italic">No events logged in current handshake period.</p>
+                                ) : (
+                                    coachingLogs.map((log, i) => (
+                                        <div key={i} className={`flex gap-3 leading-relaxed ${log.type === 'error' ? 'text-red-400' : log.type === 'warn' ? 'text-amber-400' : 'text-slate-500'}`}>
+                                            <span className="opacity-40 shrink-0 font-bold">[{log.time}]</span>
+                                            <span className="break-words">
+                                                {log.type === 'error' && <ShieldAlert size={12} className="inline mr-2 -mt-0.5"/>}
+                                                {log.msg}
+                                            </span>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                            <div className="p-4 border-t border-slate-800 bg-slate-950/50 flex justify-between items-center">
+                                <span className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Protocol: Gemini-Live-v1</span>
+                                <button onClick={() => setCoachingLogs([])} className="text-[10px] font-black text-indigo-400 hover:text-white uppercase tracking-widest underline">Clear Buffer</button>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
         )}
       </main>
