@@ -124,7 +124,10 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
   const [isCoachingSyncing, setIsCoachingSyncing] = useState(false);
   const [initialStudioFiles, setInitialStudioFiles] = useState<CodeFile[]>([]);
 
-  // ADDED FIX: Definition for hasExistingCoaching to check for existing coaching history
+  // Declaring state before hasExistingCoaching useMemo to avoid TDZ ReferenceError
+  const [activeRecording, setActiveRecording] = useState<MockInterviewRecording | null>(null);
+
+  // Definition for hasExistingCoaching to check for existing coaching history
   const hasExistingCoaching = useMemo(() => {
     return (activeRecording?.coachingTranscript && activeRecording.coachingTranscript.length > 0) || (coachingTranscript && coachingTranscript.length > 0);
   }, [activeRecording, coachingTranscript]);
@@ -140,7 +143,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
   const [currentSessionId, setCurrentSessionId] = useState<string>('');
   const activeCodeFilesRef = useRef<CodeFile[]>([]);
 
-  const [activeRecording, setActiveRecording] = useState<MockInterviewRecording | null>(null);
   const [report, setReport] = useState<MockInterviewReport | null>(null);
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [sessionProject, setSessionProject] = useState<CodeProject | null>(null);
@@ -900,7 +902,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                                     onClick={(e) => handleToggleSelect(rec.id, e)}
                                     className={`p-1 rounded transition-colors ${isSelected ? 'text-indigo-400' : 'text-slate-700 hover:text-slate-500'}`}
                                 >
-                                    {isSelected ? <CheckSquare size={20}/> : <Square size={20}/>}
+                                    {isSelected ? <CheckSquare size={18}/> : <Square size={18}/>}
                                 </button>
                             )}
                             <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-bold text-sm">{rec.userName[0]}</div>
@@ -1374,7 +1376,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                 {/* Coaching Diagnostics Modal */}
                 {showCoachingDiagnostics && (
                     <div className="absolute inset-0 z-[100] flex items-center justify-center p-8 bg-slate-950/60 backdrop-blur-sm animate-fade-in">
-                        <div className="bg-slate-900 border border-slate-700 rounded-[2rem] w-full max-w-2xl h-[500px] flex flex-col shadow-2xl overflow-hidden">
+                        <div className="bg-slate-900 border border-slate-800 rounded-[2rem] w-full max-w-2xl h-[500px] flex flex-col shadow-2xl overflow-hidden">
                             <div className="p-5 border-b border-slate-800 bg-slate-950/50 flex justify-between items-center">
                                 <h3 className="text-sm font-black text-indigo-400 uppercase tracking-widest flex items-center gap-2"><Activity size={16}/> Handshake Diagnostics</h3>
                                 <button onClick={() => setShowCoachingDiagnostics(false)} className="p-1 hover:bg-slate-800 rounded-full"><X size={20}/></button>
