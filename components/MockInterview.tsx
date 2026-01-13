@@ -8,7 +8,7 @@ import { GoogleGenAI, Type } from '@google/genai';
 import { generateSecureId } from '../utils/idUtils';
 import CodeStudio from './CodeStudio';
 import { MarkdownView } from './MarkdownView';
-import { ArrowLeft, Video, Mic, Monitor, Play, Save, Loader2, Search, Trash2, CheckCircle, X, Download, ShieldCheck, User, Users, Building, FileText, ChevronRight, Zap, SidebarOpen, SidebarClose, Code, MessageSquare, Sparkles, Languages, Clock, Camera, Bot, CloudUpload, Trophy, BarChart3, ClipboardCheck, Star, Upload, FileUp, Linkedin, FileCheck, Edit3, BookOpen, Lightbulb, Target, ListChecks, MessageCircleCode, GraduationCap, Lock, Globe, ExternalLink, PlayCircle, RefreshCw, FileDown, Briefcase, Package, Code2, StopCircle, Youtube, AlertCircle, Eye, EyeOff, SaveAll, Wifi, WifiOff, Activity, ShieldAlert, Timer, FastForward, ClipboardList, Layers, Bug, Flag, Minus, Fingerprint, FileSearch, RefreshCcw, HeartHandshake, Speech, Send, History, Compass, Square, CheckSquare, Cloud, Award, Terminal } from 'lucide-react';
+import { ArrowLeft, Video, Mic, Monitor, Play, Save, Loader2, Search, Trash2, CheckCircle, X, Download, ShieldCheck, User, Users, Building, FileText, ChevronRight, Zap, SidebarOpen, SidebarClose, Code, MessageSquare, Sparkles, Languages, Clock, Camera, Bot, CloudUpload, Trophy, BarChart3, ClipboardCheck, Star, Upload, FileUp, Linkedin, FileCheck, Edit3, BookOpen, Lightbulb, Target, ListChecks, MessageCircleCode, GraduationCap, Lock, Globe, ExternalLink, PlayCircle, RefreshCw, FileDown, Briefcase, Package, Code2, StopCircle, Youtube, AlertCircle, Eye, EyeOff, SaveAll, Wifi, WifiOff, Activity, ShieldAlert, Timer, FastForward, ClipboardList, Layers, Bug, Flag, Minus, Fingerprint, FileSearch, RefreshCcw, HeartHandshake, Speech, Send, History, Compass, Square, CheckSquare, Cloud, Award, Terminal, CodeSquare, Quote } from 'lucide-react';
 import { getGlobalAudioContext, getGlobalMediaStreamDest, warmUpAudioContext, stopAllPlatformAudio } from '../utils/audioUtils';
 
 interface OptimizedStarStory {
@@ -54,7 +54,7 @@ const getCodeTool: any = {
 
 const updateActiveFileTool: any = {
   name: "update_active_file",
-  description: "Update the content of the active code file in the editor. Use this to modify existing work or add comments.",
+  description: "Update the content of the active code file in the editor. Use this to modify existing work, add comments, or provide a corrected solution.",
   parameters: {
     type: Type.OBJECT,
     properties: {
@@ -67,11 +67,11 @@ const updateActiveFileTool: any = {
 
 const createInterviewFileTool: any = {
   name: "create_interview_file",
-  description: "Create a new file in the interview environment. Use this to provide a new technical challenge or problem statement without overwriting previous work.",
+  description: "Create a new file in the environment. Use this to provide a new technical challenge, a reference solution, or a code template.",
   parameters: {
     type: Type.OBJECT,
     properties: {
-      filename: { type: Type.STRING, description: "Name of the file (e.g. 'problem_2.py')" },
+      filename: { type: Type.STRING, description: "Name of the file (e.g. 'optimized_solution.py')" },
       content: { type: Type.STRING, description: "Initial content, including the problem statement and template." }
     },
     required: ["filename", "content"]
@@ -121,6 +121,11 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
   const [coachingTranscript, setCoachingTranscript] = useState<TranscriptItem[]>([]);
   const [isCoachingSyncing, setIsCoachingSyncing] = useState(false);
   const [initialStudioFiles, setInitialStudioFiles] = useState<CodeFile[]>([]);
+
+  // UI State for Code Pasting
+  const [showCodePasteOverlay, setShowCodePasteOverlay] = useState(false);
+  const [pasteCodeBuffer, setPasteCodeBuffer] = useState('');
+  const [pasteCodeLang, setPasteCodeLang] = useState('cpp');
   
   const [currentSessionId, setCurrentSessionId] = useState<string>('');
   const activeCodeFilesRef = useRef<CodeFile[]>([]);
@@ -326,13 +331,21 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         const userMsg: TranscriptItem = { role: 'user', text, timestamp: Date.now() };
         if (view === 'coaching') {
             setCoachingTranscript(prev => [...prev, userMsg]);
-            logCoach(`Transmitted message packet: ${text.substring(0, 20)}...`);
+            logCoach(`TEXT_PACKET_SENT: ${text.substring(0, 30)}...`, "info");
         } else {
             setTranscript(prev => [...prev, userMsg]);
         }
         liveServiceRef.current.sendText(text);
         logApi("Neural Link: Transmitted chat data packet");
     }
+  };
+
+  const handleCommitPastedCode = () => {
+      if (!pasteCodeBuffer.trim()) return;
+      const wrapped = `\`\`\`${pasteCodeLang}\n${pasteCodeBuffer}\n\`\`\``;
+      handleSendTextMessage(wrapped);
+      setPasteCodeBuffer('');
+      setShowCodePasteOverlay(false);
   };
 
   const handleReconnectAi = async (isAuto = false) => {
@@ -364,10 +377,11 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       let prompt: string = "";
       if (currentView === 'coaching') {
           prompt = `RESUMING COACHING SESSION. You are a supportive Senior Career Coach. Reviewing report for ${currentDisplayName}. Evaluation Score: ${currentReport?.score}. Summary: ${currentReport?.summary}. 
-          [HISTORY_LEDGER]:
+          STRICT INSTRUCTION: You are here to review the candidate's previous performance. You can see their typed code and generated solutions. You are encouraged to generate code or corrected solutions directly in the editor using tools.
+          [CHAT_LEDGER]:
           ${historyText}
           
-          GOAL: Continue helping the candidate understand their feedback based on the above history.`;
+          GOAL: Continue helping the candidate understand their feedback. Watch the text channel for code they might paste.`;
           logCoach("Initiating recovery handshake...");
       } else {
           prompt = `RESUMING INTERVIEW SESSION. Role: Senior Interviewer. Mode: ${currentMode}. Candidate: ${currentDisplayName}. 
@@ -461,7 +475,8 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       setView('coaching');
       setCoachingLogs([]);
       // If the recording already has a coaching transcript, load it
-      setCoachingTranscript(activeRecording?.coachingTranscript || []);
+      const prevTranscript = activeRecording?.coachingTranscript || [];
+      setCoachingTranscript(prevTranscript);
       setIsAiConnected(false);
       logCoach("Initializing AI Coaching Session...");
 
@@ -469,13 +484,15 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       activeServiceIdRef.current = service.id;
       liveServiceRef.current = service;
 
-      const historyContext = activeRecording?.coachingTranscript && activeRecording.coachingTranscript.length > 0
-        ? `RESUMING COACHING SESSION. PREVIOUS DISCUSSION HISTORY:\n${activeRecording.coachingTranscript.map(t => `${t.role.toUpperCase()}: ${t.text}`).join('\n')}`
+      const historyContext = prevTranscript.length > 0
+        ? `RESUMING COACHING SESSION. PREVIOUS DISCUSSION HISTORY:\n${prevTranscript.map(t => `${t.role.toUpperCase()}: ${t.text}`).join('\n')}`
         : `STARTING NEW COACHING SESSION.`;
 
-      const coachPrompt = `Role: Senior Career Coach. 
+      const coachPrompt = `Role: Senior Career Coach & Technical Architect. 
       Candidate: ${currentUser?.displayName}. 
       Context: You just finished a technical mock interview (${mode}). 
+      STRICT INSTRUCTION: You have access to the code editor. You are encouraged to generate code solutions or corrected implementations using tools. 
+      You should pay close attention to any code the user pastes into the chat (wrapped in triple backticks).
       ${historyContext}
       EVALUATION REPORT:
       Score: ${report.score}/100
@@ -517,8 +534,31 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                       }
                       return [...prev, { role, text: textStr, timestamp: Date.now() }];
                   });
+              },
+              onToolCall: async (toolCall: any) => {
+                  for (const fc of toolCall.functionCalls) {
+                      if (fc.name === 'get_current_code') {
+                          const code = activeCodeFilesRef.current[0]?.content || "// No code written yet.";
+                          service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: code } }]);
+                      } else if (fc.name === 'update_active_file') {
+                          const { new_content } = fc.args as any;
+                          setInitialStudioFiles(prev => prev.map((f, i) => i === 0 ? { ...f, content: new_content } : f));
+                          if (activeCodeFilesRef.current[0]) activeCodeFilesRef.current[0].content = new_content;
+                          service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: "Editor updated." } }]);
+                      } else if (fc.name === 'create_interview_file') {
+                          const { filename, content } = fc.args as any;
+                          const newFile: CodeFile = {
+                            name: filename, path: `drive://${currentSessionId}/${filename}`, 
+                            language: getLanguageFromExt(filename) as any,
+                            content, loaded: true, isDirectory: false, isModified: false
+                          };
+                          setInitialStudioFiles(prev => [newFile, ...prev]);
+                          activeCodeFilesRef.current = [newFile, ...activeCodeFilesRef.current];
+                          service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Created new file: ${filename}` } }]);
+                      }
+                  }
               }
-          });
+          }, [{ functionDeclarations: [getCodeTool, updateActiveFileTool, createInterviewFileTool] }]);
       } catch (e: any) {
           logCoach(`Fatal connection failure: ${e.message}`, "error");
           setView('report');
@@ -847,6 +887,8 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
     </div>
   );
 
+  const hasExistingCoaching = (activeRecording?.coachingTranscript && activeRecording.coachingTranscript.length > 0) || (coachingTranscript.length > 0);
+
   return (
     <div className="h-full flex flex-col bg-slate-950 text-slate-100 overflow-hidden relative">
       <header className="h-16 border-b border-slate-800 bg-slate-900/50 flex items-center justify-between px-6 backdrop-blur-md shrink-0 z-40">
@@ -1027,8 +1069,8 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                     <div className="flex flex-wrap justify-center gap-4"><div className="px-8 py-4 bg-slate-950 rounded-2xl border border-slate-800"><p className="text-[10px] text-slate-500 font-bold uppercase">Score</p><p className="text-4xl font-black text-indigo-400">{report.score}/100</p></div><div className="px-8 py-4 bg-slate-950 rounded-2xl border border-slate-800"><p className="text-[10px] text-slate-500 font-bold uppercase">Verdict</p><p className={`text-xl font-black uppercase ${report.verdict.includes('Hire') ? 'text-emerald-400' : 'text-red-400'}`}>{report.verdict}</p></div></div>
                     <div className="bg-indigo-600/10 border border-indigo-500/30 rounded-3xl p-6 w-full flex flex-col md:flex-row items-center gap-6">
                         <div className="p-4 bg-indigo-600 text-white rounded-2xl shadow-xl shadow-indigo-900/40"><Speech size={32} /></div>
-                        <div className="flex-1 text-center md:text-left"><h3 className="text-lg font-bold text-white mb-1">Discuss with AI Coach</h3><p className="text-sm text-slate-400 leading-relaxed">Start an optional follow-up session to dive deeper into this feedback.</p></div>
-                        <button onClick={handleStartCoaching} className="px-8 py-3 bg-white text-indigo-600 font-black uppercase tracking-widest rounded-xl hover:scale-105 transition-all shadow-xl active:scale-95">Begin Coaching</button>
+                        <div className="flex-1 text-center md:text-left"><h3 className="text-lg font-bold text-white mb-1">{hasExistingCoaching ? 'Resume AI Coaching' : 'Discuss with AI Coach'}</h3><p className="text-sm text-slate-400 leading-relaxed">Deeper dive into specific technical artifacts or behavioral refinement.</p></div>
+                        <button onClick={handleStartCoaching} className="px-8 py-3 bg-white text-indigo-600 font-black uppercase tracking-widest rounded-xl hover:scale-105 transition-all shadow-xl active:scale-95">{hasExistingCoaching ? 'Resume Session' : 'Begin Coaching'}</button>
                     </div>
                     <div className="text-left w-full bg-slate-950 p-8 rounded-[2rem] border border-slate-800"><h3 className="font-bold text-white mb-4 flex items-center gap-2"><Sparkles className="text-indigo-400" size={18}/> Summary</h3><p className="text-sm text-slate-400 leading-relaxed">{report.summary}</p></div>
                     
@@ -1136,11 +1178,30 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                             ))}
                             {isAiThinking && <div className="flex flex-col items-start animate-fade-in"><span className="text-[9px] uppercase font-black tracking-widest mb-1 text-emerald-400">AI Coach Thinking...</span><div className="bg-slate-800 text-slate-200 rounded-2xl rounded-tl-sm p-4 border border-slate-700"><Loader2 className="animate-spin text-indigo-400" size={18} /></div></div>}
                         </div>
-                        <div className="p-6 border-t border-slate-800 bg-slate-900/50">
-                            <form className="flex gap-4 max-w-4xl mx-auto" onSubmit={(e) => { e.preventDefault(); const form = e.target as HTMLFormElement; const input = form.elements.namedItem('message') as HTMLInputElement; if(input.value && input.value.trim()) { handleSendTextMessage(input.value); input.value = ''; } }}>
-                                <input name="message" type="text" className="flex-1 bg-slate-950 border border-slate-800 rounded-2xl px-6 py-4 text-sm text-white focus:ring-2 focus:ring-indigo-500 outline-none shadow-inner" placeholder="Discuss feedback with the coach..."/>
+                        
+                        <div className="p-4 border-t border-slate-800 bg-slate-900/80 backdrop-blur-sm">
+                            {/* Code Studio Integration for Coaching */}
+                            <div className="h-[300px] mb-4 rounded-2xl overflow-hidden border border-slate-800 shadow-inner">
+                                <CodeStudio 
+                                    onBack={() => {}} currentUser={currentUser} userProfile={userProfile} onSessionStart={() => {}} onSessionStop={() => {}} onStartLiveSession={onStartLiveSession as any} 
+                                    initialFiles={initialStudioFiles} isInterviewerMode={true} isAiThinking={isAiThinking}
+                                    onFileChange={(f) => { 
+                                        const existingIdx = activeCodeFilesRef.current.findIndex(x => x.path === f.path);
+                                        if (existingIdx !== -1) activeCodeFilesRef.current[existingIdx] = f;
+                                        else activeCodeFilesRef.current.push(f);
+                                    }}
+                                />
+                            </div>
+
+                            <form className="flex items-center gap-3 max-w-4xl mx-auto" onSubmit={(e) => { e.preventDefault(); const form = e.target as HTMLFormElement; const input = form.elements.namedItem('message') as HTMLInputElement; if(input.value && input.value.trim()) { handleSendTextMessage(input.value); input.value = ''; } }}>
+                                <div className="flex-1 flex items-center bg-slate-950 border border-slate-800 rounded-2xl px-4 shadow-inner group focus-within:border-indigo-500/50 transition-all">
+                                    <button type="button" onClick={() => setShowCodePasteOverlay(true)} className="p-2 text-slate-500 hover:text-indigo-400 transition-colors" title="Paste Code Snippet"><Code size={20}/></button>
+                                    <input name="message" type="text" className="flex-1 bg-transparent border-none py-4 text-sm text-white focus:ring-0 outline-none" placeholder="Discuss feedback or ask for a correct implementation..."/>
+                                    <button type="button" onClick={() => handleSendTextMessage("Please review my current code in the editor.")} className="p-2 text-slate-500 hover:text-emerald-400 transition-colors" title="Scan Current Code"><Activity size={20}/></button>
+                                </div>
                                 <button type="submit" disabled={!isAiConnected} className="p-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:grayscale text-white rounded-2xl shadow-xl transition-all active:scale-95 flex items-center justify-center"><Send size={24}/></button>
                             </form>
+                            
                             <div className="mt-4 flex justify-center items-center gap-6">
                                 <div className="flex items-center gap-2"><div className={`w-2 h-2 rounded-full ${isAiConnected ? 'bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.4)]' : 'bg-red-500'}`}></div><span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Neural Link: {isAiConnected ? 'Active' : 'Offline'}</span></div>
                                 <button onClick={() => handleReconnectAi(false)} className="text-[9px] font-black text-indigo-400 hover:text-white uppercase tracking-widest flex items-center gap-1.5"><RefreshCcw size={10}/> Reset Link</button>
@@ -1148,6 +1209,44 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                         </div>
                     </div>
                 </div>
+
+                {/* Code Paste Overlay */}
+                {showCodePasteOverlay && (
+                    <div className="absolute inset-0 z-[150] flex items-center justify-center p-8 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+                        <div className="bg-slate-900 border border-slate-700 rounded-[2.5rem] w-full max-w-2xl flex flex-col shadow-2xl overflow-hidden animate-fade-in-up">
+                            <div className="p-6 border-b border-slate-800 bg-slate-950/50 flex justify-between items-center">
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 bg-indigo-600 rounded-xl text-white shadow-lg"><Code size={20}/></div>
+                                    <div>
+                                        <h3 className="text-sm font-bold text-white uppercase tracking-widest">Neural Code Injection</h3>
+                                        <p className="text-[10px] text-slate-500 uppercase font-black">Paste code to share with your AI Coach</p>
+                                    </div>
+                                </div>
+                                <button onClick={() => setShowCodePasteOverlay(false)} className="p-1 hover:bg-slate-800 rounded-full"><X size={24}/></button>
+                            </div>
+                            <div className="p-8 space-y-6">
+                                <div className="flex gap-2">
+                                    {['cpp', 'python', 'javascript', 'typescript', 'java'].map(l => (
+                                        <button key={l} onClick={() => setPasteCodeLang(l)} className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border transition-all ${pasteCodeLang === l ? 'bg-indigo-600 border-indigo-400 text-white shadow-lg' : 'bg-slate-800 border-slate-700 text-slate-500 hover:text-slate-300'}`}>{l}</button>
+                                    ))}
+                                </div>
+                                <textarea 
+                                    value={pasteCodeBuffer}
+                                    onChange={e => setPasteCodeBuffer(e.target.value)}
+                                    className="w-full h-64 bg-slate-950 border border-slate-800 rounded-2xl p-6 text-sm font-mono text-indigo-300 outline-none focus:ring-2 focus:ring-indigo-500/30 resize-none shadow-inner leading-relaxed"
+                                    placeholder="// Paste your logic here..."
+                                />
+                                <div className="flex gap-3">
+                                    <button onClick={() => setShowCodePasteOverlay(false)} className="flex-1 py-4 bg-slate-800 hover:bg-slate-700 text-white rounded-2xl font-bold text-xs uppercase tracking-widest transition-all">Cancel</button>
+                                    <button onClick={handleCommitPastedCode} disabled={!pasteCodeBuffer.trim()} className="flex-[2] py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl transition-all disabled:opacity-50 flex items-center justify-center gap-2">
+                                        <Send size={18}/>
+                                        Inject into Conversation
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 {/* Coaching Diagnostics Modal */}
                 {showCoachingDiagnostics && (
