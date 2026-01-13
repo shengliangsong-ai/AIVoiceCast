@@ -180,7 +180,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
+    return `${mins}:${seconds.toString().padStart(2, '0')}`;
   };
 
   const getDurationSeconds = (m: string) => {
@@ -369,13 +369,14 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
   };
 
   /**
-   * Universal onFileChange handler to sync user edits to the parent ledger.
-   * This is critical to ensure that files are not empty when report is generated.
+   * CRITICAL FIX: Universal onFileChange handler.
+   * Updates the Ref Map (for final save) but DOES NOT update the initialStudioFiles state on every keystroke.
+   * Updating initialStudioFiles state causes parent to re-render, which causes CodeStudio to reset,
+   * leading to the "empty file" bug.
    */
   const handleEditorFileChange = useCallback((file: CodeFile) => {
     activeCodeFilesMapRef.current.set(file.path, file);
-    // Also keep initialStudioFiles up to date so re-renders don't wipe progress
-    setInitialStudioFiles(prev => prev.map(p => p.path === file.path ? file : p));
+    // Note: We intentionally avoid setInitialStudioFiles here to prevent re-render loops.
   }, []);
 
   const handleReconnectAi = async (isAuto = false) => {
@@ -828,6 +829,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
     setIsRecording(false);
 
     setSynthesisStep('Syncing Artifacts...');
+    // Ensure we are using the LATEST content from our Ref Map
     const finalFiles = Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[];
     try {
         await saveCodeProject({

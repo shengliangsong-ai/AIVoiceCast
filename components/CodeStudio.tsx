@@ -464,16 +464,17 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
   const [focusedSlot, setFocusedSlot] = useState<number>(0);
   const [slotViewModes, setSlotViewModes] = useState<Record<number, 'code' | 'preview'>>({ 0: 'code' });
   
-  // Use a ref to prevent loops or aggressive resets
-  const lastSyncIdRef = useRef<string | null>(null);
+  // Use a ref to track the session identity to prevent destructive resets during sync
+  const lastSessionIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (initialFiles && initialFiles.length > 0) {
-        // Calculate a sync hash or identifier
-        const pathsHash = initialFiles.map(f => f.path).join(',');
+        // Calculate a session hash or identifier
+        const sessionHash = initialFiles.map(f => f.path).join(',');
         
-        // Only re-sync if the paths list has changed or it's a new project session
-        if (lastSyncIdRef.current !== pathsHash) {
+        // Only trigger a full state reset if the session identity (file paths) has actually changed.
+        // This prevents your active edits from being wiped by parent state refreshes.
+        if (lastSessionIdRef.current !== sessionHash) {
             const slots: (CodeFile | null)[] = [null, null, null, null];
             const vModes: Record<number, 'code' | 'preview'> = {};
             initialFiles.slice(0, 4).forEach((file, i) => {
@@ -484,7 +485,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
             setActiveSlots(slots);
             setSlotViewModes(vModes);
             if (initialFiles.length > 1) setLayoutMode('split-v');
-            lastSyncIdRef.current = pathsHash;
+            lastSessionIdRef.current = sessionHash;
         }
     } else {
         const noFilesActive = activeSlots.every(s => s === null);
