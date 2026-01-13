@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { CodeProject, CodeFile, UserProfile, Channel, CursorPosition, CloudItem } from '../types';
 import { ArrowLeft, Save, Plus, Github, Cloud, HardDrive, Code, X, ChevronRight, ChevronDown, File, Folder, DownloadCloud, Loader2, CheckCircle, AlertTriangle, Info, FolderPlus, FileCode, RefreshCw, LogIn, CloudUpload, Trash2, ArrowUp, Edit2, FolderOpen, MoreVertical, Send, MessageSquare, Bot, Mic, Sparkles, SidebarClose, SidebarOpen, Users, Eye, FileText as FileTextIcon, Image as ImageIcon, StopCircle, Minus, Maximize2, Minimize2, Lock, Unlock, Share2, Terminal as TerminalIcon, Copy, WifiOff, PanelRightClose, PanelRightOpen, PanelLeftClose, PanelLeftOpen, Monitor, Laptop, PenTool, Edit3, ShieldAlert, ZoomIn, ZoomOut, Columns, Rows, Grid2X2, Square as SquareIcon, GripVertical, GripHorizontal, FileSearch, Indent, Wand2, Check, Link, MousePointer2, Activity, Key, Search, FilePlus, FileUp, Play, Trash, ExternalLink, GraduationCap, ShieldCheck } from 'lucide-react';
@@ -465,21 +464,34 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
   const [focusedSlot, setFocusedSlot] = useState<number>(0);
   const [slotViewModes, setSlotViewModes] = useState<Record<number, 'code' | 'preview'>>({ 0: 'code' });
   
+  // Use a ref to prevent loops or aggressive resets
+  const lastSyncIdRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (initialFiles && initialFiles.length > 0) {
-        const slots: (CodeFile | null)[] = [null, null, null, null];
-        const vModes: Record<number, 'code' | 'preview'> = {};
-        initialFiles.slice(0, 4).forEach((file, i) => {
-            slots[i] = file;
-            const lang = getLanguageFromExt(file.name);
-            vModes[i] = ['markdown', 'plantuml', 'pdf', 'whiteboard'].includes(lang) ? 'preview' : 'code';
-        });
-        setActiveSlots(slots);
-        setSlotViewModes(vModes);
-        if (initialFiles.length > 1) setLayoutMode('split-v');
+        // Calculate a sync hash or identifier
+        const pathsHash = initialFiles.map(f => f.path).join(',');
+        
+        // Only re-sync if the paths list has changed or it's a new project session
+        if (lastSyncIdRef.current !== pathsHash) {
+            const slots: (CodeFile | null)[] = [null, null, null, null];
+            const vModes: Record<number, 'code' | 'preview'> = {};
+            initialFiles.slice(0, 4).forEach((file, i) => {
+                slots[i] = file;
+                const lang = getLanguageFromExt(file.name);
+                vModes[i] = ['markdown', 'plantuml', 'pdf', 'whiteboard'].includes(lang) ? 'preview' : 'code';
+            });
+            setActiveSlots(slots);
+            setSlotViewModes(vModes);
+            if (initialFiles.length > 1) setLayoutMode('split-v');
+            lastSyncIdRef.current = pathsHash;
+        }
     } else {
-        setActiveSlots([defaultFile, null, null, null]);
-        setSlotViewModes({ 0: 'code' });
+        const noFilesActive = activeSlots.every(s => s === null);
+        if (noFilesActive) {
+            setActiveSlots([defaultFile, null, null, null]);
+            setSlotViewModes({ 0: 'code' });
+        }
     }
   }, [initialFiles]);
 
@@ -846,8 +858,6 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
         const lang = getLanguageFromExt(file.name);
         setSlotViewModes(prev => ({ ...prev, [slotIndex]: ['markdown', 'plantuml', 'pdf', 'whiteboard'].includes(lang) ? 'preview' : 'code' }));
         if (onFileChange) onFileChange(file);
-        
-        // AUTO-FOCUS the newly updated slot
         setFocusedSlot(slotIndex);
       }
       if (isLive && lockStatus === 'mine' && file?.path) updateProjectActiveFile(project.id, file.path);
@@ -895,7 +905,6 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
   const handleSendMessage = async (text: string) => {
     if (!text.trim() || isChatThinking) return;
     
-    // If in interviewer mode, prioritize external handler
     if (isInterviewerMode && onSendExternalMessage) {
         onSendExternalMessage(text);
         return;

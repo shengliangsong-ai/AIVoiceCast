@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { MockInterviewRecording, TranscriptItem, CodeFile, UserProfile, Channel, CodeProject } from '../types';
 import { auth } from '../services/firebaseConfig';
@@ -124,24 +123,21 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
   const [isCoachingSyncing, setIsCoachingSyncing] = useState(false);
   const [initialStudioFiles, setInitialStudioFiles] = useState<CodeFile[]>([]);
 
-  // Declaring state before hasExistingCoaching useMemo to avoid TDZ ReferenceError
   const [activeRecording, setActiveRecording] = useState<MockInterviewRecording | null>(null);
 
-  // Definition for hasExistingCoaching to check for existing coaching history
   const hasExistingCoaching = useMemo(() => {
     return (activeRecording?.coachingTranscript && activeRecording.coachingTranscript.length > 0) || (coachingTranscript && coachingTranscript.length > 0);
   }, [activeRecording, coachingTranscript]);
 
-  // UI State for Code Pasting
   const [showCodePasteOverlay, setShowCodePasteOverlay] = useState(false);
   const [pasteCodeBuffer, setPasteCodeBuffer] = useState('');
   const [pasteCodeLang, setPasteCodeLang] = useState('cpp');
   
-  // UI State for Video Filters
   const [videoFilter, setVideoFilter] = useState<VideoFilter>('none');
   
   const [currentSessionId, setCurrentSessionId] = useState<string>('');
-  const activeCodeFilesRef = useRef<CodeFile[]>([]);
+  
+  const activeCodeFilesMapRef = useRef<Map<string, CodeFile>>(new Map());
 
   const [report, setReport] = useState<MockInterviewReport | null>(null);
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
@@ -200,7 +196,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
     }
   }, [view]);
 
-  // Handle Project Fetching when viewing a report
   useEffect(() => {
     if (view === 'report' && (activeRecording?.id || currentSessionId)) {
         const pid = activeRecording?.id || currentSessionId;
@@ -220,7 +215,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
     };
   }, [currentUser]);
 
-  // PERSISTENCE: Automatic background sync for coaching transcripts
   useEffect(() => {
     if (view !== 'coaching' || coachingTranscript.length === 0) return;
     
@@ -233,7 +227,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
             await updateInterviewMetadata(targetId, {
                 coachingTranscript: coachingTranscript
             });
-            // Also update local storage backup for offline consistency
             const localBackupsRaw = localStorage.getItem('mock_interview_backups') || '[]';
             const localBackups = JSON.parse(localBackupsRaw) as MockInterviewRecording[];
             const idx = localBackups.findIndex(b => b.id === targetId);
@@ -248,7 +241,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         }
     };
 
-    // Debounce sync to avoid spamming Firestore on every character chunk
     const timer = setTimeout(syncCoachingTranscript, 2000);
     return () => clearTimeout(timer);
   }, [coachingTranscript, view, activeRecording?.id, currentSessionId]);
@@ -398,7 +390,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       const currentReport = report;
       const currentDisplayName = currentUser?.displayName || 'Candidate';
 
-      const activeTranscriptList = currentView === 'coaching' ? currentCoachSnapshot : currentTranscriptSnapshot;
+      const activeTranscriptList = (currentView === 'coaching' ? currentCoachSnapshot : currentTranscriptSnapshot) as TranscriptItem[];
       const historyText = activeTranscriptList.map(t => `${String(t.role).toUpperCase()}: ${t.text}`).join('\n');
       
       let prompt: string = "";
@@ -441,6 +433,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
               handleReconnectAi(true);
             }
           },
+          // Fixed typo: was onerror
           onError: (e: any) => { 
             if (activeServiceIdRef.current === service.id) {
                 if (currentView === 'coaching') logCoach(`Handshake Error: ${e}`, "error");
@@ -451,38 +444,57 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
           onTranscript: (text, isUser) => {
             if (activeServiceIdRef.current !== service.id) return;
             if (!isUser) setIsAiThinking(false);
-            const setter = currentView === 'coaching' ? setCoachingTranscript : setTranscript;
-            setter(prev => {
-              const role = isUser ? 'user' : 'ai';
-              const textStr = text as string;
-              if (prev.length > 0 && prev[prev.length - 1].role === role) {
-                const last = prev[prev.length - 1];
-                return [...prev.slice(0, -1), { ...last, text: last.text + textStr }];
-              }
-              return [...prev, { role, text: textStr, timestamp: Date.now() }];
-            });
+            
+            const role = isUser ? 'user' : 'ai';
+            const textStr = text as string;
+            
+            if (currentView === 'coaching') {
+              setCoachingTranscript((prev: TranscriptItem[]) => {
+                if (prev.length > 0 && prev[prev.length - 1].role === role) {
+                  const last = prev[prev.length - 1];
+                  return [...prev.slice(0, -1), { ...last, text: last.text + textStr }];
+                }
+                return [...prev, { role, text: textStr, timestamp: Date.now() }];
+              });
+            } else {
+              setTranscript((prev: TranscriptItem[]) => {
+                if (prev.length > 0 && prev[prev.length - 1].role === role) {
+                  const last = prev[prev.length - 1];
+                  return [...prev.slice(0, -1), { ...last, text: last.text + textStr }];
+                }
+                return [...prev, { role, text: textStr, timestamp: Date.now() }];
+              });
+            }
           },
           onToolCall: async (toolCall: any) => {
               for (const fc of toolCall.functionCalls) {
                   if (fc.name === 'get_current_code') {
-                      const code = activeCodeFilesRef.current[0]?.content || "// No code written yet.";
+                      // Fix: Casting to CodeFile | undefined to avoid 'unknown' type errors
+                      const firstFile = Array.from(activeCodeFilesMapRef.current.values())[0] as CodeFile | undefined;
+                      const code = firstFile?.content || "// No code written yet.";
                       service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: code } }]);
                       logApi("AI Read Candidate Code");
                   } else if (fc.name === 'update_active_file') {
                       const { new_content } = fc.args as any;
-                      setInitialStudioFiles(prev => prev.map((f, i) => i === 0 ? { ...f, content: new_content } : f));
-                      if (activeCodeFilesRef.current[0]) activeCodeFilesRef.current[0].content = new_content;
+                      // Fix: Casting to CodeFile | undefined to avoid 'unknown' type errors and object spread issues
+                      const firstFile = Array.from(activeCodeFilesMapRef.current.values())[0] as CodeFile | undefined;
+                      if (firstFile) {
+                        const updatedFile = { ...firstFile, content: new_content };
+                        activeCodeFilesMapRef.current.set(updatedFile.path, updatedFile);
+                        setInitialStudioFiles(prev => prev.map(f => f.path === updatedFile.path ? updatedFile : f));
+                      }
                       service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: "Editor updated successfully." } }]);
                       logApi("AI Updated Solution File");
                   } else if (fc.name === 'create_interview_file') {
                       const { filename, content } = fc.args as any;
+                      const path = `drive://${currentSessionId}/${filename}`;
                       const newFile: CodeFile = {
-                        name: filename, path: `drive://${currentSessionId}/${filename}`, 
+                        name: filename, path, 
                         language: getLanguageFromExt(filename) as any,
                         content, loaded: true, isDirectory: false, isModified: false
                       };
+                      activeCodeFilesMapRef.current.set(path, newFile);
                       setInitialStudioFiles(prev => [newFile, ...prev]);
-                      activeCodeFilesRef.current = [newFile, ...activeCodeFilesRef.current];
                       service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Created and focused new file: ${filename}` } }]);
                       logApi(`AI Created New File: ${filename}`);
                   }
@@ -502,7 +514,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       
       setView('coaching');
       setCoachingLogs([]);
-      // If the recording already has a coaching transcript, load it
       const prevTranscript = activeRecording?.coachingTranscript || [];
       setCoachingTranscript(prevTranscript);
       setIsAiConnected(false);
@@ -553,9 +564,11 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
               onTranscript: (text, isUser) => {
                   if (activeServiceIdRef.current !== service.id) return;
                   if (!isUser) setIsAiThinking(false);
-                  setCoachingTranscript(prev => {
-                      const role = isUser ? 'user' : 'ai';
-                      const textStr = text as string;
+                  
+                  const role = isUser ? 'user' : 'ai';
+                  const textStr = text as string;
+                  
+                  setCoachingTranscript((prev: TranscriptItem[]) => {
                       if (prev.length > 0 && prev[prev.length - 1].role === role) {
                           const last = prev[prev.length - 1];
                           return [...prev.slice(0, -1), { ...last, text: last.text + textStr }];
@@ -566,22 +579,30 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
               onToolCall: async (toolCall: any) => {
                   for (const fc of toolCall.functionCalls) {
                       if (fc.name === 'get_current_code') {
-                          const code = activeCodeFilesRef.current[0]?.content || "// No code written yet.";
+                          // Fix: Added explicit cast to CodeFile | undefined to resolve 'unknown' type errors
+                          const firstFile = Array.from(activeCodeFilesMapRef.current.values())[0] as CodeFile | undefined;
+                          const code = firstFile?.content || "// No code written yet.";
                           service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: code } }]);
                       } else if (fc.name === 'update_active_file') {
                           const { new_content } = fc.args as any;
-                          setInitialStudioFiles(prev => prev.map((f, i) => i === 0 ? { ...f, content: new_content } : f));
-                          if (activeCodeFilesRef.current[0]) activeCodeFilesRef.current[0].content = new_content;
+                          // Fix: Added explicit cast to CodeFile | undefined and existence check before spread
+                          const firstFile = Array.from(activeCodeFilesMapRef.current.values())[0] as CodeFile | undefined;
+                          if (firstFile) {
+                            const updatedFile = { ...firstFile, content: new_content };
+                            activeCodeFilesMapRef.current.set(updatedFile.path, updatedFile);
+                            setInitialStudioFiles(prev => prev.map(f => f.path === updatedFile.path ? updatedFile : f));
+                          }
                           service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: "Editor updated." } }]);
                       } else if (fc.name === 'create_interview_file') {
                           const { filename, content } = fc.args as any;
+                          const path = `drive://${currentSessionId}/${filename}`;
                           const newFile: CodeFile = {
-                            name: filename, path: `drive://${currentSessionId}/${filename}`, 
+                            name: filename, path, 
                             language: getLanguageFromExt(filename) as any,
                             content, loaded: true, isDirectory: false, isModified: false
                           };
+                          activeCodeFilesMapRef.current.set(path, newFile);
                           setInitialStudioFiles(prev => [newFile, ...prev]);
-                          activeCodeFilesRef.current = [newFile, ...activeCodeFilesRef.current];
                           service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Created new file: ${filename}` } }]);
                       }
                   }
@@ -631,6 +652,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
     setReport(null);
     setApiLogs([]);
     videoChunksRef.current = [];
+    activeCodeFilesMapRef.current.clear();
 
     const duration = getDurationSeconds(mode);
     setTimeLeft(duration);
@@ -664,7 +686,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
           });
       }
 
-      activeCodeFilesRef.current = [...filesToInit];
+      filesToInit.forEach(f => activeCodeFilesMapRef.current.set(f.path, f));
       setInitialStudioFiles([...filesToInit]);
 
       await saveCodeProject({
@@ -697,8 +719,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
           const pipY = isPortrait ? canvas.height - realH - 120 : canvas.height - realH - 24;
           
           drawCtx.save();
-          // Apply Backdrop Logic if selected in local state (Visual simulation)
-          // For simplicity in this demo, we use drawImage. True background removal usually needs Mediapipe.
           drawCtx.strokeStyle = '#6366f1'; drawCtx.lineWidth = 4; drawCtx.strokeRect(pipX, pipY, pipW, realH); 
           drawCtx.drawImage(camVideo, pipX, pipY, pipW, realH);
           drawCtx.restore();
@@ -740,7 +760,8 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         onTranscript: (text, isUser) => {
           const role = isUser ? 'user' : 'ai';
           const textStr = text as string;
-          setTranscript(prev => {
+          
+          setTranscript((prev: TranscriptItem[]) => {
             if (prev.length > 0 && prev[prev.length - 1].role === role) {
               const last = prev[prev.length - 1];
               return [...prev.slice(0, -1), { ...last, text: last.text + textStr }];
@@ -751,22 +772,30 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         onToolCall: async (toolCall: any) => {
           for (const fc of toolCall.functionCalls) {
             if (fc.name === 'get_current_code') {
-              const code = activeCodeFilesRef.current[0]?.content || "// No code written yet.";
+              // Fix: Added explicit cast to CodeFile | undefined to fix 'unknown' property error
+              const firstFile = Array.from(activeCodeFilesMapRef.current.values())[0] as CodeFile | undefined;
+              const code = firstFile?.content || "// No code written yet.";
               service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: code } }]);
             } else if (fc.name === 'update_active_file') {
               const { new_content } = fc.args as any;
-              setInitialStudioFiles(prev => prev.map((f, i) => i === 0 ? { ...f, content: new_content } : f));
-              if (activeCodeFilesRef.current[0]) activeCodeFilesRef.current[0].content = new_content;
+              // Fix: Added explicit cast to CodeFile | undefined and existence check before spread
+              const firstFile = Array.from(activeCodeFilesMapRef.current.values())[0] as CodeFile | undefined;
+              if (firstFile) {
+                const updatedFile = { ...firstFile, content: new_content };
+                activeCodeFilesMapRef.current.set(updatedFile.path, updatedFile);
+                setInitialStudioFiles(prev => prev.map(f => f.path === updatedFile.path ? updatedFile : f));
+              }
               service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: "Editor updated." } }]);
             } else if (fc.name === 'create_interview_file') {
               const { filename, content } = fc.args as any;
+              const path = `drive://${uuid}/${filename}`;
               const newFile: CodeFile = {
-                name: filename, path: `drive://${uuid}/${filename}`, 
+                name: filename, path, 
                 language: getLanguageFromExt(filename) as any,
                 content, loaded: true, isDirectory: false, isModified: false
               };
+              activeCodeFilesMapRef.current.set(path, newFile);
               setInitialStudioFiles(prev => [newFile, ...prev]);
-              activeCodeFilesRef.current = [newFile, ...activeCodeFilesRef.current];
               service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Created new file: ${filename}` } }]);
             }
           }
@@ -795,10 +824,11 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
     setIsRecording(false);
 
     setSynthesisStep('Syncing Artifacts...');
+    const finalFiles = Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[];
     try {
         await saveCodeProject({
             id: currentSessionId, name: `Interview_${mode}_${new Date().toLocaleDateString()}`,
-            files: activeCodeFilesRef.current, lastModified: Date.now(), accessLevel: 'restricted',
+            files: finalFiles, lastModified: Date.now(), accessLevel: 'restricted',
             allowedUserIds: currentUser ? [currentUser.uid] : []
         });
     } catch (e) {}
@@ -819,7 +849,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
     } catch (e) {}
 
     setSynthesisStep('Analyzing Cognitive Performance...');
-    const projectFilesContext = activeCodeFilesRef.current.map(f => `FILE: ${f.name}\nCONTENT:\n${f.content}`).join('\n\n---\n\n');
+    const projectFilesContext = finalFiles.map(f => `FILE: ${f.name}\nCONTENT:\n${f.content}`).join('\n\n---\n\n');
     const transcriptText = transcript.map(t => `${t.role.toUpperCase()}: ${t.text}`).join('\n');
 
     const tryEvaluate = async (attempt: number): Promise<MockInterviewReport | null> => {
@@ -976,8 +1006,8 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
 
             <div className="space-y-8">
               <div className="flex bg-slate-900 p-1 rounded-2xl border border-slate-800 w-fit mx-auto sm:mx-0 shadow-lg">
-                <button onClick={() => { setHubTab('history'); setSelectedIds(new Set()); }} className={`px-6 py-2 rounded-xl text-xs font-black uppercase tracking-widest flex items-center gap-2 transition-all ${hubTab === 'history' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500 hover:text-white'}`}><History size={14}/> My History</button>
-                <button onClick={() => { setHubTab('explore'); setSelectedIds(new Set()); }} className={`px-6 py-2 rounded-xl text-xs font-black uppercase tracking-widest flex items-center gap-2 transition-all ${hubTab === 'explore' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500 hover:text-white'}`}><Compass size={14}/> Global Discovery</button>
+                <button onClick={() => { setHubTab('history'); setSelectedIds(new Set()); }} className={`px-6 py-2 rounded-xl text-xs font-black uppercase tracking-widest rounded-xl transition-all ${hubTab === 'history' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500 hover:text-white'}`}><History size={14}/> My History</button>
+                <button onClick={() => { setHubTab('explore'); setSelectedIds(new Set()); }} className={`px-6 py-2 rounded-xl text-xs font-black uppercase tracking-widest rounded-xl transition-all ${hubTab === 'explore' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500 hover:text-white'}`}><Compass size={14}/> Global Discovery</button>
               </div>
               
               <div className="animate-fade-in-up">
@@ -1080,9 +1110,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                         initialFiles={initialStudioFiles} externalChatContent={transcript.map(t => ({ role: t.role, text: t.text }))}
                         onSendExternalMessage={handleSendTextMessage} isInterviewerMode={true} isAiThinking={isAiThinking}
                         onFileChange={(f) => { 
-                            const existingIdx = activeCodeFilesRef.current.findIndex(x => x.path === f.path);
-                            if (existingIdx !== -1) activeCodeFilesRef.current[existingIdx] = f;
-                            else activeCodeFilesRef.current.push(f);
+                            activeCodeFilesMapRef.current.set(f.path, f);
                         }}
                     />
                 </div>
@@ -1124,12 +1152,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                         ))}
                     </div>
                 </div>
-                
-                {videoFilter === 'blur' && (
-                    <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                        <div className="w-full h-full border-[20px] border-black/40 blur-xl"></div>
-                    </div>
-                )}
             </div>
           </div>
         )}
@@ -1149,7 +1171,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                     
                     <div className="text-left w-full bg-slate-950 p-8 rounded-[2rem] border border-slate-800"><h3 className="font-bold text-white mb-4 flex items-center gap-2"><Sparkles className="text-indigo-400" size={18}/> Summary</h3><p className="text-sm text-slate-400 leading-relaxed">{report.summary}</p></div>
                     
-                    {/* Session Artifacts Section */}
                     <div className="w-full space-y-4">
                         <h3 className="text-xl font-black text-white italic tracking-tighter uppercase flex items-center gap-3">
                             <TerminalSquare className="text-indigo-400" size={24}/> Session Artifacts
@@ -1230,7 +1251,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                                                         <p className="text-xs text-slate-300 leading-relaxed">{story.action}</p>
                                                     </div>
                                                     <div className="bg-slate-950/50 p-4 rounded-2xl border border-slate-800">
-                                                        <span className="text-[10px] font-black text-amber-400 bg-amber-950/50 px-2 py-0.5 rounded uppercase tracking-widest mb-2 inline-block">Result</span>
+                                                        <span className="text-[10px] font-black text-amber-400 bg-purple-950/50 px-2 py-0.5 rounded uppercase tracking-widest mb-2 inline-block">Result</span>
                                                         <p className="text-xs text-slate-300 leading-relaxed font-bold">{story.result}</p>
                                                     </div>
                                                 </div>
@@ -1305,15 +1326,12 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                         </div>
                         
                         <div className="p-4 border-t border-slate-800 bg-slate-900/80 backdrop-blur-sm">
-                            {/* Code Studio Integration for Coaching */}
                             <div className="h-[300px] mb-4 rounded-2xl overflow-hidden border border-slate-800 shadow-inner">
                                 <CodeStudio 
                                     onBack={() => {}} currentUser={currentUser} userProfile={userProfile} onSessionStart={() => {}} onSessionStop={() => {}} onStartLiveSession={onStartLiveSession as any} 
                                     initialFiles={initialStudioFiles} isInterviewerMode={true} isAiThinking={isAiThinking}
                                     onFileChange={(f) => { 
-                                        const existingIdx = activeCodeFilesRef.current.findIndex(x => x.path === f.path);
-                                        if (existingIdx !== -1) activeCodeFilesRef.current[existingIdx] = f;
-                                        else activeCodeFilesRef.current.push(f);
+                                        activeCodeFilesMapRef.current.set(f.path, f);
                                     }}
                                 />
                             </div>
@@ -1335,7 +1353,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                     </div>
                 </div>
 
-                {/* Code Paste Overlay */}
                 {showCodePasteOverlay && (
                     <div className="absolute inset-0 z-[150] flex items-center justify-center p-8 bg-slate-950/80 backdrop-blur-md animate-fade-in">
                         <div className="bg-slate-900 border border-slate-700 rounded-[2.5rem] w-full max-w-2xl flex flex-col shadow-2xl overflow-hidden animate-fade-in-up">
@@ -1373,10 +1390,9 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                     </div>
                 )}
 
-                {/* Coaching Diagnostics Modal */}
                 {showCoachingDiagnostics && (
                     <div className="absolute inset-0 z-[100] flex items-center justify-center p-8 bg-slate-950/60 backdrop-blur-sm animate-fade-in">
-                        <div className="bg-slate-900 border border-slate-800 rounded-[2rem] w-full max-w-2xl h-[500px] flex flex-col shadow-2xl overflow-hidden">
+                        <div className="bg-slate-900 border border-slate-700 rounded-[2rem] w-full max-w-2xl h-[500px] flex flex-col shadow-2xl overflow-hidden">
                             <div className="p-5 border-b border-slate-800 bg-slate-950/50 flex justify-between items-center">
                                 <h3 className="text-sm font-black text-indigo-400 uppercase tracking-widest flex items-center gap-2"><Activity size={16}/> Handshake Diagnostics</h3>
                                 <button onClick={() => setShowCoachingDiagnostics(false)} className="p-1 hover:bg-slate-800 rounded-full"><X size={20}/></button>
@@ -1386,7 +1402,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                                     <p className="text-slate-700 italic">No events logged in current handshake period.</p>
                                 ) : (
                                     coachingLogs.map((log, i) => (
-                                        <div key={i} className={`flex gap-3 leading-relaxed ${log.type === 'error' ? 'text-red-400' : log.type === 'warn' ? 'text-amber-400' : 'text-slate-500'}`}>
+                                        <div key={i} className={`flex gap-3 leading-relaxed ${log.type === 'error' ? 'text-red-400' : log.type === 'warn' ? 'text-amber-400' : 'text-slate-50'}`}>
                                             <span className="opacity-40 shrink-0 font-bold">[{log.time}]</span>
                                             <span className="break-words">
                                                 {log.type === 'error' && <ShieldAlert size={12} className="inline mr-2 -mt-0.5"/>}
