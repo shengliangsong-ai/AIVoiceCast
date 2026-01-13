@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { MockInterviewRecording, TranscriptItem, CodeFile, UserProfile, Channel, CodeProject } from '../types';
 import { auth } from '../services/firebaseConfig';
@@ -7,8 +8,10 @@ import { GoogleGenAI, Type } from '@google/genai';
 import { generateSecureId } from '../utils/idUtils';
 import CodeStudio from './CodeStudio';
 import { MarkdownView } from './MarkdownView';
-import { ArrowLeft, Video, Mic, Monitor, Play, Save, Loader2, Search, Trash2, CheckCircle, X, Download, ShieldCheck, User, Users, Building, FileText, ChevronRight, Zap, SidebarOpen, SidebarClose, Code, MessageSquare, Sparkles, Languages, Clock, Camera, Bot, CloudUpload, Trophy, BarChart3, ClipboardCheck, Star, Upload, FileUp, Linkedin, FileCheck, Edit3, BookOpen, Lightbulb, Target, ListChecks, MessageCircleCode, GraduationCap, Lock, Globe, ExternalLink, PlayCircle, RefreshCw, FileDown, Briefcase, Package, Code2, StopCircle, Youtube, AlertCircle, Eye, EyeOff, SaveAll, Wifi, WifiOff, Activity, ShieldAlert, Timer, FastForward, ClipboardList, Layers, Bug, Flag, Minus, Fingerprint, FileSearch, RefreshCcw, HeartHandshake, Speech, Send, History, Compass, Square, CheckSquare, Cloud, Award, Terminal, CodeSquare, Quote, Image as ImageIcon, Sparkle, LayoutPanelTop, TerminalSquare } from 'lucide-react';
+import { ArrowLeft, Video, Mic, Monitor, Play, Save, Loader2, Search, Trash2, CheckCircle, X, Download, ShieldCheck, User, Users, Building, FileText, ChevronRight, Zap, SidebarOpen, SidebarClose, Code, MessageSquare, Sparkles, Languages, Clock, Camera, Bot, CloudUpload, Trophy, BarChart3, ClipboardCheck, Star, Upload, FileUp, Linkedin, FileCheck, Edit3, BookOpen, Lightbulb, Target, ListChecks, MessageCircleCode, GraduationCap, Lock, Globe, ExternalLink, PlayCircle, RefreshCw, FileDown, Briefcase, Package, Code2, StopCircle, Youtube, AlertCircle, Eye, EyeOff, SaveAll, Wifi, WifiOff, Activity, ShieldAlert, Timer, FastForward, ClipboardList, Layers, Bug, Flag, Minus, Fingerprint, FileSearch, RefreshCcw, HeartHandshake, Speech, Send, History, Compass, Square, CheckSquare, Cloud, Award, Terminal, CodeSquare, Quote, Image as ImageIcon, Sparkle, LayoutPanelTop, TerminalSquare, FolderOpen } from 'lucide-react';
 import { getGlobalAudioContext, getGlobalMediaStreamDest, warmUpAudioContext, stopAllPlatformAudio } from '../utils/audioUtils';
+import { getDriveToken, connectGoogleDrive } from '../services/authService';
+import { ensureFolder, uploadToDrive } from '../services/googleDriveService';
 
 interface OptimizedStarStory {
   title: string;
@@ -136,6 +139,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
   const [videoFilter, setVideoFilter] = useState<VideoFilter>('none');
   
   const [currentSessionId, setCurrentSessionId] = useState<string>('');
+  const [driveFolderId, setDriveFolderId] = useState<string | null>(null);
   
   // Use a Map for O(1) lookups and to guarantee uniqueness by path
   const activeCodeFilesMapRef = useRef<Map<string, CodeFile>>(new Map());
@@ -368,12 +372,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       setShowCodePasteOverlay(false);
   };
 
-  /**
-   * CRITICAL FIX: Universal onFileChange handler.
-   * Updates BOTH the Ref Map (for final save) AND the initialStudioFiles state.
-   * This ensures that when the AI tool 'update_active_file' causes a re-render, 
-   * the child component receives the LATEST user edits instead of resetting to old state.
-   */
   const handleEditorFileChange = useCallback((file: CodeFile) => {
     activeCodeFilesMapRef.current.set(file.path, file);
     setInitialStudioFiles(prev => prev.map(f => f.path === file.path ? file : f));
@@ -666,7 +664,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
     setTimeLeft(duration);
 
     try {
-      const recordingDest = getGlobalMediaStreamDest();
+      const recordingDest = audioCtx.createMediaStreamDestination();
       const micSource = audioCtx.createMediaStreamSource(camStream);
       micSource.connect(recordingDest);
       activeStreamRef.current = camStream;
@@ -829,16 +827,63 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
     setIsAiConnected(false);
     setIsRecording(false);
 
-    setSynthesisStep('Syncing Artifacts...');
-    // Ensure we are using the LATEST content from our Ref Map
+    setSynthesisStep('Organizing Neural Workspace...');
+    // PACKAGING EVERYTHING INTO A FOLDER-LIKE STRUCTURE
+    // 1. Create transcript.md
+    const transcriptText = transcript.map(t => `${t.role.toUpperCase()}: ${t.text}`).join('\n\n');
+    const transcriptFile: CodeFile = {
+        name: 'session_transcript.md',
+        path: `drive://${currentSessionId}/session_transcript.md`,
+        language: 'markdown',
+        content: `# Interview Transcript\n\nGenerated on: ${new Date().toLocaleString()}\n\n${transcriptText}`,
+        loaded: true, isDirectory: false, isModified: false
+    };
+    activeCodeFilesMapRef.current.set(transcriptFile.path, transcriptFile);
+
+    // 2. Create context.md (Job + Interviewer Profile)
+    const contextContent = `# Session Context\n\n## Job Specification\n${jobDesc || 'N/A'}\n\n## Interviewer Profile\n${interviewerInfo || 'Standard AI Interviewer'}\n\n## Target Language\n${language}`;
+    const contextFile: CodeFile = {
+        name: 'session_context.md',
+        path: `drive://${currentSessionId}/session_context.md`,
+        language: 'markdown',
+        content: contextContent,
+        loaded: true, isDirectory: false, isModified: false
+    };
+    activeCodeFilesMapRef.current.set(contextFile.path, contextFile);
+
+    setSynthesisStep('Syncing Workspace...');
     const finalFiles = Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[];
+    
     try {
+        // Save project as a single logical entity in Firestore
         await saveCodeProject({
-            id: currentSessionId, name: `Interview_${mode}_${new Date().toLocaleDateString()}`,
-            files: finalFiles, lastModified: Date.now(), accessLevel: 'restricted',
+            id: currentSessionId, 
+            name: `Interview_${mode}_${new Date().toLocaleDateString()}`,
+            files: finalFiles, 
+            lastModified: Date.now(), 
+            accessLevel: 'restricted',
             allowedUserIds: currentUser ? [currentUser.uid] : []
         });
-    } catch (e) {}
+
+        // PHYSICAL GOOGLE DRIVE FOLDER SYNC (Sovereign Data Model)
+        const token = getDriveToken();
+        if (token) {
+            setSynthesisStep('Archiving to Personal Cloud...');
+            const rootFolderId = await ensureFolder(token, 'CodeStudio');
+            const interviewFolderId = await ensureFolder(token, `MockInterviews`, rootFolderId);
+            const thisSessionFolderId = await ensureFolder(token, `Session_${currentSessionId.substring(0, 8)}`, interviewFolderId);
+            setDriveFolderId(thisSessionFolderId);
+
+            // Upload individual files to the drive folder
+            for (const file of finalFiles) {
+                if (file.content && !file.name.endsWith('.draw')) { // Skip binary whiteboard for simple text sync here
+                    await uploadToDrive(token, thisSessionFolderId, file.name, new Blob([file.content], { type: 'text/markdown' }));
+                }
+            }
+        }
+    } catch (e) {
+        console.warn("Artifact sync issue", e);
+    }
 
     setSynthesisStep('Closing Video Channel...');
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
@@ -857,7 +902,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
 
     setSynthesisStep('Analyzing Cognitive Performance...');
     const projectFilesContext = finalFiles.map(f => `FILE: ${f.name}\nCONTENT:\n${f.content}`).join('\n\n---\n\n');
-    const transcriptText = transcript.map(t => `${t.role.toUpperCase()}: ${t.text}`).join('\n');
 
     const tryEvaluate = async (attempt: number): Promise<MockInterviewReport | null> => {
         try {
@@ -871,10 +915,8 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
 
             EVALUATION CRITERIA:
             1. CRITICAL: If mode is 'behavioral', ignore the lack of code artifacts. Evaluate SOLELY based on the candidate's conversation, STAR method adherence, and communication skills.
-            2. SCORE RANGE: 0-100. A score of 0 is reserved for NO engagement. If the candidate spoke meaningfully, they must receive a representative score based on their answers.
-            3. ANALYSIS: For technical modes, evaluate both code quality and verbal reasoning.
-            4. STAR EXTRACTION: Scan the transcript for any specific stories or anecdotes shared by the candidate. Re-structure them into highly optimized STAR (Situation, Task, Action, Result) answers. These should represent the 'ideal' version of the candidate's own experience.
-            5. PERSONA ADAPTATION: If an Interviewer Profile was provided, evaluate how well the candidate tailored their answers to that specific interviewer's likely expectations or technical focus.
+            2. SCORE RANGE: 0-100.
+            3. STAR EXTRACTION: Scan the transcript for any specific stories or anecdotes shared by the candidate. Re-structure them into highly optimized STAR (Situation, Task, Action, Result) answers.
             
             Return ONLY JSON: score(0-100), technicalSkills, communication, collaboration, strengths[], areasForImprovement[], verdict, summary, learningMaterial(Markdown), 
             optimizedStarStories: Array<{ title: string, situation: string, task: string, action: string, result: string, coachTip: string }>.`;
@@ -893,7 +935,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
 
     if (reportData) {
       setReport(reportData);
-      setSynthesisStep('Saving to Cloud Ledger...');
+      setSynthesisStep('Finalizing Cloud Ledger...');
       const rec: MockInterviewRecording = {
         id: currentSessionId, userId: currentUser?.uid || 'guest', userName: currentUser?.displayName || 'Guest',
         mode, language, jobDescription: jobDesc, interviewerInfo, timestamp: Date.now(), videoUrl: "", 
@@ -1178,7 +1220,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                     
                     <div className="w-full space-y-4">
                         <h3 className="text-xl font-black text-white italic tracking-tighter uppercase flex items-center gap-3">
-                            <TerminalSquare className="text-indigo-400" size={24}/> Session Artifacts
+                            <FolderOpen className="text-indigo-400" size={24}/> Neural Workspace Folder
                         </h3>
                         <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-8 shadow-xl relative overflow-hidden group">
                             <div className="absolute top-0 right-0 p-12 bg-indigo-500/5 blur-3xl rounded-full"></div>
@@ -1186,15 +1228,15 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                                 <div className="flex flex-col md:flex-row items-center gap-6">
                                     <div className="p-5 bg-indigo-600 text-white rounded-3xl shadow-2xl"><LayoutPanelTop size={40}/></div>
                                     <div className="flex-1 text-center md:text-left">
-                                        <h4 className="text-lg font-bold text-white mb-1">Neural Workspace Snapshot</h4>
-                                        <p className="text-sm text-slate-500">All code, architecture diagrams, and technical specifications generated during this interview.</p>
+                                        <h4 className="text-lg font-bold text-white mb-1">Session Artifacts Directory</h4>
+                                        <p className="text-sm text-slate-500">A unified folder containing all code solutions, the full session transcript, and specific job context analyzed by the AI.</p>
                                     </div>
                                     <button 
                                         onClick={() => window.open(`${window.location.origin}${window.location.pathname}?view=code_studio&id=${activeRecording?.id || currentSessionId}`, '_blank')}
-                                        className="px-6 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-black uppercase tracking-widest border border-slate-700 flex items-center gap-2 transition-all active:scale-95"
+                                        className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-black uppercase tracking-widest shadow-xl flex items-center gap-2 transition-all active:scale-95"
                                     >
                                         <ExternalLink size={16}/>
-                                        Launch Builder Studio
+                                        Open Workspace
                                     </button>
                                 </div>
                                 
@@ -1207,7 +1249,9 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-4 border-t border-slate-800">
                                         {sessionProject.files.map((file, fIdx) => (
                                             <div key={fIdx} className="flex items-center gap-3 p-3 bg-slate-950 rounded-xl border border-slate-800 group/file hover:border-indigo-500/30 transition-all">
-                                                <div className="p-1.5 bg-slate-900 rounded-lg text-indigo-400"><Code2 size={14}/></div>
+                                                <div className={`p-1.5 rounded-lg ${file.name.includes('transcript') || file.name.includes('context') ? 'bg-emerald-900/30 text-emerald-400' : 'bg-indigo-900/30 text-indigo-400'}`}>
+                                                    {file.name.includes('solution') ? <Code2 size={14}/> : <FileText size={14}/>}
+                                                </div>
                                                 <span className="text-xs font-mono text-slate-400 group-hover/file:text-indigo-200 transition-colors truncate flex-1">{file.name}</span>
                                                 <button 
                                                     onClick={() => window.open(`${window.location.origin}${window.location.pathname}?view=code_studio&id=${activeRecording?.id || currentSessionId}`, '_blank')}
