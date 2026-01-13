@@ -200,6 +200,9 @@ const RichCodeEditor = ({ code, onChange, onCursorMove, language, readOnly, font
 
 const AIChatPanel = ({ isOpen, onClose, messages, onSendMessage, isThinking, currentInput, onInputChange, isInterviewerMode }: any) => {
     const scrollRef = useRef<HTMLDivElement>(null);
+    const [showLocalPaste, setShowLocalPaste] = useState(false);
+    const [pasteBuffer, setPasteBuffer] = useState('');
+    const [pasteLang, setPasteLang] = useState('cpp');
     
     useEffect(() => {
         if (scrollRef.current) {
@@ -207,8 +210,16 @@ const AIChatPanel = ({ isOpen, onClose, messages, onSendMessage, isThinking, cur
         }
     }, [messages, isThinking]);
 
+    const handleLocalPaste = () => {
+        if (!pasteBuffer.trim()) return;
+        const wrapped = `\`\`\`${pasteLang}\n${pasteBuffer}\n\`\`\``;
+        onSendMessage(wrapped);
+        setPasteBuffer('');
+        setShowLocalPaste(false);
+    };
+
     return (
-        <div className="flex flex-col h-full bg-slate-950 border-l border-slate-800">
+        <div className="flex flex-col h-full bg-slate-950 border-l border-slate-800 relative">
             <div className="p-3 border-b border-slate-800 flex justify-between items-center bg-slate-900">
                 <span className="font-bold text-slate-300 text-sm flex items-center gap-2">
                     {isInterviewerMode ? (
@@ -229,7 +240,7 @@ const AIChatPanel = ({ isOpen, onClose, messages, onSendMessage, isThinking, cur
                 {messages.map((m: any, i: number) => (
                     <div key={i} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'} animate-fade-in-up`}>
                         <span className={`text-[9px] font-black uppercase mb-1 ${m.role === 'user' ? 'text-indigo-500' : 'text-slate-500'}`}>
-                            {m.role === 'user' ? 'Candidate' : 'Interviewer'}
+                            {m.role === 'user' ? 'Me' : 'AI'}
                         </span>
                         <div className={`max-w-[95%] rounded-2xl p-3 text-sm leading-relaxed ${m.role === 'user' ? 'bg-indigo-600 text-white rounded-tr-sm shadow-lg' : 'bg-slate-800 text-slate-200 rounded-tl-sm border border-slate-700'}`}>
                             {m.role === 'ai' || m.role === 'model' ? <MarkdownView content={m.text} /> : <p className="whitespace-pre-wrap">{m.text}</p>}
@@ -245,18 +256,43 @@ const AIChatPanel = ({ isOpen, onClose, messages, onSendMessage, isThinking, cur
                     </div>
                 )}
             </div>
+
+            {showLocalPaste && (
+                <div className="absolute bottom-[70px] left-3 right-3 bg-slate-900 border border-indigo-500/50 rounded-2xl p-4 shadow-2xl z-50 animate-fade-in-up">
+                    <div className="flex justify-between items-center mb-3">
+                        <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Neural Paste Helper</span>
+                        <button onClick={() => setShowLocalPaste(false)}><X size={14}/></button>
+                    </div>
+                    <div className="flex gap-1 mb-3">
+                        {['cpp', 'python', 'js'].map(l => (
+                            <button key={l} onClick={() => setPasteLang(l)} className={`px-2 py-0.5 rounded text-[8px] font-black uppercase border transition-all ${pasteLang === l ? 'bg-indigo-600 border-indigo-400 text-white' : 'bg-slate-950 border-slate-800 text-slate-500'}`}>{l}</button>
+                        ))}
+                    </div>
+                    <textarea 
+                        value={pasteBuffer}
+                        onChange={e => setPasteBuffer(e.target.value)}
+                        className="w-full h-32 bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-mono text-indigo-200 outline-none focus:border-indigo-500 resize-none mb-3"
+                        placeholder="// Paste code to share..."
+                    />
+                    <button onClick={handleLocalPaste} disabled={!pasteBuffer.trim()} className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[10px] font-black uppercase tracking-widest shadow-lg active:scale-95 disabled:opacity-30 transition-all">Inject Block</button>
+                </div>
+            )}
+
             <div className="p-3 border-t border-slate-800 bg-slate-950">
                 <form 
                     className="flex gap-2" 
                     onSubmit={(e) => { e.preventDefault(); if(currentInput.trim()) { onSendMessage(currentInput); onInputChange(''); } }}
                 >
-                    <input 
-                        type="text" 
-                        value={currentInput} 
-                        onChange={e => onInputChange(e.target.value)} 
-                        className="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-300 focus:outline-none focus:border-indigo-500 placeholder-slate-600 shadow-inner" 
-                        placeholder={isInterviewerMode ? "Reply to interviewer..." : "Ask AI to edit code..."} 
-                    />
+                    <div className="flex-1 flex items-center bg-slate-900 border border-slate-800 rounded-xl px-2 focus-within:border-indigo-500/50 transition-all shadow-inner">
+                        <button type="button" onClick={() => setShowLocalPaste(true)} className="p-1.5 text-slate-500 hover:text-indigo-400 transition-colors" title="Paste Code Snippet"><Code size={18}/></button>
+                        <input 
+                            type="text" 
+                            value={currentInput} 
+                            onChange={e => onInputChange(e.target.value)} 
+                            className="flex-1 bg-transparent border-none py-2.5 text-sm text-slate-300 focus:ring-0 placeholder-slate-600" 
+                            placeholder={isInterviewerMode ? "Reply to AI..." : "Ask AI to edit code..."} 
+                        />
+                    </div>
                     <button 
                         type="submit" 
                         disabled={!currentInput.trim() || isThinking}
@@ -934,7 +970,6 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
     return root;
   }, [cloudItems]);
 
-  // Fix: replaced broken 'searchQuery' reference with correctly defined 'githubSearchQuery'
   const filteredRepos = useMemo(() => {
       if (!githubSearchQuery.trim()) return githubRepos;
       return githubRepos.filter(r => r.full_name.toLowerCase().includes(githubSearchQuery.toLowerCase()));
@@ -998,7 +1033,6 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                               </div>
                           ) : (
                               <div className="flex-1 flex flex-col overflow-hidden">
-                                  {/* Fix: replaced broken 'searchQuery' reference with 'githubSearchQuery' and its setter */}
                                   <div className="p-3"><div className="relative"><Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" size={14}/><input type="text" value={githubSearchQuery} onChange={e => setGithubSearchQuery(e.target.value)} placeholder="Search repositories..." className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-8 pr-3 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500"/></div></div>
                                   <div className="flex-1 overflow-y-auto scrollbar-hide">{filteredRepos.length === 0 ? <div className="p-8 text-center text-slate-600 text-xs italic">No repositories found.</div> : filteredRepos.map(repo => <button key={repo.id} onClick={() => handleSelectRepo(repo)} className="w-full text-left p-3 border-b border-slate-800 hover:bg-slate-800 transition-colors group"><div className="flex items-center justify-between mb-1"><span className="text-xs font-bold text-slate-300 group-hover:text-white truncate">{repo.name}</span><span className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded border ${repo.private ? 'bg-amber-900/20 text-amber-500 border-amber-900/50' : 'bg-emerald-900/20 text-emerald-500 border-emerald-900/50'}`}>{repo.private ? 'Private' : 'Public'}</span></div><p className="text-[10px] text-slate-500 line-clamp-1">{repo.description || 'No description provided.'}</p></button>)}</div>
                                   <div className="p-3 bg-slate-950 border-t border-slate-800 text-center"><button onClick={() => { localStorage.removeItem('github_token'); setGithubToken(null); }} className="text-[9px] font-black text-slate-500 uppercase hover:text-red-400">Logout GitHub</button></div>

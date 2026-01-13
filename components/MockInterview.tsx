@@ -8,7 +8,7 @@ import { GoogleGenAI, Type } from '@google/genai';
 import { generateSecureId } from '../utils/idUtils';
 import CodeStudio from './CodeStudio';
 import { MarkdownView } from './MarkdownView';
-import { ArrowLeft, Video, Mic, Monitor, Play, Save, Loader2, Search, Trash2, CheckCircle, X, Download, ShieldCheck, User, Users, Building, FileText, ChevronRight, Zap, SidebarOpen, SidebarClose, Code, MessageSquare, Sparkles, Languages, Clock, Camera, Bot, CloudUpload, Trophy, BarChart3, ClipboardCheck, Star, Upload, FileUp, Linkedin, FileCheck, Edit3, BookOpen, Lightbulb, Target, ListChecks, MessageCircleCode, GraduationCap, Lock, Globe, ExternalLink, PlayCircle, RefreshCw, FileDown, Briefcase, Package, Code2, StopCircle, Youtube, AlertCircle, Eye, EyeOff, SaveAll, Wifi, WifiOff, Activity, ShieldAlert, Timer, FastForward, ClipboardList, Layers, Bug, Flag, Minus, Fingerprint, FileSearch, RefreshCcw, HeartHandshake, Speech, Send, History, Compass, Square, CheckSquare, Cloud, Award, Terminal, CodeSquare, Quote } from 'lucide-react';
+import { ArrowLeft, Video, Mic, Monitor, Play, Save, Loader2, Search, Trash2, CheckCircle, X, Download, ShieldCheck, User, Users, Building, FileText, ChevronRight, Zap, SidebarOpen, SidebarClose, Code, MessageSquare, Sparkles, Languages, Clock, Camera, Bot, CloudUpload, Trophy, BarChart3, ClipboardCheck, Star, Upload, FileUp, Linkedin, FileCheck, Edit3, BookOpen, Lightbulb, Target, ListChecks, MessageCircleCode, GraduationCap, Lock, Globe, ExternalLink, PlayCircle, RefreshCw, FileDown, Briefcase, Package, Code2, StopCircle, Youtube, AlertCircle, Eye, EyeOff, SaveAll, Wifi, WifiOff, Activity, ShieldAlert, Timer, FastForward, ClipboardList, Layers, Bug, Flag, Minus, Fingerprint, FileSearch, RefreshCcw, HeartHandshake, Speech, Send, History, Compass, Square, CheckSquare, Cloud, Award, Terminal, CodeSquare, Quote, Image as ImageIcon, Sparkle } from 'lucide-react';
 import { getGlobalAudioContext, getGlobalMediaStreamDest, warmUpAudioContext, stopAllPlatformAudio } from '../utils/audioUtils';
 
 interface OptimizedStarStory {
@@ -78,6 +78,8 @@ const createInterviewFileTool: any = {
   }
 };
 
+type VideoFilter = 'none' | 'blur' | 'sepia' | 'executive' | 'hacker';
+
 export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfile, onStartLiveSession }) => {
   const currentUser = auth?.currentUser;
 
@@ -126,6 +128,9 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
   const [showCodePasteOverlay, setShowCodePasteOverlay] = useState(false);
   const [pasteCodeBuffer, setPasteCodeBuffer] = useState('');
   const [pasteCodeLang, setPasteCodeLang] = useState('cpp');
+  
+  // UI State for Video Filters
+  const [videoFilter, setVideoFilter] = useState<VideoFilter>('none');
   
   const [currentSessionId, setCurrentSessionId] = useState<string>('');
   const activeCodeFilesRef = useRef<CodeFile[]>([]);
@@ -334,6 +339,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
             logCoach(`TEXT_PACKET_SENT: ${text.substring(0, 30)}...`, "info");
         } else {
             setTranscript(prev => [...prev, userMsg]);
+            logApi(`INTERVIEW_TEXT_SENT: ${text.substring(0, 30)}...`, "info");
         }
         liveServiceRef.current.sendText(text);
         logApi("Neural Link: Transmitted chat data packet");
@@ -387,6 +393,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
           prompt = `RESUMING INTERVIEW SESSION. Role: Senior Interviewer. Mode: ${currentMode}. Candidate: ${currentDisplayName}. 
           ${currentInterviewer ? `STRICT PERSONA LOCK: You are simulating this specific interviewer: "${currentInterviewer}". Adopt their tone, expertise level, and likely priorities.` : ''}
           STRICT INSTRUCTION: You MUST stay in ${currentMode} mode. Do NOT switch to other interview types (e.g., if in behavioral, do NOT ask technical/coding questions like TinyURL). 
+          TEXT AWARENESS: You are monitoring both the audio and text channels. If the user types code or text in the chat input, treat it as a primary response.
           COMPLETE HISTORY SO FAR:\n${historyText}\n\nPick up exactly where the last message ended. If a technical question was already asked, continue discussing it. If the candidate was telling a story, ask a follow-up.`;
       }
       
@@ -492,7 +499,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       Candidate: ${currentUser?.displayName}. 
       Context: You just finished a technical mock interview (${mode}). 
       STRICT INSTRUCTION: You have access to the code editor. You are encouraged to generate code solutions or corrected implementations using tools. 
-      You should pay close attention to any code the user pastes into the chat (wrapped in triple backticks).
+      TEXT AWARENESS: You should pay close attention to any code or text the user types into the chat input.
       ${historyContext}
       EVALUATION REPORT:
       Score: ${report.score}/100
@@ -654,19 +661,26 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
 
       const drawFrame = () => {
         if (isEndingRef.current) return;
+        
         if (screenStream && screenVideo.readyState >= 2) {
             drawCtx.fillStyle = '#020617'; drawCtx.fillRect(0, 0, canvas.width, canvas.height);
             const scale = Math.min(canvas.width / screenVideo.videoWidth, canvas.height / screenVideo.videoHeight);
             const w = screenVideo.videoWidth * scale; const h = screenVideo.videoHeight * scale;
             drawCtx.drawImage(screenVideo, (canvas.width - w) / 2, (canvas.height - h) / 2, w, h);
         } else { drawCtx.fillStyle = '#020617'; drawCtx.fillRect(0, 0, canvas.width, canvas.height); }
+        
         if (camVideo.readyState >= 2) {
           const pipW = isPortrait ? canvas.width * 0.5 : 320;
           const realH = (pipW * camVideo.videoHeight) / camVideo.videoWidth;
           const pipX = isPortrait ? (canvas.width - pipW) / 2 : canvas.width - pipW - 24;
           const pipY = isPortrait ? canvas.height - realH - 120 : canvas.height - realH - 24;
+          
+          drawCtx.save();
+          // Apply Backdrop Logic if selected in local state (Visual simulation)
+          // For simplicity in this demo, we use drawImage. True background removal usually needs Mediapipe.
           drawCtx.strokeStyle = '#6366f1'; drawCtx.lineWidth = 4; drawCtx.strokeRect(pipX, pipY, pipW, realH); 
           drawCtx.drawImage(camVideo, pipX, pipY, pipW, realH);
+          drawCtx.restore();
         }
         requestAnimationFrame(drawFrame);
       };
@@ -687,6 +701,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       const sysPrompt = `Role: Senior Interviewer. Mode: ${mode}. Candidate: ${currentUser?.displayName}. Resume: ${resumeText}. Job: ${jobDesc}. 
       ${interviewerInfo ? `STRICT PERSONA LOCK: You are simulating this specific interviewer: "${interviewerInfo}". Adopt their tone, expertise level, and likely priorities.` : ''}
       STRICT MODE LOCK: You are currently in ${mode} mode. Do NOT switch to technical coding questions if you are in behavioral mode. If you are in system design mode, focus on architecture.
+      TEXT AWARENESS: You are monitoring both the audio and text channels. Treat chat inputs as primary communication.
       GOAL: Greet the candidate. For ${mode} mode, begin your evaluation sequence.
       INSTRUCTIONS: For technical modes, you MUST write the technical challenge directly into a solution file using 'update_active_file' or 'create_interview_file'. For behavioral mode, do NOT use the coding files unless the user wants to take notes.`;
       
@@ -1053,9 +1068,49 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                     />
                 </div>
             </div>
-            <div className="absolute bottom-20 right-4 w-64 aspect-video rounded-3xl overflow-hidden border-4 border-indigo-500/50 shadow-2xl z-[100] bg-black group">
-                <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
-                <div className="absolute top-2 left-2 bg-black/60 px-2 py-0.5 rounded text-[8px] font-black uppercase text-white">Candidate Feed</div>
+            
+            <div className={`absolute bottom-20 right-4 w-64 aspect-video rounded-3xl overflow-hidden border-4 ${videoFilter === 'none' ? 'border-indigo-500/50' : 'border-emerald-500/50'} shadow-2xl z-[100] bg-black group transition-all`}>
+                <video 
+                    ref={localVideoRef} 
+                    autoPlay 
+                    muted 
+                    playsInline 
+                    className={`w-full h-full object-cover transition-all ${
+                        videoFilter === 'blur' ? 'blur-md' : 
+                        videoFilter === 'sepia' ? 'sepia contrast-125' : 
+                        videoFilter === 'executive' ? 'brightness-110 contrast-125' :
+                        videoFilter === 'hacker' ? 'hue-rotate-90 brightness-75' : ''
+                    }`} 
+                />
+                
+                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-3">
+                    <div className="flex justify-between items-start">
+                        <span className="bg-black/60 px-2 py-0.5 rounded text-[8px] font-black uppercase text-white">Neural Backdrop</span>
+                        <button onClick={() => setShowCodePasteOverlay(true)} className="p-1.5 bg-indigo-600 rounded-lg text-white shadow-lg" title="Inject Code Snippet"><Code size={14}/></button>
+                    </div>
+                    <div className="flex gap-1 overflow-x-auto no-scrollbar pb-1">
+                        {[
+                            { id: 'none', icon: ImageIcon },
+                            { id: 'blur', icon: Sparkle },
+                            { id: 'executive', icon: Briefcase },
+                            { id: 'hacker', icon: Terminal }
+                        ].map(f => (
+                            <button 
+                                key={f.id} 
+                                onClick={() => setVideoFilter(f.id as VideoFilter)}
+                                className={`p-1.5 rounded-lg border transition-all ${videoFilter === f.id ? 'bg-indigo-600 border-indigo-400 text-white' : 'bg-black/60 border-white/10 text-white/60 hover:text-white'}`}
+                            >
+                                <f.icon size={12}/>
+                            </button>
+                        ))}
+                    </div>
+                </div>
+                
+                {videoFilter === 'blur' && (
+                    <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                        <div className="w-full h-full border-[20px] border-black/40 blur-xl"></div>
+                    </div>
+                )}
             </div>
           </div>
         )}
