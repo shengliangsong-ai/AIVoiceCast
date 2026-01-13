@@ -137,6 +137,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
   
   const [currentSessionId, setCurrentSessionId] = useState<string>('');
   
+  // Use a Map for O(1) lookups and to guarantee uniqueness by path
   const activeCodeFilesMapRef = useRef<Map<string, CodeFile>>(new Map());
 
   const [report, setReport] = useState<MockInterviewReport | null>(null);
@@ -367,6 +368,16 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       setShowCodePasteOverlay(false);
   };
 
+  /**
+   * Universal onFileChange handler to sync user edits to the parent ledger.
+   * This is critical to ensure that files are not empty when report is generated.
+   */
+  const handleEditorFileChange = useCallback((file: CodeFile) => {
+    activeCodeFilesMapRef.current.set(file.path, file);
+    // Also keep initialStudioFiles up to date so re-renders don't wipe progress
+    setInitialStudioFiles(prev => prev.map(p => p.path === file.path ? file : p));
+  }, []);
+
   const handleReconnectAi = async (isAuto = false) => {
     if (isEndingRef.current) return;
     
@@ -433,7 +444,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
               handleReconnectAi(true);
             }
           },
-          // Fixed typo: was onerror
           onError: (e: any) => { 
             if (activeServiceIdRef.current === service.id) {
                 if (currentView === 'coaching') logCoach(`Handshake Error: ${e}`, "error");
@@ -469,14 +479,12 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
           onToolCall: async (toolCall: any) => {
               for (const fc of toolCall.functionCalls) {
                   if (fc.name === 'get_current_code') {
-                      // Fix: Casting to CodeFile | undefined to avoid 'unknown' type errors
                       const firstFile = Array.from(activeCodeFilesMapRef.current.values())[0] as CodeFile | undefined;
                       const code = firstFile?.content || "// No code written yet.";
                       service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: code } }]);
                       logApi("AI Read Candidate Code");
                   } else if (fc.name === 'update_active_file') {
                       const { new_content } = fc.args as any;
-                      // Fix: Casting to CodeFile | undefined to avoid 'unknown' type errors and object spread issues
                       const firstFile = Array.from(activeCodeFilesMapRef.current.values())[0] as CodeFile | undefined;
                       if (firstFile) {
                         const updatedFile = { ...firstFile, content: new_content };
@@ -579,13 +587,11 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
               onToolCall: async (toolCall: any) => {
                   for (const fc of toolCall.functionCalls) {
                       if (fc.name === 'get_current_code') {
-                          // Fix: Added explicit cast to CodeFile | undefined to resolve 'unknown' type errors
                           const firstFile = Array.from(activeCodeFilesMapRef.current.values())[0] as CodeFile | undefined;
                           const code = firstFile?.content || "// No code written yet.";
                           service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: code } }]);
                       } else if (fc.name === 'update_active_file') {
                           const { new_content } = fc.args as any;
-                          // Fix: Added explicit cast to CodeFile | undefined and existence check before spread
                           const firstFile = Array.from(activeCodeFilesMapRef.current.values())[0] as CodeFile | undefined;
                           if (firstFile) {
                             const updatedFile = { ...firstFile, content: new_content };
@@ -772,13 +778,11 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         onToolCall: async (toolCall: any) => {
           for (const fc of toolCall.functionCalls) {
             if (fc.name === 'get_current_code') {
-              // Fix: Added explicit cast to CodeFile | undefined to fix 'unknown' property error
               const firstFile = Array.from(activeCodeFilesMapRef.current.values())[0] as CodeFile | undefined;
               const code = firstFile?.content || "// No code written yet.";
               service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: code } }]);
             } else if (fc.name === 'update_active_file') {
               const { new_content } = fc.args as any;
-              // Fix: Added explicit cast to CodeFile | undefined and existence check before spread
               const firstFile = Array.from(activeCodeFilesMapRef.current.values())[0] as CodeFile | undefined;
               if (firstFile) {
                 const updatedFile = { ...firstFile, content: new_content };
@@ -1109,9 +1113,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                         onBack={() => {}} currentUser={currentUser} userProfile={userProfile} onSessionStart={() => {}} onSessionStop={() => {}} onStartLiveSession={onStartLiveSession as any} 
                         initialFiles={initialStudioFiles} externalChatContent={transcript.map(t => ({ role: t.role, text: t.text }))}
                         onSendExternalMessage={handleSendTextMessage} isInterviewerMode={true} isAiThinking={isAiThinking}
-                        onFileChange={(f) => { 
-                            activeCodeFilesMapRef.current.set(f.path, f);
-                        }}
+                        onFileChange={handleEditorFileChange}
                     />
                 </div>
             </div>
@@ -1251,7 +1253,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                                                         <p className="text-xs text-slate-300 leading-relaxed">{story.action}</p>
                                                     </div>
                                                     <div className="bg-slate-950/50 p-4 rounded-2xl border border-slate-800">
-                                                        <span className="text-[10px] font-black text-amber-400 bg-purple-950/50 px-2 py-0.5 rounded uppercase tracking-widest mb-2 inline-block">Result</span>
+                                                        <span className="text-[10px] font-black text-amber-400 bg-amber-950/50 px-2 py-0.5 rounded uppercase tracking-widest mb-2 inline-block">Result</span>
                                                         <p className="text-xs text-slate-300 leading-relaxed font-bold">{story.result}</p>
                                                     </div>
                                                 </div>
@@ -1330,9 +1332,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                                 <CodeStudio 
                                     onBack={() => {}} currentUser={currentUser} userProfile={userProfile} onSessionStart={() => {}} onSessionStop={() => {}} onStartLiveSession={onStartLiveSession as any} 
                                     initialFiles={initialStudioFiles} isInterviewerMode={true} isAiThinking={isAiThinking}
-                                    onFileChange={(f) => { 
-                                        activeCodeFilesMapRef.current.set(f.path, f);
-                                    }}
+                                    onFileChange={handleEditorFileChange}
                                 />
                             </div>
 

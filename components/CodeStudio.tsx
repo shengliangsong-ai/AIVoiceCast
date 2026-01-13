@@ -920,7 +920,13 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       const response = await ai.models.generateContent({ model: 'gemini-3-pro-preview', contents: [ ...history, { role: 'user', parts: [{ text: contextualMessage }] } ], config: { systemInstruction: "Expert pair programmer.", tools: [{ functionDeclarations: [updateFileTool] }] } });
       if (response.functionCalls?.[0]?.name === 'update_active_file') {
           const args = response.functionCalls[0].args as any;
-          if (args.new_content) { handleCodeChangeInSlot(args.new_content, focusedSlot); setChatMessages(prev => [...prev, { role: 'ai', text: `✅ Updated. ${args.summary || ''}` }]); }
+          if (args.new_content) { 
+              handleCodeChangeInSlot(args.new_content, focusedSlot); 
+              setChatMessages(prev => [...prev, { role: 'ai', text: `✅ Updated. ${args.summary || ''}` }]); 
+              if (onFileChange && activeSlots[focusedSlot]) {
+                onFileChange({ ...activeSlots[focusedSlot]!, content: args.new_content });
+              }
+          }
       } else { setChatMessages(prev => [...prev, { role: 'ai', text: response.text || "No response." }]); }
     } catch (e: any) { setChatMessages(prev => [...prev, { role: 'ai', text: "Error: " + e.message }]); } finally { setIsChatThinking(false); }
   };
