@@ -2,13 +2,12 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { Channel, TranscriptItem, GeneratedLecture, CommunityDiscussion, RecordingSession, Attachment, UserProfile } from '../types';
 import { GeminiLiveService } from '../services/geminiLive';
-import { Mic, MicOff, PhoneOff, Radio, AlertCircle, ScrollText, RefreshCw, Music, Download, Share2, Trash2, Quote, Copy, Check, MessageSquare, BookPlus, Loader2, Globe, FilePlus, Play, Save, CloudUpload, Link, X, Video, Monitor, Camera, Youtube, ClipboardList, Maximize2, Minimize2, Activity, Terminal, ShieldAlert, LogIn, Wifi, WifiOff, Zap, ShieldCheck, Thermometer, RefreshCcw, Sparkles, Square, Power } from 'lucide-react';
+import { Mic, MicOff, PhoneOff, Radio, AlertCircle, ScrollText, RefreshCw, Music, Download, Share2, Trash2, Quote, Copy, Check, MessageSquare, BookPlus, Loader2, Globe, FilePlus, Play, Save, CloudUpload, Link, X, Video, Monitor, Camera, Youtube, ClipboardList, Maximize2, Minimize2, Activity, Terminal, ShieldAlert, LogIn, Wifi, WifiOff, Zap, ShieldCheck, Thermometer, RefreshCcw, Sparkles, Square, Power, Database } from 'lucide-react';
 import { auth } from '../services/firebaseConfig';
 import { getDriveToken, signInWithGoogle } from '../services/authService';
 import { uploadToYouTube, getYouTubeVideoUrl } from '../services/youtubeService';
 import { ensureCodeStudioFolder, uploadToDrive } from '../services/googleDriveService';
 import { saveUserChannel, cacheLectureScript, getCachedLectureScript, saveLocalRecording } from '../utils/db';
-// Fix: removed linkDiscussionToLectureSegment which is not exported by firestoreService
 import { publishChannelToFirestore, saveDiscussion, saveRecordingReference, updateBookingRecording, addChannelAttachment, updateDiscussion, syncUserProfile, getUserProfile } from '../services/firestoreService';
 import { summarizeDiscussionAsSection, generateDesignDocFromTranscript } from '../services/lectureGenerator';
 import { FunctionDeclaration, Type } from '@google/genai';
@@ -69,10 +68,11 @@ const UI_TEXT = {
     linkLost: "Neural Link Interrupted",
     rateLimit: "Neural Cooling Engaged",
     rateLimitDesc: "API quota exceeded. Please wait a few seconds before retrying.",
-    rotating: "Refreshing Neural Fabric...",
+    rotating: "Neural Rotation (15min Checkpoint)...",
     forceRestart: "Neural Refresh (Fix Hang)",
     stopLink: "Pause AI Link",
-    stopped: "AI Paused"
+    stopped: "AI Paused",
+    checkpoint: "Neural Checkpoint"
   },
   zh: {
     welcomePrefix: "试着问...",
@@ -112,10 +112,11 @@ const UI_TEXT = {
     linkLost: "神经连接中断",
     rateLimit: "神经冷却中",
     rateLimitDesc: "API 配额已超出。请等待几秒钟后重试。",
-    rotating: "正在刷新神经织网...",
+    rotating: "神经轮换 (15分钟检查点)...",
     forceRestart: "神经刷新 (修复卡顿)",
     stopLink: "暂停 AI 连接",
-    stopped: "AI 已暂停"
+    stopped: "AI 已暂停",
+    checkpoint: "神经检查点"
   }
 };
 
@@ -178,7 +179,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [logs, setLogs] = useState<{time: string, msg: string, type: 'info' | 'error' | 'warn'}[]>([]);
   
-  // PERSISTENT RECORDING REFS (Survive re-connections)
+  // PERSISTENT RECORDING REFS
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const screenStreamRef = useRef<MediaStream | null>(null);
@@ -218,7 +219,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({
   const serviceRef = useRef<GeminiLiveService | null>(null);
   const currentUser = auth?.currentUser;
 
-  // Decoupled startRecording logic
   const initializePersistentRecorder = useCallback(async () => {
     if (!recordingEnabled || !currentUser) return;
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') return;
@@ -228,12 +228,10 @@ export const LiveSession: React.FC<LiveSessionProps> = ({
         const ctx = getGlobalAudioContext();
         const recordingDest = getGlobalMediaStreamDest();
         
-        // Microphone acquisition
         const userStream = await navigator.mediaDevices.getUserMedia({ audio: true });
         const userSource = ctx.createMediaStreamSource(userStream); 
         userSource.connect(recordingDest);
 
-        // UI Compositor Canvas
         const canvas = document.createElement('canvas');
         const isPortrait = window.innerHeight > window.innerWidth;
         canvas.width = isPortrait ? 720 : 1280;
@@ -273,7 +271,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({
             videoBitsPerSecond: 2500000 
         });
         
-        audioChunksRef.current = []; // ONLY reset here once per meeting
+        audioChunksRef.current = []; 
         recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
         
         recorder.onstop = async () => {
@@ -313,7 +311,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({
       setIsRateLimited(false);
       autoReconnectAttempts.current = 0;
       
-      // 1. Hardware Sync
       if (recordingEnabled) {
           const isMeeting = channel.id.includes('meeting');
           if (videoEnabled || isMeeting) {
@@ -331,13 +328,11 @@ export const LiveSession: React.FC<LiveSessionProps> = ({
           await initializePersistentRecorder();
       }
 
-      // 2. Audio Fabric
       const ctx = getGlobalAudioContext();
       addLog("Warming up neural fabric...");
       await warmUpAudioContext(ctx);
       setHasStarted(true);
       
-      // 3. Connect Link
       await connect();
   };
 
@@ -346,7 +341,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({
     if (rotationTimerRef.current) clearTimeout(rotationTimerRef.current);
     
     if (isRotationSwap || isAutoRetry) {
-        addLog(isRotationSwap ? "NEURAL ROTATION: Refreshing fabric for stability..." : "LINK INTERRUPTED: Attempting neural restoration...", "info");
+        addLog(isRotationSwap ? "NEURAL ROTATION: Performing 15-min context checkpoint..." : "LINK INTERRUPTED: Attempting neural restoration...", "info");
         setIsRotating(isRotationSwap);
         setIsReconnecting(!isRotationSwap);
         
@@ -368,9 +363,9 @@ export const LiveSession: React.FC<LiveSessionProps> = ({
       let effectiveInstruction = `[TIME]: ${now.toLocaleString()}.\n\n${channel.systemInstruction}`;
       
       const fullHistory = transcriptRef.current;
-      const recentHistory = fullHistory.slice(-25); 
+      const recentHistory = fullHistory.slice(-40); 
       if (recentHistory.length > 0) {
-          effectiveInstruction += `\n\n[CONTEXT_STITCH]:\n${recentHistory.map(t => `${t.role}: ${t.text}`).join('\n')}\n\nContinue the current meeting exactly where it left off.`;
+          effectiveInstruction += `\n\n[CONTEXT_CHECKPOINT]:\n${recentHistory.map(t => `${t.role}: ${t.text}`).join('\n')}\n\nContinue the session seamlessly from the point above. Do NOT restart the greeting.`;
       }
 
       await service.connect(channel.voiceName, effectiveInstruction, {
@@ -378,13 +373,13 @@ export const LiveSession: React.FC<LiveSessionProps> = ({
               if (!mountedRef.current) return;
               setIsConnected(true); setIsReconnecting(false); setIsRotating(false); setShowReconnectButton(false);
               autoReconnectAttempts.current = 0;
-              addLog(isRotationSwap ? "Neural Link Refreshed." : "Neural Link Active.");
+              addLog(isRotationSwap ? "Neural Checkpoint Verified. Link Refreshed." : "Neural Link Active.");
 
-              // SCHEDULE 5-MINUTE ROTATION
-              const jitter = (Math.random() * 20 - 10) * 1000;
+              // SCHEDULE 15-MINUTE ROTATION (Checkpoint)
+              const jitter = (Math.random() * 30 - 15) * 1000;
               rotationTimerRef.current = setTimeout(() => {
                   if (mountedRef.current && isConnected) handlePreemptiveRotation();
-              }, (5 * 60 * 1000) + jitter);
+              }, (15 * 60 * 1000) + jitter);
           },
           onClose: (reason, code) => { 
               if (!mountedRef.current) return;
@@ -438,8 +433,8 @@ export const LiveSession: React.FC<LiveSessionProps> = ({
   const handlePreemptiveRotation = async (force: boolean = false) => {
     if (!mountedRef.current) return;
     if (!force && serviceRef.current && (serviceRef.current as any).isPlayingResponse) {
-        addLog("Neural Rotation: Waiting for AI silence...", "info");
-        rotationTimerRef.current = setTimeout(() => handlePreemptiveRotation(false), 2500);
+        addLog("Neural Checkpoint: Waiting for AI silence...", "info");
+        rotationTimerRef.current = setTimeout(() => handlePreemptiveRotation(false), 3000);
         return;
     }
     connect(false, true); 
@@ -496,7 +491,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({
                <div className="flex items-center gap-2">
                    <div className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]' : (isReconnecting || isRotating || isRateLimited) ? 'bg-amber-500 animate-pulse' : 'bg-red-500'}`} />
                    <span className="text-[10px] text-indigo-400 font-bold uppercase tracking-widest">
-                       {isConnected ? 'Link Active' : isRotating ? 'Neural Swap...' : isReconnecting ? 'Recovery...' : isRateLimited ? 'Neural Cooling' : t.stopped}
+                       {isConnected ? 'Link Active' : isRotating ? 'Neural Checkpoint...' : isReconnecting ? 'Recovery...' : isRateLimited ? 'Neural Cooling' : t.stopped}
                    </span>
                </div>
             </div>
@@ -512,7 +507,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({
 
       {(isRotating || isReconnecting) && (
           <div className="bg-indigo-600/20 border-b border-indigo-500/30 p-2 px-4 flex items-center justify-center animate-fade-in z-20 gap-3">
-              <RefreshCcw size={12} className="animate-spin text-indigo-400"/>
+              <Database size={12} className="animate-spin text-indigo-400"/>
               <span className="text-[10px] font-black text-indigo-300 uppercase tracking-[0.2em]">{isRotating ? t.rotating : t.reconnecting}</span>
           </div>
       )}
@@ -520,13 +515,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({
       {hasStarted && cameraEnabled && (
           <div className="absolute bottom-20 right-6 w-48 aspect-video md:w-64 bg-black border-2 border-indigo-500 rounded-2xl shadow-2xl z-40 overflow-hidden group">
               <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover mirror" />
-          </div>
-      )}
-
-      {showDiagnostics && (
-          <div className="absolute top-16 right-4 w-80 max-h-[70%] z-[100] bg-slate-900/95 border border-slate-700 rounded-2xl shadow-2xl flex flex-col animate-fade-in-down backdrop-blur-md">
-              <div className="p-3 border-b border-slate-800 bg-slate-950/50 flex justify-between items-center"><span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest flex items-center gap-2"><Terminal size={14}/> {t.diagnostics}</span><button onClick={() => setShowDiagnostics(false)} className="text-slate-500 hover:text-white"><X size={16}/></button></div>
-              <div className="flex-1 overflow-y-auto p-4 space-y-2 font-mono text-[10px]">{logs.map((log, i) => (<div key={i} className={`flex gap-2 ${log.type === 'error' ? 'text-red-400' : log.type === 'warn' ? 'text-amber-400' : 'text-slate-400'}`}><span className="opacity-40 shrink-0">[{log.time}]</span><span className="break-words font-black">{log.msg}</span></div>))}</div>
           </div>
       )}
 
@@ -538,8 +526,20 @@ export const LiveSession: React.FC<LiveSessionProps> = ({
          </div>
       ) : (
          <div className="flex-1 flex flex-col min-h-0 relative">
+            {isRotating && (
+                <div className="absolute inset-0 z-[110] bg-slate-950/80 backdrop-blur-md flex flex-col items-center justify-center gap-6 animate-fade-in">
+                    <div className="p-6 bg-slate-900 border border-indigo-500/30 rounded-[2.5rem] flex flex-col items-center shadow-2xl">
+                        <div className="w-16 h-16 bg-indigo-600/10 rounded-2xl flex items-center justify-center mb-4 border border-indigo-500/20">
+                            <Database size={32} className="text-indigo-400 animate-pulse"/>
+                        </div>
+                        <h3 className="text-lg font-black text-white uppercase tracking-widest mb-1">{t.checkpoint}</h3>
+                        <p className="text-xs text-slate-500 uppercase font-black text-center max-w-[200px] leading-relaxed">Securing workspace and refreshing high-intensity link...</p>
+                    </div>
+                </div>
+            )}
+
             {isUploadingRecording && (
-               <div className="absolute inset-0 z-[100] bg-slate-950/90 backdrop-blur-md flex flex-col items-center justify-center gap-8 animate-fade-in">
+               <div className="absolute inset-0 z-[120] bg-slate-950/90 backdrop-blur-md flex flex-col items-center justify-center gap-8 animate-fade-in">
                   <div className="relative">
                     <div className="w-32 h-32 border-4 border-indigo-500/10 rounded-full" />
                     <div className="absolute inset-0 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
