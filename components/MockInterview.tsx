@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { MockInterviewRecording, TranscriptItem, CodeFile, UserProfile, Channel, CodeProject } from '../types';
 import { auth } from '../services/firebaseConfig';
@@ -109,7 +108,7 @@ function getLanguageFromExt(filename: string): CodeFile['language'] {
 export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfile, onStartLiveSession }) => {
   const currentUser = auth?.currentUser;
 
-  const [view, setView] = useState<'hub' | 'prep' | 'interview' | 'report' | 'coaching'>('hub');
+  const [view, setView] = useState<'hub' | 'prep' | 'interview' | 'report' | 'coaching' | 'artifact_viewer'>('hub');
   const [hubTab, setHubTab] = useState<'history' | 'explore'>('history');
   const [myInterviews, setMyInterviews] = useState<MockInterviewRecording[]>([]);
   const [publicInterviews, setPublicInterviews] = useState<MockInterviewRecording[]>([]);
@@ -238,7 +237,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
   }, [view]);
 
   useEffect(() => {
-    if (view === 'report' && (activeRecording?.id || currentSessionId)) {
+    if ((view === 'report' || view === 'artifact_viewer') && (activeRecording?.id || currentSessionId)) {
         const pid = activeRecording?.id || currentSessionId;
         setLoadingProject(true);
         getCodeProject(pid).then(p => {
@@ -515,6 +514,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                       service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: code } }]);
                   } else if (fc.name === 'update_active_file') {
                       const { new_content } = fc.args as any;
+                      // Fixed typo: activeCodeFilesMapMapRef -> activeCodeFilesMapRef
                       const firstFile = (Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[])[0] as CodeFile | undefined;
                       if (firstFile) {
                         const updatedFile = { ...firstFile, content: new_content };
@@ -711,6 +711,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
               logApi("AI Accessing Editor Buffer...");
             } else if (fc.name === 'update_active_file') {
               const { new_content } = fc.args as any;
+              // Fixed typo: activeCodeFilesMapMapRef -> activeCodeFilesMapRef
               const firstFile = (Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[])[0] as CodeFile | undefined;
               if (firstFile) {
                 const updatedFile = { ...firstFile, content: new_content };
@@ -986,13 +987,13 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
     <div className="h-full flex flex-col bg-slate-950 text-slate-100 overflow-hidden relative">
       <header className="h-16 border-b border-slate-800 bg-slate-900/50 flex items-center justify-between px-6 backdrop-blur-md shrink-0 z-40">
         <div className="flex items-center gap-4">
-          <button onClick={() => view === 'hub' ? onBack() : setView('hub')} className="p-2 hover:bg-slate-800 rounded-lg text-slate-400"><ArrowLeft size={20} /></button>
+          <button onClick={() => view === 'hub' ? onBack() : view === 'artifact_viewer' ? setView('report') : setView('hub')} className="p-2 hover:bg-slate-800 rounded-lg text-slate-400"><ArrowLeft size={20} /></button>
           <div>
             <h1 className="text-lg font-bold text-white flex items-center gap-2">
                 <Video className="text-red-500" size={20} /> 
-                Mock Interview
+                {view === 'artifact_viewer' ? 'Artifact Viewer' : 'Mock Interview'}
             </h1>
-            {(view === 'interview' || view === 'coaching') && (
+            {(view === 'interview' || view === 'coaching' || view === 'artifact_viewer') && (
                 <div className="flex items-center gap-1.5 text-[9px] font-black text-indigo-400 uppercase tracking-widest mt-0.5">
                     <Fingerprint size={10}/> Session: {(activeRecording?.id || currentSessionId).substring(0, 8)}
                 </div>
@@ -1006,9 +1007,11 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                     <Timer size={14}/><span className="font-mono text-base font-black tabular-nums">{formatTime(timeLeft)}</span>
                 </div>
             )}
-            <button onClick={() => setShowDiagnostics(!showDiagnostics)} className={`p-2 rounded-lg transition-colors ${showDiagnostics ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' : 'bg-slate-800 text-slate-400 hover:text-white'}`} title="Handshake Logs">
-                <Terminal size={18}/>
-            </button>
+            {view !== 'artifact_viewer' && (
+                <button onClick={() => setShowDiagnostics(!showDiagnostics)} className={`p-2 rounded-lg transition-colors ${showDiagnostics ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' : 'bg-slate-800 text-slate-400 hover:text-white'}`} title="Handshake Logs">
+                    <Terminal size={18}/>
+                </button>
+            )}
             {(view === 'report' || view === 'coaching') && (
                 <button onClick={() => { setView('hub'); loadInterviews(); }} className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-black uppercase tracking-widest border border-slate-700 transition-all">
                     <History size={14}/>
@@ -1037,7 +1040,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         {view === 'hub' && (
           <div className="max-w-6xl mx-auto p-8 space-y-12 animate-fade-in overflow-y-auto h-full scrollbar-hide">
             <div className="bg-indigo-600 rounded-[3rem] p-12 shadow-2xl relative overflow-hidden flex flex-col md:flex-row items-center gap-10">
-              <div className="absolute top-0 right-0 p-32 bg-white/10 blur-[100px] rounded-full"></div>
+              <div className="absolute top-0 right-0 p-32 bg-white/10 blur-[100px] rounded-full pointer-events-none"></div>
               <div className="relative z-10 flex-1 space-y-6">
                 <h2 className="text-5xl font-black text-white italic tracking-tighter uppercase leading-none">Validate your<br/>Potential.</h2>
                 <p className="text-indigo-100 text-lg max-w-sm">AI-driven technical evaluation for senior engineering roles.</p>
@@ -1127,7 +1130,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                   </div>
                   <div className="bg-slate-950 p-6 rounded-3xl border border-slate-800 space-y-4 shadow-inner">
                     <h3 className="text-xs font-black text-indigo-500 uppercase tracking-widest flex items-center gap-2"><Briefcase size={14}/> Interviewer Persona</h3>
-                    <textarea value={interviewerInfo} onChange={e => setInterviewerInfo(e.target.value)} placeholder="Expertise (e.g. 'Senior SRE at Uber')..." className="w-full h-24 bg-slate-950 border border-slate-800 rounded-2xl p-4 text-xs text-slate-300 outline-none resize-none focus:border-indigo-500/50 transition-all shadow-inner"/>
+                    <textarea value={interviewerInfo} onChange={e => setInterviewerInfo(e.target.value)} placeholder="Expertise (e.g. 'Senior SRE at Uber')..." className="w-full h-24 bg-slate-950 border border-slate-700 rounded-2xl p-4 text-xs text-slate-300 outline-none resize-none focus:border-indigo-500/50 transition-all shadow-inner"/>
                   </div>
                   <div className="bg-slate-950 p-6 rounded-3xl border border-slate-800 space-y-4 shadow-inner">
                     <h3 className="text-xs font-black text-indigo-500 uppercase tracking-widest flex items-center gap-2"><Globe size={14}/> Visibility</h3>
@@ -1185,27 +1188,53 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                     </div>
                     
                     <div className="w-full space-y-4 text-left">
-                        <h3 className="text-xl font-black text-white italic tracking-tighter uppercase flex items-center gap-3"><FolderOpen className="text-indigo-400" size={24}/> Neural Workspace Artifacts</h3>
-                        <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 shadow-inner">
+                        <div onClick={() => setView('artifact_viewer')} className="flex items-center justify-between cursor-pointer hover:opacity-80 transition-opacity group">
+                            <h3 className="text-xl font-black text-white italic tracking-tighter uppercase flex items-center gap-3"><FolderOpen className="text-indigo-400" size={24}/> Neural Workspace Artifacts</h3>
+                            <span className="text-[10px] font-black text-indigo-400 uppercase flex items-center gap-1 group-hover:translate-x-1 transition-transform">Explore All <ChevronRight size={14}/></span>
+                        </div>
+                        <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 shadow-inner cursor-pointer" onClick={() => setView('artifact_viewer')}>
                             {loadingProject ? <div className="py-4 text-center text-slate-600 uppercase text-[10px] font-black animate-pulse">Hydrating Registry...</div> : sessionProject?.files?.map((f, idx) => (
-                                <div key={idx} className="flex items-center justify-between p-3 border-b border-slate-900 last:border-0">
+                                <div key={idx} className="flex items-center justify-between p-3 border-b border-slate-900 last:border-0 hover:bg-white/5 transition-colors rounded-lg">
                                     <div className="flex items-center gap-3">
                                         <FileText size={16} className="text-indigo-500"/>
                                         <span className="text-xs font-mono text-slate-400">{f.name}</span>
                                     </div>
-                                    <span className="text-[9px] font-black text-slate-700 uppercase">Synced to G-Drive</span>
+                                    <span className="text-[9px] font-black text-slate-700 uppercase">Archive Secure</span>
                                 </div>
                             ))}
                         </div>
                     </div>
 
                     <div className="text-left w-full bg-slate-950 p-8 rounded-[2rem] border border-slate-800"><h3 className="font-bold text-white mb-4 flex items-center gap-2"><Sparkles className="text-indigo-400" size={18}/> Summary</h3><p className="text-sm text-slate-400 leading-relaxed">{report.summary}</p></div>
-                    <div className="text-left w-full bg-slate-950 p-8 rounded-[2rem] border border-slate-800"><h3 className="font-bold text-white mb-4 flex items-center gap-2"><BookOpen className="text-indigo-400" size={18}/> Growth Path</h3><div className="prose prose-invert prose-sm max-w-none"><MarkdownView content={report.learningMaterial} /></div></div>
+                    <div className="text-left w-full bg-slate-950 p-8 rounded-[2rem] border border-slate-800"><h3 className="font-bold text-white mb-4 flex items-center gap-2"><BookOpen className="text-indigo-400" size={18}/> Growth Path</h3><div className="prose prose-invert prose-sm max-none"><MarkdownView content={report.learningMaterial} /></div></div>
                     <button onClick={() => { setView('hub'); loadInterviews(); }} className="px-10 py-4 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl transition-all">Return Hub</button>
                 </div>
               ) : <Loader2 size={32} className="animate-spin text-indigo-400" />}
             </div>
           </div>
+        )}
+
+        {view === 'artifact_viewer' && (
+            <div className="h-full flex flex-col bg-slate-950 animate-fade-in relative">
+                <div className="flex-1">
+                    <CodeStudio 
+                        onBack={() => setView('report')} 
+                        currentUser={currentUser} 
+                        userProfile={userProfile} 
+                        onSessionStart={() => {}} 
+                        onSessionStop={() => {}} 
+                        onStartLiveSession={() => {}} 
+                        initialFiles={sessionProject?.files || []}
+                        isInterviewerMode={true} // Re-use session tab UI
+                        isAiThinking={false}
+                    />
+                </div>
+                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50">
+                    <button onClick={() => setView('report')} className="px-12 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-black uppercase tracking-widest rounded-2xl shadow-2xl transition-all active:scale-95 flex items-center gap-3 border border-indigo-400/50">
+                        <ArrowLeft size={18}/> Return to Evaluation Report
+                    </button>
+                </div>
+            </div>
         )}
 
         {view === 'coaching' && (
