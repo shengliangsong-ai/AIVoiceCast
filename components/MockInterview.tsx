@@ -180,7 +180,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
-    return `${mins}:${seconds.toString().padStart(2, '0')}`;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
   const getDurationSeconds = (m: string) => {
@@ -370,13 +370,13 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
 
   /**
    * CRITICAL FIX: Universal onFileChange handler.
-   * Updates the Ref Map (for final save) but DOES NOT update the initialStudioFiles state on every keystroke.
-   * Updating initialStudioFiles state causes parent to re-render, which causes CodeStudio to reset,
-   * leading to the "empty file" bug.
+   * Updates BOTH the Ref Map (for final save) AND the initialStudioFiles state.
+   * This ensures that when the AI tool 'update_active_file' causes a re-render, 
+   * the child component receives the LATEST user edits instead of resetting to old state.
    */
   const handleEditorFileChange = useCallback((file: CodeFile) => {
     activeCodeFilesMapRef.current.set(file.path, file);
-    // Note: We intentionally avoid setInitialStudioFiles here to prevent re-render loops.
+    setInitialStudioFiles(prev => prev.map(f => f.path === file.path ? file : f));
   }, []);
 
   const handleReconnectAi = async (isAuto = false) => {
@@ -409,6 +409,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       if (currentView === 'coaching') {
           prompt = `RESUMING COACHING SESSION. You are a supportive Senior Career Coach. Reviewing report for ${currentDisplayName}. Evaluation Score: ${currentReport?.score}. Summary: ${currentReport?.summary}. 
           STRICT INSTRUCTION: You are here to review the candidate's previous performance. You can see their typed code and generated solutions. You are encouraged to generate code or corrected solutions directly in the editor using tools.
+          TEXT AWARENESS: Pay close attention to any code or text the user has provided in the chat history.
           [CHAT_LEDGER]:
           ${historyText}
           
@@ -418,7 +419,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
           prompt = `RESUMING INTERVIEW SESSION. Role: Senior Interviewer. Mode: ${currentMode}. Candidate: ${currentDisplayName}. 
           ${currentInterviewer ? `STRICT PERSONA LOCK: You are simulating this specific interviewer: "${currentInterviewer}". Adopt their tone, expertise level, and likely priorities.` : ''}
           STRICT INSTRUCTION: You MUST stay in ${currentMode} mode. Do NOT switch to other interview types (e.g., if in behavioral, do NOT ask technical/coding questions like TinyURL). 
-          TEXT AWARENESS: You are monitoring both the audio and text channels. Treat chat inputs as primary communication.
+          TEXT AWARENESS: You are monitoring both the audio and text channels. Treat chat inputs (including pasted code blocks) as primary communication.
           COMPLETE HISTORY SO FAR:\n${historyText}\n\nPick up exactly where the last message ended. If a technical question was already asked, continue discussing it. If the candidate was telling a story, ask a follow-up.`;
       }
       
@@ -540,7 +541,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       Candidate: ${currentUser?.displayName}. 
       Context: You just finished a technical mock interview (${mode}). 
       STRICT INSTRUCTION: You have access to the code editor. You are encouraged to generate code solutions or corrected implementations using tools. 
-      TEXT AWARENESS: You should pay close attention to any code or text the user types into the chat input.
+      TEXT AWARENESS: You should pay close attention to any code or text the user types into the chat input or has provided in history.
       ${historyContext}
       EVALUATION REPORT:
       Score: ${report.score}/100
@@ -749,7 +750,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       const sysPrompt = `Role: Senior Interviewer. Mode: ${mode}. Candidate: ${currentUser?.displayName}. Resume: ${resumeText}. Job: ${jobDesc}. 
       ${interviewerInfo ? `STRICT PERSONA LOCK: You are simulating this specific interviewer: "${interviewerInfo}". Adopt their tone, expertise level, and likely priorities.` : ''}
       STRICT MODE LOCK: You are currently in ${mode} mode. Do NOT switch to technical coding questions if you are in behavioral mode. If you are in system design mode, focus on architecture.
-      TEXT AWARENESS: You are monitoring both the audio and text channels. Treat chat inputs as primary communication.
+      TEXT AWARENESS: You are monitoring both the audio and text channels. Treat chat inputs (including pasted code blocks) as primary communication.
       GOAL: Greet the candidate. For ${mode} mode, begin your evaluation sequence.
       INSTRUCTIONS: For technical modes, you MUST write the technical challenge directly into a solution file using 'update_active_file' or 'create_interview_file'. For behavioral mode, do NOT use the coding files unless the user wants to take notes.`;
       
@@ -1255,7 +1256,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                                                         <p className="text-xs text-slate-300 leading-relaxed">{story.action}</p>
                                                     </div>
                                                     <div className="bg-slate-950/50 p-4 rounded-2xl border border-slate-800">
-                                                        <span className="text-[10px] font-black text-amber-400 bg-amber-950/50 px-2 py-0.5 rounded uppercase tracking-widest mb-2 inline-block">Result</span>
+                                                        <span className="text-[10px] font-black text-amber-400 bg-purple-950/50 px-2 py-0.5 rounded uppercase tracking-widest mb-2 inline-block">Result</span>
                                                         <p className="text-xs text-slate-300 leading-relaxed font-bold">{story.result}</p>
                                                     </div>
                                                 </div>

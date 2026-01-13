@@ -464,28 +464,56 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
   const [focusedSlot, setFocusedSlot] = useState<number>(0);
   const [slotViewModes, setSlotViewModes] = useState<Record<number, 'code' | 'preview'>>({ 0: 'code' });
   
-  // Use a ref to track the session identity to prevent destructive resets during sync
-  const lastSessionIdRef = useRef<string | null>(null);
+  // Ref to track internal versions of file content to prevent unnecessary overwrites
+  const internalFileContentRef = useRef<Map<string, string>>(new Map());
 
   useEffect(() => {
     if (initialFiles && initialFiles.length > 0) {
-        // Calculate a session hash or identifier
-        const sessionHash = initialFiles.map(f => f.path).join(',');
-        
-        // Only trigger a full state reset if the session identity (file paths) has actually changed.
-        // This prevents your active edits from being wiped by parent state refreshes.
-        if (lastSessionIdRef.current !== sessionHash) {
-            const slots: (CodeFile | null)[] = [null, null, null, null];
-            const vModes: Record<number, 'code' | 'preview'> = {};
-            initialFiles.slice(0, 4).forEach((file, i) => {
-                slots[i] = file;
-                const lang = getLanguageFromExt(file.name);
-                vModes[i] = ['markdown', 'plantuml', 'pdf', 'whiteboard'].includes(lang) ? 'preview' : 'code';
+        // Logic: Sync incoming files with current slots WITHOUT blindly overwriting everything
+        // to preserve the user's focus and unsaved keystrokes unless the content actually changed
+        // via an external source (like AI).
+        const nextSlots = [...activeSlots];
+        let changed = false;
+
+        initialFiles.slice(0, 4).forEach((incomingFile, i) => {
+            const currentSlot = activeSlots[i];
+            const internalLastContent = internalFileContentRef.current.get(incomingFile.path);
+            
+            // Case 1: Slot is empty, fill it.
+            if (!currentSlot && incomingFile) {
+                nextSlots[i] = incomingFile;
+                internalFileContentRef.current.set(incomingFile.path, incomingFile.content);
+                changed = true;
+            }
+            // Case 2: Incoming file has DIFFERENT content than what we last recorded as "synced",
+            // meaning it was likely changed by an external tool (AI).
+            else if (currentSlot && currentSlot.path === incomingFile.path && incomingFile.content !== internalLastContent) {
+                nextSlots[i] = incomingFile;
+                internalFileContentRef.current.set(incomingFile.path, incomingFile.content);
+                changed = true;
+            }
+            // Case 3: Paths changed (new file focused or opened).
+            else if (currentSlot && currentSlot.path !== incomingFile.path) {
+                nextSlots[i] = incomingFile;
+                internalFileContentRef.current.set(incomingFile.path, incomingFile.content);
+                changed = true;
+            }
+        });
+
+        if (changed) {
+            setActiveSlots(nextSlots);
+            // Auto-detect view modes for new files
+            const nextVModes = { ...slotViewModes };
+            nextSlots.forEach((s, i) => {
+                if (s) {
+                    const lang = getLanguageFromExt(s.name);
+                    if (!nextVModes[i]) {
+                        nextVModes[i] = ['markdown', 'plantuml', 'pdf', 'whiteboard'].includes(lang) ? 'preview' : 'code';
+                    }
+                }
             });
-            setActiveSlots(slots);
-            setSlotViewModes(vModes);
-            if (initialFiles.length > 1) setLayoutMode('split-v');
-            lastSessionIdRef.current = sessionHash;
+            setSlotViewModes(nextVModes);
+            if (initialFiles.length > 1 && layoutMode === 'single') setLayoutMode('split-v');
         }
     } else {
         const noFilesActive = activeSlots.every(s => s === null);
@@ -858,6 +886,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       if (file) {
         const lang = getLanguageFromExt(file.name);
         setSlotViewModes(prev => ({ ...prev, [slotIndex]: ['markdown', 'plantuml', 'pdf', 'whiteboard'].includes(lang) ? 'preview' : 'code' }));
+        internalFileContentRef.current.set(file.path, file.content);
         if (onFileChange) onFileChange(file);
         setFocusedSlot(slotIndex);
       }
@@ -872,6 +901,10 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       newSlots[slotIdx] = updatedFile;
       setActiveSlots(newSlots);
       setSaveStatus('modified');
+      
+      // Critical: Update internal ref so we don't accidentally "sync back" old state from parent
+      internalFileContentRef.current.set(file.path, newCode);
+      
       if (onFileChange) onFileChange(updatedFile);
       if (isLive && lockStatus === 'mine') updateCodeFile(project.id, updatedFile);
   };
