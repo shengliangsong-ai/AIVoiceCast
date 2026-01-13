@@ -8,7 +8,7 @@ import { GoogleGenAI, Type } from '@google/genai';
 import { generateSecureId } from '../utils/idUtils';
 import CodeStudio from './CodeStudio';
 import { MarkdownView } from './MarkdownView';
-import { ArrowLeft, Video, Mic, Monitor, Play, Save, Loader2, Search, Trash2, CheckCircle, X, Download, ShieldCheck, User, Users, Building, FileText, ChevronRight, Zap, SidebarOpen, SidebarClose, Code, MessageSquare, Sparkles, Languages, Clock, Camera, Bot, CloudUpload, Trophy, BarChart3, ClipboardCheck, Star, Upload, FileUp, Linkedin, FileCheck, Edit3, BookOpen, Lightbulb, Target, ListChecks, MessageCircleCode, GraduationCap, Lock, Globe, ExternalLink, PlayCircle, RefreshCw, FileDown, Briefcase, Package, Code2, StopCircle, Youtube, AlertCircle, Eye, EyeOff, SaveAll, Wifi, WifiOff, Activity, ShieldAlert, Timer, FastForward, ClipboardList, Layers, Bug, Flag, Minus, Fingerprint, FileSearch, RefreshCcw, HeartHandshake, Speech, Send, History, Compass, Square, CheckSquare, Cloud, Award, Terminal, CodeSquare, Quote, Image as ImageIcon, Sparkle } from 'lucide-react';
+import { ArrowLeft, Video, Mic, Monitor, Play, Save, Loader2, Search, Trash2, CheckCircle, X, Download, ShieldCheck, User, Users, Building, FileText, ChevronRight, Zap, SidebarOpen, SidebarClose, Code, MessageSquare, Sparkles, Languages, Clock, Camera, Bot, CloudUpload, Trophy, BarChart3, ClipboardCheck, Star, Upload, FileUp, Linkedin, FileCheck, Edit3, BookOpen, Lightbulb, Target, ListChecks, MessageCircleCode, GraduationCap, Lock, Globe, ExternalLink, PlayCircle, RefreshCw, FileDown, Briefcase, Package, Code2, StopCircle, Youtube, AlertCircle, Eye, EyeOff, SaveAll, Wifi, WifiOff, Activity, ShieldAlert, Timer, FastForward, ClipboardList, Layers, Bug, Flag, Minus, Fingerprint, FileSearch, RefreshCcw, HeartHandshake, Speech, Send, History, Compass, Square, CheckSquare, Cloud, Award, Terminal, CodeSquare, Quote, Image as ImageIcon, Sparkle, LayoutPanelTop, TerminalSquare } from 'lucide-react';
 import { getGlobalAudioContext, getGlobalMediaStreamDest, warmUpAudioContext, stopAllPlatformAudio } from '../utils/audioUtils';
 
 interface OptimizedStarStory {
@@ -124,6 +124,11 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
   const [isCoachingSyncing, setIsCoachingSyncing] = useState(false);
   const [initialStudioFiles, setInitialStudioFiles] = useState<CodeFile[]>([]);
 
+  // ADDED FIX: Definition for hasExistingCoaching to check for existing coaching history
+  const hasExistingCoaching = useMemo(() => {
+    return (activeRecording?.coachingTranscript && activeRecording.coachingTranscript.length > 0) || (coachingTranscript && coachingTranscript.length > 0);
+  }, [activeRecording, coachingTranscript]);
+
   // UI State for Code Pasting
   const [showCodePasteOverlay, setShowCodePasteOverlay] = useState(false);
   const [pasteCodeBuffer, setPasteCodeBuffer] = useState('');
@@ -138,6 +143,8 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
   const [activeRecording, setActiveRecording] = useState<MockInterviewRecording | null>(null);
   const [report, setReport] = useState<MockInterviewReport | null>(null);
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+  const [sessionProject, setSessionProject] = useState<CodeProject | null>(null);
+  const [loadingProject, setLoadingProject] = useState(false);
 
   const liveServiceRef = useRef<GeminiLiveService | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -190,6 +197,18 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       localVideoRef.current.srcObject = activeStreamRef.current;
     }
   }, [view]);
+
+  // Handle Project Fetching when viewing a report
+  useEffect(() => {
+    if (view === 'report' && (activeRecording?.id || currentSessionId)) {
+        const pid = activeRecording?.id || currentSessionId;
+        setLoadingProject(true);
+        getCodeProject(pid).then(p => {
+            setSessionProject(p);
+            setLoadingProject(false);
+        }).catch(() => setLoadingProject(false));
+    }
+  }, [view, activeRecording?.id, currentSessionId]);
 
   useEffect(() => {
     loadInterviews();
@@ -393,7 +412,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
           prompt = `RESUMING INTERVIEW SESSION. Role: Senior Interviewer. Mode: ${currentMode}. Candidate: ${currentDisplayName}. 
           ${currentInterviewer ? `STRICT PERSONA LOCK: You are simulating this specific interviewer: "${currentInterviewer}". Adopt their tone, expertise level, and likely priorities.` : ''}
           STRICT INSTRUCTION: You MUST stay in ${currentMode} mode. Do NOT switch to other interview types (e.g., if in behavioral, do NOT ask technical/coding questions like TinyURL). 
-          TEXT AWARENESS: You are monitoring both the audio and text channels. If the user types code or text in the chat input, treat it as a primary response.
+          TEXT AWARENESS: You are monitoring both the audio and text channels. Treat chat inputs as primary communication.
           COMPLETE HISTORY SO FAR:\n${historyText}\n\nPick up exactly where the last message ended. If a technical question was already asked, continue discussing it. If the candidate was telling a story, ask a follow-up.`;
       }
       
@@ -729,25 +748,25 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         },
         onToolCall: async (toolCall: any) => {
           for (const fc of toolCall.functionCalls) {
-              if (fc.name === 'get_current_code') {
-                  const code = activeCodeFilesRef.current[0]?.content || "// No code written yet.";
-                  service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: code } }]);
-              } else if (fc.name === 'update_active_file') {
-                  const { new_content } = fc.args as any;
-                  setInitialStudioFiles(prev => prev.map((f, i) => i === 0 ? { ...f, content: new_content } : f));
-                  if (activeCodeFilesRef.current[0]) activeCodeFilesRef.current[0].content = new_content;
-                  service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: "Editor updated." } }]);
-              } else if (fc.name === 'create_interview_file') {
-                  const { filename, content } = fc.args as any;
-                  const newFile: CodeFile = {
-                    name: filename, path: `drive://${uuid}/${filename}`, 
-                    language: getLanguageFromExt(filename) as any,
-                    content, loaded: true, isDirectory: false, isModified: false
-                  };
-                  setInitialStudioFiles(prev => [newFile, ...prev]);
-                  activeCodeFilesRef.current = [newFile, ...activeCodeFilesRef.current];
-                  service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Created new file: ${filename}` } }]);
-              }
+            if (fc.name === 'get_current_code') {
+              const code = activeCodeFilesRef.current[0]?.content || "// No code written yet.";
+              service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: code } }]);
+            } else if (fc.name === 'update_active_file') {
+              const { new_content } = fc.args as any;
+              setInitialStudioFiles(prev => prev.map((f, i) => i === 0 ? { ...f, content: new_content } : f));
+              if (activeCodeFilesRef.current[0]) activeCodeFilesRef.current[0].content = new_content;
+              service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: "Editor updated." } }]);
+            } else if (fc.name === 'create_interview_file') {
+              const { filename, content } = fc.args as any;
+              const newFile: CodeFile = {
+                name: filename, path: `drive://${uuid}/${filename}`, 
+                language: getLanguageFromExt(filename) as any,
+                content, loaded: true, isDirectory: false, isModified: false
+              };
+              setInitialStudioFiles(prev => [newFile, ...prev]);
+              activeCodeFilesRef.current = [newFile, ...activeCodeFilesRef.current];
+              service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Created new file: ${filename}` } }]);
+            }
           }
         }
       }, [{ functionDeclarations: [getCodeTool, updateActiveFileTool, createInterviewFileTool] }]);
@@ -902,8 +921,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
     </div>
   );
 
-  const hasExistingCoaching = (activeRecording?.coachingTranscript && activeRecording.coachingTranscript.length > 0) || (coachingTranscript.length > 0);
-
   return (
     <div className="h-full flex flex-col bg-slate-950 text-slate-100 overflow-hidden relative">
       <header className="h-16 border-b border-slate-800 bg-slate-900/50 flex items-center justify-between px-6 backdrop-blur-md shrink-0 z-40">
@@ -971,7 +988,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                             {myInterviews.length > 0 && (
                                 <div className={`flex items-center gap-3 p-2 rounded-2xl border transition-all duration-300 ${selectedIds.size > 0 ? 'bg-indigo-600 border-indigo-400 shadow-xl' : 'bg-slate-900 border-slate-800'}`}>
                                     <button onClick={handleSelectAll} className="flex items-center gap-2 text-[10px] font-black text-white uppercase tracking-widest px-2 hover:opacity-80">
-                                        {selectedIds.size === myInterviews.length ? <CheckSquare size={16}/> : <Square size={16}/>}
+                                        {selectedIds.size === myInterviews.length ? <CheckSquare size={18}/> : <Square size={18}/>}
                                         <span>{selectedIds.size === myInterviews.length ? 'Deselect' : 'All'}</span>
                                     </button>
                                     {selectedIds.size > 0 && (
@@ -1127,8 +1144,59 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                         <div className="flex-1 text-center md:text-left"><h3 className="text-lg font-bold text-white mb-1">{hasExistingCoaching ? 'Resume AI Coaching' : 'Discuss with AI Coach'}</h3><p className="text-sm text-slate-400 leading-relaxed">Deeper dive into specific technical artifacts or behavioral refinement.</p></div>
                         <button onClick={handleStartCoaching} className="px-8 py-3 bg-white text-indigo-600 font-black uppercase tracking-widest rounded-xl hover:scale-105 transition-all shadow-xl active:scale-95">{hasExistingCoaching ? 'Resume Session' : 'Begin Coaching'}</button>
                     </div>
+                    
                     <div className="text-left w-full bg-slate-950 p-8 rounded-[2rem] border border-slate-800"><h3 className="font-bold text-white mb-4 flex items-center gap-2"><Sparkles className="text-indigo-400" size={18}/> Summary</h3><p className="text-sm text-slate-400 leading-relaxed">{report.summary}</p></div>
                     
+                    {/* Session Artifacts Section */}
+                    <div className="w-full space-y-4">
+                        <h3 className="text-xl font-black text-white italic tracking-tighter uppercase flex items-center gap-3">
+                            <TerminalSquare className="text-indigo-400" size={24}/> Session Artifacts
+                        </h3>
+                        <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-8 shadow-xl relative overflow-hidden group">
+                            <div className="absolute top-0 right-0 p-12 bg-indigo-500/5 blur-3xl rounded-full"></div>
+                            <div className="relative z-10 space-y-6">
+                                <div className="flex flex-col md:flex-row items-center gap-6">
+                                    <div className="p-5 bg-indigo-600 text-white rounded-3xl shadow-2xl"><LayoutPanelTop size={40}/></div>
+                                    <div className="flex-1 text-center md:text-left">
+                                        <h4 className="text-lg font-bold text-white mb-1">Neural Workspace Snapshot</h4>
+                                        <p className="text-sm text-slate-500">All code, architecture diagrams, and technical specifications generated during this interview.</p>
+                                    </div>
+                                    <button 
+                                        onClick={() => window.open(`${window.location.origin}${window.location.pathname}?view=code_studio&id=${activeRecording?.id || currentSessionId}`, '_blank')}
+                                        className="px-6 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-black uppercase tracking-widest border border-slate-700 flex items-center gap-2 transition-all active:scale-95"
+                                    >
+                                        <ExternalLink size={16}/>
+                                        Launch Builder Studio
+                                    </button>
+                                </div>
+                                
+                                {loadingProject ? (
+                                    <div className="flex items-center justify-center py-4 text-slate-600 gap-2">
+                                        <Loader2 size={16} className="animate-spin"/>
+                                        <span className="text-[10px] font-bold uppercase tracking-widest">Hydrating File Index...</span>
+                                    </div>
+                                ) : sessionProject?.files && sessionProject.files.length > 0 ? (
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-4 border-t border-slate-800">
+                                        {sessionProject.files.map((file, fIdx) => (
+                                            <div key={fIdx} className="flex items-center gap-3 p-3 bg-slate-950 rounded-xl border border-slate-800 group/file hover:border-indigo-500/30 transition-all">
+                                                <div className="p-1.5 bg-slate-900 rounded-lg text-indigo-400"><Code2 size={14}/></div>
+                                                <span className="text-xs font-mono text-slate-400 group-hover/file:text-indigo-200 transition-colors truncate flex-1">{file.name}</span>
+                                                <button 
+                                                    onClick={() => window.open(`${window.location.origin}${window.location.pathname}?view=code_studio&id=${activeRecording?.id || currentSessionId}`, '_blank')}
+                                                    className="p-1.5 opacity-0 group-hover/file:opacity-100 transition-opacity text-slate-500 hover:text-white"
+                                                >
+                                                    <Eye size={14}/>
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <p className="text-center text-slate-600 text-xs italic py-4">No code artifacts were persisted during this session.</p>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
                     {report.optimizedStarStories && report.optimizedStarStories.length > 0 && (
                         <div className="w-full space-y-6">
                             <h3 className="text-xl font-black text-white italic tracking-tighter uppercase flex items-center gap-3">
@@ -1306,7 +1374,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                 {/* Coaching Diagnostics Modal */}
                 {showCoachingDiagnostics && (
                     <div className="absolute inset-0 z-[100] flex items-center justify-center p-8 bg-slate-950/60 backdrop-blur-sm animate-fade-in">
-                        <div className="bg-slate-900 border border-slate-800 rounded-[2rem] w-full max-w-2xl h-[500px] flex flex-col shadow-2xl overflow-hidden">
+                        <div className="bg-slate-900 border border-slate-700 rounded-[2rem] w-full max-w-2xl h-[500px] flex flex-col shadow-2xl overflow-hidden">
                             <div className="p-5 border-b border-slate-800 bg-slate-950/50 flex justify-between items-center">
                                 <h3 className="text-sm font-black text-indigo-400 uppercase tracking-widest flex items-center gap-2"><Activity size={16}/> Handshake Diagnostics</h3>
                                 <button onClick={() => setShowCoachingDiagnostics(false)} className="p-1 hover:bg-slate-800 rounded-full"><X size={20}/></button>
