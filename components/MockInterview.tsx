@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { MockInterviewRecording, TranscriptItem, CodeFile, UserProfile, Channel, CodeProject } from '../types';
 import { auth } from '../services/firebaseConfig';
@@ -81,7 +82,6 @@ const createInterviewFileTool: any = {
 
 type VideoFilter = 'none' | 'blur' | 'sepia' | 'executive' | 'hacker';
 
-// Fix: Added getLanguageFromExt helper function
 function getLanguageFromExt(filename: string): CodeFile['language'] {
     if (!filename) return 'text';
     const ext = filename.split('.').pop()?.toLowerCase();
@@ -396,17 +396,14 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
     }
   };
 
-  const handleCommitPastedCode = () => {
-      if (!pasteCodeBuffer.trim()) return;
-      const wrapped = `\`\`\`${pasteCodeLang}\n${pasteCodeBuffer}\n\`\`\``;
-      handleSendTextMessage(wrapped);
-      setPasteCodeBuffer('');
-      setShowCodePasteOverlay(false);
-  };
-
   const handleEditorFileChange = useCallback((file: CodeFile) => {
     activeCodeFilesMapRef.current.set(file.path, file);
-    setInitialStudioFiles(prev => prev.map(f => f.path === file.path ? file : f));
+    // Explicitly update initialStudioFiles to trigger CodeStudio re-render
+    setInitialStudioFiles(prev => {
+        const exists = prev.some(f => f.path === file.path);
+        if (exists) return prev.map(f => f.path === file.path ? file : f);
+        return [...prev, file];
+    });
   }, []);
 
   const handleReconnectAi = async (isAuto = false) => {
@@ -430,7 +427,10 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       const currentCoachSnapshot = [...coachingTranscript];
       const currentReport = report;
       const currentDisplayName = currentUser?.displayName || 'Candidate';
-      const currentCode = (Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[])[0]?.content || "";
+      
+      // CRITICAL FIX: Collect ALL workspace files to sync AI memory
+      const currentFiles = Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[];
+      const workspaceManifest = currentFiles.map(f => `FILE: ${f.name}\nCONTENT:\n${f.content}`).join('\n\n---\n\n');
 
       const activeTranscriptList = (currentView === 'coaching' ? currentCoachSnapshot : currentTranscriptSnapshot) as TranscriptItem[];
       const historyText = activeTranscriptList.map(t => `${String(t.role).toUpperCase()}: ${t.text}`).join('\n');
@@ -439,18 +439,19 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       if (currentView === 'coaching') {
           prompt = `RESUMING COACHING SESSION. Role: Senior Coach. Candidate: ${currentDisplayName}. 
           SESSION PROGRESS: You have reviewed a report with score ${currentReport?.score}. 
-          CODE CONTEXT: The candidate last worked on this code:\n${currentCode}\n
+          WORKSPACE CONTEXT:\n${workspaceManifest}\n
           TRANSCRIPT HISTORY:\n${historyText}\n
           GOAL: Restore the coaching atmosphere and continue the guidance.`;
           logCoach("Handshake Checkpoint Restoration...");
       } else {
           prompt = `RESUMING INTERVIEW SESSION. Role: Senior Interviewer. Mode: ${currentMode}. Candidate: ${currentDisplayName}. 
           ${currentInterviewer ? `STRICT PERSONA LOCK: You are simulating: "${currentInterviewer}".` : ''}
-          PROGRESS RECOVERY (CHECKPOINT):
-          - Current Editor Content: \n${currentCode}\n
-          - Discussion History: \n${historyText}\n
-          STRICT INSTRUCTION: Pick up exactly where the last message ended. Do NOT restart the greeting.`;
-          logApi("Neural Link Context Checkpoint Restored.");
+          PROGRESS RECOVERY (CHECKPOINT) WORKSPACE STATE:
+          ${workspaceManifest}\n
+          DISCUSSION HISTORY: 
+          ${historyText}\n
+          STRICT INSTRUCTION: Pick up exactly where the last message ended. Do NOT restart the greeting. Reference specific files if they were the focus.`;
+          logApi("Neural Link Workspace Checkpoint Restored.");
       }
       
       const service = new GeminiLiveService();
@@ -530,7 +531,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                         content, loaded: true, isDirectory: false, isModified: false
                       };
                       activeCodeFilesMapRef.current.set(path, newFile);
-                      setInitialStudioFiles(prev => [newFile, ...prev]);
+                      setInitialStudioFiles(prev => [...prev, newFile]);
                       service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Created new file: ${filename}` } }]);
                   }
               }
@@ -727,7 +728,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                 content, loaded: true, isDirectory: false, isModified: false
               };
               activeCodeFilesMapRef.current.set(path, newFile);
-              setInitialStudioFiles(prev => [newFile, ...prev]);
+              setInitialStudioFiles(prev => [...prev, newFile]);
               service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Created new file: ${filename}` } }]);
               logApi(`AI Injected New File: ${filename}`);
             }
@@ -914,6 +915,37 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
     
     setIsGeneratingReport(false);
     if (synthesisIntervalRef.current) clearInterval(synthesisIntervalRef.current);
+  };
+
+  /**
+   * Commits code from the manual paste overlay into a new file in the workspace.
+   */
+  const handleCommitPastedCode = () => {
+    // Check if there is content to inject
+    if (!pasteCodeBuffer.trim()) return;
+    
+    const filename = `manual_snip_${Date.now()}.${pasteCodeLang}`;
+    const path = `drive://${currentSessionId}/${filename}`;
+    
+    // Create new CodeFile object
+    const newFile: CodeFile = {
+      name: filename,
+      path,
+      language: getLanguageFromExt(filename) as any,
+      content: pasteCodeBuffer,
+      loaded: true,
+      isDirectory: false,
+      isModified: true
+    };
+    
+    // Register in the ref map and trigger state update
+    activeCodeFilesMapRef.current.set(path, newFile);
+    setInitialStudioFiles(prev => [...prev, newFile]);
+    
+    // Clear buffer and close overlay
+    setPasteCodeBuffer('');
+    setShowCodePasteOverlay(false);
+    logApi(`Neural Logic Injected: ${filename}`);
   };
 
   const renderInterviewsList = (list: MockInterviewRecording[], isMine: boolean) => (

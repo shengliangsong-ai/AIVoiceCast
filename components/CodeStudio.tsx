@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { CodeProject, CodeFile, UserProfile, Channel, CursorPosition, CloudItem } from '../types';
 import { ArrowLeft, Save, Plus, Github, Cloud, HardDrive, Code, X, ChevronRight, ChevronDown, File, Folder, DownloadCloud, Loader2, CheckCircle, AlertTriangle, Info, FolderPlus, FileCode, RefreshCw, LogIn, CloudUpload, Trash2, ArrowUp, Edit2, FolderOpen, MoreVertical, Send, MessageSquare, Bot, Mic, Sparkles, SidebarClose, SidebarOpen, Users, Eye, FileText as FileTextIcon, Image as ImageIcon, StopCircle, Minus, Maximize2, Minimize2, Lock, Unlock, Share2, Terminal as TerminalIcon, Copy, WifiOff, PanelRightClose, PanelRightOpen, PanelLeftClose, PanelLeftOpen, Monitor, Laptop, PenTool, Edit3, ShieldAlert, ZoomIn, ZoomOut, Columns, Rows, Grid2X2, Square as SquareIcon, GripVertical, GripHorizontal, FileSearch, Indent, Wand2, Check, Link, MousePointer2, Activity, Key, Search, FilePlus, FileUp, Play, Trash, ExternalLink, GraduationCap, ShieldCheck } from 'lucide-react';
@@ -96,7 +97,7 @@ const FileTreeItem = ({ node, depth, activeId, onSelect, onToggle, onDelete, onS
     return (
         <div>
             <div 
-                className={`flex items-center gap-1 py-1 px-2 cursor-pointer select-none hover:bg-slate-800/50 group ${isActive ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'}`}
+                className={`flex items-center gap-1 py-1 px-2 cursor-pointer select-none hover:bg-slate-800/50 group ${isActive ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}
                 style={{ paddingLeft: `${depth * 12 + 8}px` }}
                 onClick={() => onSelect(node)}
             >
@@ -129,7 +130,7 @@ const FileTreeItem = ({ node, depth, activeId, onSelect, onToggle, onDelete, onS
                             node={child} 
                             depth={depth + 1} 
                             activeId={activeId} 
-                            onSelect={node.children ? onSelect : undefined} 
+                            onSelect={onSelect} 
                             onToggle={onToggle}
                             onDelete={onDelete}
                             onShare={onShare}
@@ -528,7 +529,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
   const [isDraggingInner, setIsDraggingInner] = useState(false);
   
   const [project, setProject] = useState<CodeProject>({ id: 'init', name: 'My Workspace', files: [defaultFile], lastModified: Date.now() });
-  const [activeTab, setActiveTab] = useState<'drive' | 'cloud' | 'github'>('drive');
+  const [activeTab, setActiveTab] = useState<'session' | 'drive' | 'cloud' | 'github'>(isInterviewerMode ? 'session' : 'drive');
   const [isLeftOpen, setIsLeftOpen] = useState(true);
   const [isRightOpen, setIsRightOpen] = useState(true);
   
@@ -873,6 +874,15 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                   const { owner, repo, branch } = project.github;
                   const text = await fetchFileContent(githubToken, owner, repo, node.id, branch);
                   fileData = { name: node.name, path: node.id, content: text, language: getLanguageFromExt(node.name), loaded: true, isDirectory: false, isModified: false, sha: node.data?.sha };
+              } else if (activeTab === 'session') {
+                  // Session files are already in initialFiles / activeSlots, so we just focus them.
+                  const foundInSlots = activeSlots.find(s => s?.path === node.id);
+                  if (foundInSlots) {
+                      setFocusedSlot(activeSlots.indexOf(foundInSlots));
+                  } else if (initialFiles) {
+                      const foundInInitial = initialFiles.find(f => f.path === node.id);
+                      if (foundInInitial) updateSlotFile(foundInInitial, focusedSlot);
+                  }
               }
               if (fileData) updateSlotFile(fileData, focusedSlot);
           } catch(e: any) { alert(e.message); }
@@ -999,6 +1009,17 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
 
   useEffect(() => { refreshExplorer(); }, [activeTab, driveToken, githubToken, currentUser]);
 
+  const sessionTree = useMemo(() => {
+      if (!isInterviewerMode || !initialFiles) return [];
+      return initialFiles.map(f => ({
+          id: f.path,
+          name: f.name,
+          type: 'file' as const,
+          isLoaded: true,
+          data: f
+      }));
+  }, [isInterviewerMode, initialFiles]);
+
   const driveTree = useMemo(() => {
       const root: TreeNode[] = [];
       const map = new Map<string, TreeNode>();
@@ -1055,6 +1076,9 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       <div className="flex-1 flex overflow-hidden">
           <div className={`${isLeftOpen ? '' : 'hidden'} bg-slate-900 border-r border-slate-800 flex flex-col shrink-0 overflow-hidden`} style={{ width: `${leftWidth}px` }}>
               <div className="flex border-b border-slate-800 shrink-0">
+                  {isInterviewerMode && (
+                      <button onClick={() => setActiveTab('session')} className={`flex-1 py-3 flex justify-center border-b-2 transition-colors ${activeTab === 'session' ? 'border-indigo-500 text-white bg-slate-800' : 'border-transparent text-slate-500 hover:text-slate-300'}`} title="Interview Session"><Activity size={18}/></button>
+                  )}
                   <button onClick={() => setActiveTab('drive')} className={`flex-1 py-3 flex justify-center border-b-2 transition-colors ${activeTab === 'drive' ? 'border-indigo-500 text-white bg-slate-800' : 'border-transparent text-slate-500 hover:text-slate-300'}`} title="Google Drive"><HardDrive size={18}/></button>
                   <button onClick={() => setActiveTab('cloud')} className={`flex-1 py-3 flex justify-center border-b-2 transition-colors ${activeTab === 'cloud' ? 'border-indigo-500 text-white bg-slate-800' : 'border-transparent text-slate-500 hover:text-slate-300'}`} title="Private Cloud"><Cloud size={18}/></button>
                   <button onClick={() => setActiveTab('github')} className={`flex-1 py-3 flex justify-center border-b-2 transition-colors ${activeTab === 'github' ? 'border-indigo-500 text-white bg-slate-800' : 'border-transparent text-slate-500 hover:text-slate-300'}`} title="GitHub"><Github size={18}/></button>
@@ -1065,6 +1089,15 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                       {!isSharedViewOnly && <button onClick={handleCreateNewFile} className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white py-1.5 rounded-lg text-[10px] font-black uppercase flex items-center justify-center gap-1.5 shadow-lg transition-all active:scale-95"><FilePlus size={14}/> New File</button>}
                   </div>
                   
+                  {activeTab === 'session' && (
+                      <div className="flex-1 overflow-y-auto scrollbar-hide py-2">
+                          <div className="px-3 py-1 mb-2">
+                              <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Interview Artifacts</span>
+                          </div>
+                          {sessionTree.map(node => <FileTreeItem key={node.id} node={node} depth={0} activeId={activeFile?.path} onSelect={handleExplorerSelect} onToggle={toggleFolder} onShare={()=>{}} expandedIds={expandedIds} loadingIds={loadingIds}/>)}
+                      </div>
+                  )}
+
                   {activeTab === 'drive' && (driveToken ? <div className="flex-1 overflow-y-auto scrollbar-hide py-2">{driveTree.map(node => <FileTreeItem key={node.id} node={node} depth={0} activeId={activeFile?.path?.replace('drive://','')} onSelect={handleExplorerSelect} onToggle={toggleFolder} onShare={()=>{}} expandedIds={expandedIds} loadingIds={loadingIds}/>)}</div> : <div className="p-12 text-center flex flex-col items-center justify-center h-full gap-4"><button onClick={handleConnectDrive} className="px-6 py-2 bg-indigo-600 text-white text-xs font-bold rounded-xl shadow-lg">Connect G-Drive</button></div>)}
                   
                   {activeTab === 'cloud' && (currentUser ? <div className="flex-1 overflow-y-auto scrollbar-hide py-2">{cloudTree.map(node => <FileTreeItem key={node.id} node={node} depth={0} onSelect={handleExplorerSelect} onToggle={toggleFolder} onShare={()=>{}} expandedIds={expandedIds} loadingIds={loadingIds}/>)}</div> : <div className="p-12 text-center flex flex-col items-center justify-center h-full gap-4"><p className="text-xs text-slate-400">Sign in for Private Cloud.</p></div>)}
