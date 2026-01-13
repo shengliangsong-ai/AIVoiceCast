@@ -467,14 +467,38 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
   
   // Ref to track internal versions of file content to prevent unnecessary overwrites
   const internalFileContentRef = useRef<Map<string, string>>(new Map());
+  const lastSessionIdRef = useRef<string | null>(null);
+
+  const currentSessionIdFromPaths = useMemo(() => {
+      const firstPath = initialFiles?.[0]?.path;
+      if (firstPath?.startsWith('drive://')) {
+          return firstPath.split('/')[2]; // drive://SESSION_ID/filename
+      }
+      return null;
+  }, [initialFiles]);
 
   useEffect(() => {
     if (initialFiles && initialFiles.length > 0) {
+        const sid = currentSessionIdFromPaths;
+        const isNewSession = sid !== lastSessionIdRef.current;
+
+        // CRITICAL FIX: If we detect a new session ID in the paths, wipe all local state 
+        // to prevent mixing files from different interviews.
+        if (isNewSession) {
+            setActiveSlots([null, null, null, null]);
+            internalFileContentRef.current.clear();
+            lastSessionIdRef.current = sid;
+        }
+
         // Logic: Sync incoming files with current slots WITHOUT blindly overwriting everything
         // to preserve the user's focus and unsaved keystrokes unless the content actually changed
         // via an external source (like AI).
         const nextSlots = [...activeSlots];
         let changed = false;
+
+        // If the number of initial files increased, automatically switch to the newest file
+        const prevFileCount = internalFileContentRef.current.size;
+        const newFileAdded = initialFiles.length > prevFileCount;
 
         initialFiles.slice(0, 4).forEach((incomingFile, i) => {
             const currentSlot = activeSlots[i];
@@ -514,8 +538,23 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                 }
             });
             setSlotViewModes(nextVModes);
+            
+            // If AI just added a new file, focus the slot that now contains it
+            if (newFileAdded) {
+                const latestFile = initialFiles[initialFiles.length - 1];
+                const targetSlot = nextSlots.findIndex(s => s?.path === latestFile.path);
+                if (targetSlot !== -1) setFocusedSlot(targetSlot);
+            }
+
             if (initialFiles.length > 1 && layoutMode === 'single') setLayoutMode('split-v');
         }
+        
+        // Update the set of paths we know about
+        initialFiles.forEach(f => {
+            if (!internalFileContentRef.current.has(f.path)) {
+                internalFileContentRef.current.set(f.path, f.content);
+            }
+        });
     } else {
         const noFilesActive = activeSlots.every(s => s === null);
         if (noFilesActive) {
@@ -523,7 +562,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
             setSlotViewModes({ 0: 'code' });
         }
     }
-  }, [initialFiles]);
+  }, [initialFiles, currentSessionIdFromPaths]);
 
   const [innerSplitRatio, setInnerSplitRatio] = useState(50);
   const [isDraggingInner, setIsDraggingInner] = useState(false);
@@ -875,13 +914,18 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                   const text = await fetchFileContent(githubToken, owner, repo, node.id, branch);
                   fileData = { name: node.name, path: node.id, content: text, language: getLanguageFromExt(node.name), loaded: true, isDirectory: false, isModified: false, sha: node.data?.sha };
               } else if (activeTab === 'session') {
-                  // Session files are already in initialFiles / activeSlots, so we just focus them.
+                  // FIXED: Correctly find and switch to session artifacts
                   const foundInSlots = activeSlots.find(s => s?.path === node.id);
                   if (foundInSlots) {
                       setFocusedSlot(activeSlots.indexOf(foundInSlots));
                   } else if (initialFiles) {
                       const foundInInitial = initialFiles.find(f => f.path === node.id);
-                      if (foundInInitial) updateSlotFile(foundInInitial, focusedSlot);
+                      if (foundInInitial) {
+                          // Try to reuse an empty slot or replace current focus
+                          const emptySlotIdx = activeSlots.findIndex(s => s === null);
+                          const targetIdx = emptySlotIdx !== -1 ? emptySlotIdx : focusedSlot;
+                          updateSlotFile(foundInInitial, targetIdx);
+                      }
                   }
               }
               if (fileData) updateSlotFile(fileData, focusedSlot);

@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { MockInterviewRecording, TranscriptItem, CodeFile, UserProfile, Channel, CodeProject } from '../types';
 import { auth } from '../services/firebaseConfig';
@@ -10,7 +11,7 @@ import { MarkdownView } from './MarkdownView';
 import { ArrowLeft, Video, Mic, Monitor, Play, Save, Loader2, Search, Trash2, CheckCircle, X, Download, ShieldCheck, User, Users, Building, FileText, ChevronRight, Zap, SidebarOpen, SidebarClose, Code, MessageSquare, Sparkles, Languages, Clock, Camera, Bot, CloudUpload, Trophy, BarChart3, ClipboardCheck, Star, Upload, FileUp, Linkedin, FileCheck, Edit3, BookOpen, Lightbulb, Target, ListChecks, MessageCircleCode, GraduationCap, Lock, Globe, ExternalLink, PlayCircle, RefreshCw, FileDown, Briefcase, Package, Code2, StopCircle, Youtube, AlertCircle, Eye, EyeOff, SaveAll, Wifi, WifiOff, Activity, ShieldAlert, Timer, FastForward, ClipboardList, Layers, Bug, Flag, Minus, Fingerprint, FileSearch, RefreshCcw, HeartHandshake, Speech, Send, History, Compass, Square, CheckSquare, Cloud, Award, Terminal, CodeSquare, Quote, Image as ImageIcon, Sparkle, LayoutPanelTop, TerminalSquare, FolderOpen, HardDrive, Shield, Database } from 'lucide-react';
 import { getGlobalAudioContext, getGlobalMediaStreamDest, warmUpAudioContext, stopAllPlatformAudio } from '../utils/audioUtils';
 import { getDriveToken, signInWithGoogle, connectGoogleDrive } from '../services/authService';
-import { ensureFolder, uploadToDrive } from '../services/googleDriveService';
+import { ensureFolder, uploadToDrive, downloadDriveFileAsBlob, deleteDriveFile } from '../services/googleDriveService';
 
 interface OptimizedStarStory {
   title: string;
@@ -237,11 +238,17 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
   }, [view]);
 
   useEffect(() => {
-    if ((view === 'report' || view === 'artifact_viewer') && (activeRecording?.id || currentSessionId)) {
+    if ((view === 'report' || view === 'artifact_viewer' || view === 'coaching') && (activeRecording?.id || currentSessionId)) {
         const pid = activeRecording?.id || currentSessionId;
         setLoadingProject(true);
         getCodeProject(pid).then(p => {
-            setSessionProject(p);
+            if (p && p.files) {
+                setSessionProject(p);
+                setInitialStudioFiles(p.files);
+                // CRITICAL: Hydrate the file map so tool calls have access to the correct files for this specific session
+                activeCodeFilesMapRef.current.clear();
+                p.files.forEach(f => activeCodeFilesMapRef.current.set(f.path, f));
+            }
             setLoadingProject(false);
         }).catch(() => setLoadingProject(false));
     }
@@ -397,7 +404,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
 
   const handleEditorFileChange = useCallback((file: CodeFile) => {
     activeCodeFilesMapRef.current.set(file.path, file);
-    // Explicitly update initialStudioFiles to trigger CodeStudio re-render
+    // CRITICAL FIX: Use functional update to prevent duplicate paths in array
     setInitialStudioFiles(prev => {
         const exists = prev.some(f => f.path === file.path);
         if (exists) return prev.map(f => f.path === file.path ? file : f);
@@ -509,13 +516,15 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
           onToolCall: async (toolCall: any) => {
               for (const fc of toolCall.functionCalls) {
                   if (fc.name === 'get_current_code') {
-                      const firstFile = (Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[])[0] as CodeFile | undefined;
-                      const code = firstFile?.content || "// No code written yet.";
+                      const currentFiles = Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[];
+                      // Try to find an active slot or first file
+                      const file = currentFiles[0];
+                      const code = file?.content || "// No code written yet.";
                       service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: code } }]);
                   } else if (fc.name === 'update_active_file') {
                       const { new_content } = fc.args as any;
-                      // Fixed typo: activeCodeFilesMapMapRef -> activeCodeFilesMapRef
-                      const firstFile = (Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[])[0] as CodeFile | undefined;
+                      const currentFiles = Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[];
+                      const firstFile = currentFiles[0];
                       if (firstFile) {
                         const updatedFile = { ...firstFile, content: new_content };
                         activeCodeFilesMapRef.current.set(updatedFile.path, updatedFile);
@@ -530,9 +539,15 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                         language: getLanguageFromExt(filename) as any,
                         content, loaded: true, isDirectory: false, isModified: false
                       };
+                      
+                      // DEDUPLICATION: Check if file already exists in registry
                       activeCodeFilesMapRef.current.set(path, newFile);
-                      setInitialStudioFiles(prev => [...prev, newFile]);
-                      service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Created new file: ${filename}` } }]);
+                      setInitialStudioFiles(prev => {
+                          const exists = prev.some(f => f.path === path);
+                          if (exists) return prev.map(f => f.path === path ? newFile : f);
+                          return [...prev, newFile];
+                      });
+                      service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Success: '${filename}' created and pushed to candidate's sidebar.` } }]);
                   }
               }
           }
@@ -541,6 +556,142 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
           logApi(`Critical Init Failure: ${err.message}`, "error"); 
       }
     }, backoffTime);
+  };
+
+  /**
+   * FIX: Added handleEndInterview to terminate the evaluation, stop recorders, and generate a final AI report.
+   */
+  const handleEndInterview = async () => {
+    if (isEndingRef.current) return;
+    isEndingRef.current = true;
+    setIsStarting(false);
+    
+    // Stop timers
+    if (timerRef.current) clearInterval(timerRef.current);
+    if (checkpointTimerRef.current) clearInterval(checkpointTimerRef.current);
+    
+    // Stop recording
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+    
+    // Disconnect AI
+    if (liveServiceRef.current) {
+        liveServiceRef.current.disconnect();
+        setIsAiConnected(false);
+    }
+    
+    // Generate Report
+    setIsGeneratingReport(true);
+    setSynthesisStep('Analyzing Neural Transcript...');
+    setSynthesisPercent(10);
+    
+    try {
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+        const historyText = transcript.map(t => `${t.role.toUpperCase()}: ${t.text}`).join('\n');
+        const currentFiles = Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[];
+        const codeText = currentFiles.map(f => `FILE: ${f.name}\nCONTENT:\n${f.content}`).join('\n\n');
+
+        setSynthesisStep('Synthesizing Feedback...');
+        setSynthesisPercent(40);
+
+        const prompt = `
+            Analyze this technical interview evaluation. 
+            Mode: ${mode}
+            Job: ${jobDesc}
+            Transcript History: ${historyText}
+            Code Solution Workspace: ${codeText}
+            
+            Generate a detailed professional report in JSON format:
+            {
+                "score": number (0-100),
+                "technicalSkills": "string analysis",
+                "communication": "string analysis",
+                "collaboration": "string analysis",
+                "strengths": ["string points"],
+                "areasForImprovement": ["string points"],
+                "verdict": "Strong Hire" | "Hire" | "No Hire" | "Strong No Hire" | "Move Forward" | "Reject",
+                "summary": "overall summary string",
+                "learningMaterial": "Comprehensive Markdown string with advice and learning resources"
+            }
+        `;
+
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-flash-preview',
+            contents: prompt,
+            config: { responseMimeType: 'application/json' }
+        });
+
+        const reportData = JSON.parse(response.text || '{}') as MockInterviewReport;
+        setReport(reportData);
+        setSynthesisPercent(80);
+        setSynthesisStep('Archiving Workspace...');
+
+        // Finalize recording and save to ledger
+        const videoBlob = new Blob(videoChunksRef.current, { type: 'video/webm' });
+        videoBlobRef.current = videoBlob;
+        
+        const timestamp = Date.now();
+        const interviewId = currentSessionId;
+        
+        const recording: MockInterviewRecording = {
+            id: interviewId,
+            userId: currentUser?.uid || 'guest',
+            userName: currentUser?.displayName || 'Guest',
+            userPhoto: currentUser?.photoURL,
+            mode,
+            language,
+            jobDescription: jobDesc,
+            interviewerInfo,
+            timestamp,
+            videoUrl: '', 
+            transcript,
+            feedback: JSON.stringify(reportData),
+            visibility
+        };
+
+        if (currentUser) {
+            const token = getDriveToken();
+            if (token) {
+                const folderId = await ensureFolder(token, 'CodeStudio');
+                const interviewFolderId = await ensureFolder(token, 'Interviews', folderId);
+                const driveFileId = await uploadToDrive(token, interviewFolderId, `Interview_${interviewId}.webm`, videoBlob);
+                recording.videoUrl = `drive://${driveFileId}`;
+            }
+            await saveInterviewRecording(recording);
+        }
+
+        // Local persistence fallback
+        const localBackupsRaw = localStorage.getItem('mock_interview_backups') || '[]';
+        const localBackups = JSON.parse(localBackupsRaw);
+        localBackups.push(recording);
+        localStorage.setItem('mock_interview_backups', JSON.stringify(localBackups));
+
+        setSynthesisPercent(100);
+        setSynthesisStep('Refraction Complete');
+        
+        setTimeout(() => {
+            setIsGeneratingReport(false);
+            setView('report');
+        }, 1000);
+
+    } catch (e) {
+        console.error("End interview sequence failed", e);
+        setIsGeneratingReport(false);
+        setView('hub');
+    } finally {
+        if (activeStreamRef.current) activeStreamRef.current.getTracks().forEach(t => t.stop());
+        if (activeScreenStreamRef.current) activeScreenStreamRef.current.getTracks().forEach(t => t.stop());
+    }
+  };
+
+  /**
+   * FIX: Added handleStartCoaching to transition to the interactive career coaching mode.
+   */
+  const handleStartCoaching = async () => {
+    setView('coaching');
+    setCoachingTranscript([]);
+    handleReconnectAi(false); 
   };
 
   const handleStartInterview = async () => {
@@ -705,14 +856,15 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         onToolCall: async (toolCall: any) => {
           for (const fc of toolCall.functionCalls) {
             if (fc.name === 'get_current_code') {
-              const firstFile = (Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[])[0] as CodeFile | undefined;
+              const currentFiles = Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[];
+              const firstFile = currentFiles[0];
               const code = firstFile?.content || "// No code written yet.";
               service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: code } }]);
               logApi("AI Accessing Editor Buffer...");
             } else if (fc.name === 'update_active_file') {
               const { new_content } = fc.args as any;
-              // Fixed typo: activeCodeFilesMapMapRef -> activeCodeFilesMapRef
-              const firstFile = (Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[])[0] as CodeFile | undefined;
+              const currentFiles = Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[];
+              const firstFile = currentFiles[0];
               if (firstFile) {
                 const updatedFile = { ...firstFile, content: new_content };
                 activeCodeFilesMapRef.current.set(updatedFile.path, updatedFile);
@@ -728,9 +880,15 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                 language: getLanguageFromExt(filename) as any,
                 content, loaded: true, isDirectory: false, isModified: false
               };
+              
+              // DEDUPLICATION: Check if file already exists in registry
               activeCodeFilesMapRef.current.set(path, newFile);
-              setInitialStudioFiles(prev => [...prev, newFile]);
-              service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Created new file: ${filename}` } }]);
+              setInitialStudioFiles(prev => {
+                  const exists = prev.some(f => f.path === path);
+                  if (exists) return prev.map(f => f.path === path ? newFile : f);
+                  return [...prev, newFile];
+              });
+              service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Success: '${filename}' created and pushed to candidate's sidebar.` } }]);
               logApi(`AI Injected New File: ${filename}`);
             }
           }
@@ -739,183 +897,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       
       setView('interview');
     } catch (e: any) { alert("Startup failed."); setView('hub'); } finally { setIsStarting(false); }
-  };
-
-  const startSmoothProgress = () => {
-    setSynthesisPercent(0);
-    if (synthesisIntervalRef.current) clearInterval(synthesisIntervalRef.current);
-    synthesisIntervalRef.current = setInterval(() => {
-      setSynthesisPercent(prev => {
-        if (prev >= 95) return prev;
-        const increment = Math.max(0.5, (100 - prev) / 20);
-        return prev + increment;
-      });
-    }, 200);
-  };
-
-  const handleStartCoaching = async () => {
-    setView('coaching');
-    if (activeRecording?.coachingTranscript) {
-        setCoachingTranscript(activeRecording.coachingTranscript);
-    }
-    logCoach("Neural Coach Activated. Reviewing session history...");
-    handleReconnectAi(false);
-  };
-
-  const handleEndInterview = async () => {
-    if (isEndingRef.current) return;
-
-    const confirmEnd = window.confirm("Finalize and generate report? This will archive all artifacts.");
-    if (!confirmEnd) return;
-
-    isEndingRef.current = true;
-    setIsGeneratingReport(true);
-    startSmoothProgress();
-    
-    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
-    if (checkpointTimerRef.current) { clearInterval(checkpointTimerRef.current); checkpointTimerRef.current = null; }
-
-    setSynthesisStep('De-linking Neural Core...');
-    if (liveServiceRef.current) { await liveServiceRef.current.disconnect(); }
-    setIsAiConnected(false);
-    setIsRecording(false);
-
-    setSynthesisStep('Organizing Neural Workspace...');
-    const transcriptText = transcript.map(t => `${t.role.toUpperCase()}: ${t.text}`).join('\n\n');
-    const transcriptFile: CodeFile = {
-        name: 'session_transcript.md',
-        path: `drive://${currentSessionId}/session_transcript.md`,
-        language: 'markdown',
-        content: `# Interview Transcript\n\n${transcriptText}`,
-        loaded: true, isDirectory: false, isModified: false
-    };
-    activeCodeFilesMapRef.current.set(transcriptFile.path, transcriptFile);
-
-    const contextContent = `# Session Context\n\n## Job\n${jobDesc || 'N/A'}\n\n## Interviewer\n${interviewerInfo || 'N/A'}`;
-    const contextFile: CodeFile = {
-        name: 'session_context.md',
-        path: `drive://${currentSessionId}/session_context.md`,
-        language: 'markdown',
-        content: contextContent,
-        loaded: true, isDirectory: false, isModified: false
-    };
-    activeCodeFilesMapRef.current.set(contextFile.path, contextFile);
-
-    // 3. Manifest/Index File
-    const finalFiles = (Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[]);
-    const manifestContent = `# Neural Workspace Manifest\n\n**Session ID:** ${currentSessionId}\n**Date:** ${new Date().toLocaleString()}\n\n### Archived Artifacts:\n${finalFiles.map(f => `- [${f.name}](${f.path})`).join('\n')}`;
-    const manifestFile: CodeFile = {
-        name: 'neural_index.md',
-        path: `drive://${currentSessionId}/neural_index.md`,
-        language: 'markdown',
-        content: manifestContent,
-        loaded: true, isDirectory: false, isModified: false
-    };
-    activeCodeFilesMapRef.current.set(manifestFile.path, manifestFile);
-
-    setSynthesisStep('Syncing Workspace...');
-    try {
-        await saveCodeProject({
-            id: currentSessionId, 
-            name: `Interview_${mode}_${new Date().toLocaleDateString()}`,
-            files: (Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[]), 
-            lastModified: Date.now(), 
-            accessLevel: 'restricted',
-            allowedUserIds: currentUser ? [currentUser.uid] : []
-        });
-
-        const token = getDriveToken();
-        if (token) {
-            setSynthesisStep('Archiving to Personal Cloud...');
-            const rootFolderId = await ensureFolder(token, 'CodeStudio');
-            const interviewFolderId = await ensureFolder(token, `MockInterviews`, rootFolderId);
-            const sessionFolderId = await ensureFolder(token, `Session_${currentSessionId.substring(0, 8)}`, interviewFolderId);
-
-            for (const file of (Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[])) {
-                if (file.content && !file.name.endsWith('.draw')) {
-                    await uploadToDrive(token, sessionFolderId, file.name, new Blob([file.content], { type: 'text/markdown' }));
-                }
-            }
-            logApi("Workspace Successfully Archived to Google Drive.");
-        }
-    } catch (e: any) {
-        logApi(`Archive Error: ${e.message}`, "error");
-    }
-
-    setSynthesisStep('Closing Video Channel...');
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-        const blobPromise = new Promise<Blob>((resolve) => {
-            const rec = mediaRecorderRef.current!;
-            rec.onstop = () => resolve(new Blob(videoChunksRef.current, { type: 'video/webm' }));
-            rec.stop();
-        });
-        videoBlobRef.current = await blobPromise;
-    }
-
-    try {
-        activeStreamRef.current?.getTracks().forEach(t => t.stop());
-        activeScreenStreamRef.current?.getTracks().forEach(t => t.stop());
-    } catch (e) {}
-
-    setSynthesisStep('Analyzing Cognitive Performance...');
-    const projectFilesContext = (Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[]).map(f => `FILE: ${f.name}\nCONTENT:\n${f.content}`).join('\n\n---\n\n');
-
-    const tryEvaluate = async (attempt: number): Promise<MockInterviewReport | null> => {
-        try {
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-            const prompt = `AUDIT REPORT: Technical Mock Interview. 
-            MODE: ${mode} 
-            JOB_SPEC: ${jobDesc}
-            INTERVIEWER: ${interviewerInfo}
-            TRANSCRIPT: ${transcriptText}
-            ARTIFACTS: ${projectFilesContext}
-
-            EVALUATION CRITERIA:
-            1. If mode is 'behavioral', focus on conversation and STAR method.
-            2. Score 0-100.
-            
-            Return JSON: score, technicalSkills, communication, collaboration, strengths[], areasForImprovement[], verdict, summary, learningMaterial(Markdown), 
-            optimizedStarStories: Array<{ title: string, situation: string, task: string, action: string, result: string, coachTip: string }>.`;
-
-            const response = await ai.models.generateContent({
-                model: attempt === 1 ? 'gemini-3-pro-preview' : 'gemini-3-flash-preview',
-                contents: prompt,
-                config: { responseMimeType: 'application/json', thinkingConfig: { thinkingBudget: attempt === 1 ? 4000 : 0 } }
-            });
-            return JSON.parse(response.text || "null");
-        } catch (e) { return null; }
-    };
-
-    let reportData = await tryEvaluate(1);
-    if (!reportData) { setSynthesisStep('Re-scanning neural trace...'); reportData = await tryEvaluate(2); }
-
-    if (reportData) {
-      setReport(reportData);
-      setSynthesisStep('Finalizing Cloud Ledger...');
-      const rec: MockInterviewRecording = {
-        id: currentSessionId, userId: currentUser?.uid || 'guest', userName: currentUser?.displayName || 'Guest',
-        mode, language, jobDescription: jobDesc, interviewerInfo, timestamp: Date.now(), videoUrl: "", 
-        transcript: transcript.map(t => ({ role: t.role, text: t.text, timestamp: t.timestamp })),
-        coachingTranscript: [],
-        feedback: JSON.stringify(reportData), visibility
-      };
-      
-      const localBackupsRaw = localStorage.getItem('mock_interview_backups') || '[]';
-      const localBackups = JSON.parse(localBackupsRaw) as MockInterviewRecording[];
-      localBackups.push(rec);
-      localStorage.setItem('mock_interview_backups', JSON.stringify(localBackups.slice(-20))); 
-      await saveInterviewRecording(rec);
-      
-      setSynthesisPercent(100);
-      setView('report');
-      loadInterviews();
-    } else {
-        alert("Evaluation timed out. Session saved to history.");
-        setView('hub');
-    }
-    
-    setIsGeneratingReport(false);
-    if (synthesisIntervalRef.current) clearInterval(synthesisIntervalRef.current);
   };
 
   /**
@@ -941,7 +922,11 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
     
     // Register in the ref map and trigger state update
     activeCodeFilesMapRef.current.set(path, newFile);
-    setInitialStudioFiles(prev => [...prev, newFile]);
+    setInitialStudioFiles(prev => {
+        const exists = prev.some(f => f.path === path);
+        if (exists) return prev.map(f => f.path === path ? newFile : f);
+        return [...prev, newFile];
+    });
     
     // Clear buffer and close overlay
     setPasteCodeBuffer('');
@@ -954,7 +939,13 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         {list.map(rec => {
             const isSelected = selectedIds.has(rec.id);
             return (
-                <div key={rec.id} onClick={() => { setActiveRecording(rec); setReport(JSON.parse(rec.feedback || '{}')); setView('report'); }} className={`bg-slate-900 border ${isSelected ? 'border-indigo-500 bg-indigo-900/10' : 'border-slate-800'} rounded-[2.5rem] p-6 hover:border-indigo-500/50 transition-all group cursor-pointer shadow-xl relative overflow-hidden`}>
+                <div key={rec.id} onClick={() => { 
+                    setActiveRecording(rec); 
+                    setCurrentSessionId(rec.id); // UPDATE ACTIVE ID
+                    setReport(JSON.parse(rec.feedback || '{}')); 
+                    setView('report'); 
+                    activeCodeFilesMapRef.current.clear(); // RESET LOCAL MAP for new view context
+                }} className={`bg-slate-900 border ${isSelected ? 'border-indigo-500 bg-indigo-900/10' : 'border-slate-800'} rounded-[2.5rem] p-6 hover:border-indigo-500/50 transition-all group cursor-pointer shadow-xl relative overflow-hidden`}>
                     <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center gap-3">
                             {isMine && (
@@ -1130,7 +1121,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                   </div>
                   <div className="bg-slate-950 p-6 rounded-3xl border border-slate-800 space-y-4 shadow-inner">
                     <h3 className="text-xs font-black text-indigo-500 uppercase tracking-widest flex items-center gap-2"><Briefcase size={14}/> Interviewer Persona</h3>
-                    <textarea value={interviewerInfo} onChange={e => setInterviewerInfo(e.target.value)} placeholder="Expertise (e.g. 'Senior SRE at Uber')..." className="w-full h-24 bg-slate-950 border border-slate-700 rounded-2xl p-4 text-xs text-slate-300 outline-none resize-none focus:border-indigo-500/50 transition-all shadow-inner"/>
+                    <textarea value={interviewerInfo} onChange={e => setInterviewerInfo(e.target.value)} placeholder="Expertise (e.g. 'Senior SRE at Uber')..." className="w-full h-24 bg-slate-950 border border-slate-800 rounded-2xl p-4 text-xs text-slate-300 outline-none resize-none focus:border-indigo-500/50 transition-all shadow-inner"/>
                   </div>
                   <div className="bg-slate-950 p-6 rounded-3xl border border-slate-800 space-y-4 shadow-inner">
                     <h3 className="text-xs font-black text-indigo-500 uppercase tracking-widest flex items-center gap-2"><Globe size={14}/> Visibility</h3>
@@ -1206,7 +1197,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                     </div>
 
                     <div className="text-left w-full bg-slate-950 p-8 rounded-[2rem] border border-slate-800"><h3 className="font-bold text-white mb-4 flex items-center gap-2"><Sparkles className="text-indigo-400" size={18}/> Summary</h3><p className="text-sm text-slate-400 leading-relaxed">{report.summary}</p></div>
-                    <div className="text-left w-full bg-slate-950 p-8 rounded-[2rem] border border-slate-800"><h3 className="font-bold text-white mb-4 flex items-center gap-2"><BookOpen className="text-indigo-400" size={18}/> Growth Path</h3><div className="prose prose-invert prose-sm max-none"><MarkdownView content={report.learningMaterial} /></div></div>
+                    <div className="text-left w-full bg-slate-950 p-8 rounded-[2rem] border border-slate-800"><h3 className="font-bold text-white mb-4 flex items-center gap-2"><BookOpen className="text-indigo-400" size={18}/> Growth Path</h3><div className="prose prose-invert prose-sm max-w-none"><MarkdownView content={report.learningMaterial} /></div></div>
                     <button onClick={() => { setView('hub'); loadInterviews(); }} className="px-10 py-4 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl transition-all">Return Hub</button>
                 </div>
               ) : <Loader2 size={32} className="animate-spin text-indigo-400" />}
