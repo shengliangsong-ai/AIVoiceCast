@@ -467,19 +467,31 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
   
   useEffect(() => {
     if (initialFiles && initialFiles.length > 0) {
-        const slots: (CodeFile | null)[] = [null, null, null, null];
-        const vModes: Record<number, 'code' | 'preview'> = {};
-        initialFiles.slice(0, 4).forEach((file, i) => {
-            slots[i] = file;
-            const lang = getLanguageFromExt(file.name);
-            vModes[i] = ['markdown', 'plantuml', 'pdf', 'whiteboard'].includes(lang) ? 'preview' : 'code';
-        });
-        setActiveSlots(slots);
-        setSlotViewModes(vModes);
-        if (initialFiles.length > 1) setLayoutMode('split-v');
+        // Optimization: Only reset if the files are truly new or different to prevent typing jitters
+        const currentPaths = activeSlots.filter(s => s !== null).map(s => s?.path);
+        const incomingPaths = initialFiles.map(f => f.path);
+        
+        const isSameProject = incomingPaths.length === currentPaths.length && incomingPaths.every((p, i) => p === currentPaths[i]);
+        const hasContentChanges = initialFiles.some((f, i) => f.content !== activeSlots[i]?.content);
+        
+        if (!isSameProject || hasContentChanges) {
+            const slots: (CodeFile | null)[] = [null, null, null, null];
+            const vModes: Record<number, 'code' | 'preview'> = {};
+            initialFiles.slice(0, 4).forEach((file, i) => {
+                slots[i] = file;
+                const lang = getLanguageFromExt(file.name);
+                vModes[i] = ['markdown', 'plantuml', 'pdf', 'whiteboard'].includes(lang) ? 'preview' : 'code';
+            });
+            setActiveSlots(slots);
+            setSlotViewModes(vModes);
+            if (initialFiles.length > 1) setLayoutMode('split-v');
+        }
     } else {
-        setActiveSlots([defaultFile, null, null, null]);
-        setSlotViewModes({ 0: 'code' });
+        const noFilesActive = activeSlots.every(s => s === null);
+        if (noFilesActive) {
+            setActiveSlots([defaultFile, null, null, null]);
+            setSlotViewModes({ 0: 'code' });
+        }
     }
   }, [initialFiles]);
 
@@ -846,8 +858,6 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
         const lang = getLanguageFromExt(file.name);
         setSlotViewModes(prev => ({ ...prev, [slotIndex]: ['markdown', 'plantuml', 'pdf', 'whiteboard'].includes(lang) ? 'preview' : 'code' }));
         if (onFileChange) onFileChange(file);
-        
-        // AUTO-FOCUS the newly updated slot
         setFocusedSlot(slotIndex);
       }
       if (isLive && lockStatus === 'mine' && file?.path) updateProjectActiveFile(project.id, file.path);
@@ -895,7 +905,6 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
   const handleSendMessage = async (text: string) => {
     if (!text.trim() || isChatThinking) return;
     
-    // If in interviewer mode, prioritize external handler
     if (isInterviewerMode && onSendExternalMessage) {
         onSendExternalMessage(text);
         return;
