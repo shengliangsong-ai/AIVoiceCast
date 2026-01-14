@@ -1,11 +1,12 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { CodeProject, CodeFile, UserProfile, Channel, CursorPosition, CloudItem } from '../types';
-import { ArrowLeft, Save, Plus, Github, Cloud, HardDrive, Code, X, ChevronRight, ChevronDown, File, Folder, DownloadCloud, Loader2, CheckCircle, AlertTriangle, Info, FolderPlus, FileCode, RefreshCw, LogIn, CloudUpload, Trash2, ArrowUp, Edit2, FolderOpen, MoreVertical, Send, MessageSquare, Bot, Mic, MicOff, Sparkles, SidebarClose, SidebarOpen, Users, Eye, FileText as FileTextIcon, Image as ImageIcon, StopCircle, Minus, Maximize2, Minimize2, Lock, Unlock, Share2, Terminal as TerminalIcon, Copy, WifiOff, PanelRightClose, PanelRightOpen, PanelLeftClose, PanelLeftOpen, Monitor, Laptop, PenTool, Edit3, ShieldAlert, ZoomIn, ZoomOut, Columns, Rows, Grid2X2, Square as SquareIcon, GripVertical, GripHorizontal, FileSearch, Indent, Wand2, Check, Link, MousePointer2, Activity, Key, Search, FilePlus, FileUp, Play, Trash, ExternalLink, GraduationCap, ShieldCheck, Youtube, Video, Zap, Download, Headphones } from 'lucide-react';
+import { CodeProject, CodeFile, UserProfile, Channel, CursorPosition, CloudItem, TranscriptItem } from '../types';
+import { ArrowLeft, Save, Plus, Github, Cloud, HardDrive, Code, X, ChevronRight, ChevronDown, File, Folder, DownloadCloud, Loader2, CheckCircle, AlertTriangle, Info, FolderPlus, FileCode, RefreshCw, LogIn, CloudUpload, Trash2, ArrowUp, Edit2, FolderOpen, MoreVertical, Send, MessageSquare, Bot, Mic, MicOff, Sparkles, SidebarClose, SidebarOpen, Users, Eye, FileText as FileTextIcon, Image as ImageIcon, StopCircle, Minus, Maximize2, Minimize2, Lock, Unlock, Share2, Terminal as TerminalIcon, Copy, WifiOff, PanelRightClose, PanelRightOpen, PanelLeftClose, PanelLeftOpen, Monitor, Laptop, PenTool, Edit3, ShieldAlert, ZoomIn, ZoomOut, Columns, Rows, Grid2X2, Square as SquareIcon, GripVertical, GripHorizontal, FileSearch, Indent, Wand2, Check, Link, MousePointer2, Activity, Key, Search, FilePlus, FileUp, Play, Trash, ExternalLink, GraduationCap, ShieldCheck, Youtube, Video, Zap, Download, Headphones, Radio } from 'lucide-react';
 import { listCloudDirectory, saveProjectToCloud, deleteCloudItem, createCloudFolder, subscribeToCodeProject, saveCodeProject, updateCodeFile, updateCursor, claimCodeProjectLock, updateProjectActiveFile, deleteCodeFile, updateProjectAccess, sendShareNotification, deleteCloudFolderRecursive } from '../services/firestoreService';
 import { ensureCodeStudioFolder, listDriveFiles, readDriveFile, saveToDrive, deleteDriveFile, createDriveFolder, DriveFile, moveDriveFile, shareFileWithEmail, getDriveFileSharingLink, downloadDriveFileAsBlob, getDriveFileStreamUrl, getDrivePreviewUrl } from '../services/googleDriveService';
 import { connectGoogleDrive, getDriveToken, signInWithGoogle, signInWithGitHub } from '../services/authService';
 import { fetchRepoInfo, fetchRepoContents, fetchFileContent, updateRepoFile, fetchUserRepos, fetchRepoSubTree, deleteRepoFile } from '../services/githubService';
+import { GeminiLiveService } from '../services/geminiLive';
 import { MarkdownView } from './MarkdownView';
 import { Whiteboard } from './Whiteboard';
 import { ShareModal } from './ShareModal';
@@ -230,7 +231,7 @@ const RichCodeEditor = ({ code, onChange, onCursorMove, language, readOnly, font
     );
 };
 
-const AIChatPanel = ({ isOpen, onClose, messages, onSendMessage, isThinking, currentInput, onInputChange, isInterviewerMode }: any) => {
+const AIChatPanel = ({ isOpen, onClose, messages, onSendMessage, isThinking, currentInput, onInputChange, isInterviewerMode, isLiveMode, onToggleLive }: any) => {
     const scrollRef = useRef<HTMLDivElement>(null);
     const [showLocalPaste, setShowLocalPaste] = useState(false);
     const [pasteBuffer, setPasteBuffer] = useState('');
@@ -283,15 +284,33 @@ const AIChatPanel = ({ isOpen, onClose, messages, onSendMessage, isThinking, cur
 
     return (
         <div className="flex flex-col h-full bg-slate-950 border-l border-slate-800 relative">
-            <div className="p-3 border-b border-slate-800 flex justify-between items-center bg-slate-900">
-                <span className="font-bold text-slate-300 text-sm flex items-center gap-2">
-                    {isInterviewerMode ? (
-                        <><GraduationCap size={16} className="text-red-500"/> AI Interviewer</>
-                    ) : (
-                        <><Bot size={16} className="text-indigo-400"/> AI Assistant</>
+            <div className="p-3 border-b border-slate-800 flex justify-between items-center bg-slate-900 shrink-0">
+                <div className="flex items-center gap-3">
+                    <span className="font-bold text-slate-300 text-sm flex items-center gap-2">
+                        {isInterviewerMode ? (
+                            <><GraduationCap size={16} className="text-red-500"/> AI Interviewer</>
+                        ) : (
+                            <><Bot size={16} className="text-indigo-400"/> AI Assistant</>
+                        )}
+                    </span>
+                    {isLiveMode && (
+                        <div className="flex items-center gap-1.5 px-2 py-0.5 bg-red-900/30 text-red-400 rounded-full border border-red-500/20 text-[10px] font-black uppercase tracking-widest animate-pulse">
+                            <Radio size={10} fill="currentColor"/> Live
+                        </div>
                     )}
-                </span>
-                <button onClick={onClose} title="Minimize AI Panel"><PanelRightClose size={16} className="text-slate-500 hover:text-white"/></button>
+                </div>
+                <div className="flex items-center gap-2">
+                    {!isInterviewerMode && (
+                        <button 
+                            onClick={onToggleLive} 
+                            className={`p-1.5 rounded-lg transition-all ${isLiveMode ? 'bg-red-600 text-white shadow-lg' : 'text-slate-500 hover:text-white hover:bg-slate-800'}`}
+                            title={isLiveMode ? "End Live Connection" : "Start Live Voice Link"}
+                        >
+                            {isLiveMode ? <MicOff size={16}/> : <Mic size={16}/>}
+                        </button>
+                    )}
+                    <button onClick={onClose} title="Minimize AI Panel"><PanelRightClose size={16} className="text-slate-500 hover:text-white"/></button>
+                </div>
             </div>
             <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide">
                 {messages.length === 0 && (
@@ -353,15 +372,15 @@ const AIChatPanel = ({ isOpen, onClose, messages, onSendMessage, isThinking, cur
                             value={currentInput} 
                             onChange={e => onInputChange(e.target.value)} 
                             className="flex-1 bg-transparent border-none py-2.5 text-sm text-slate-300 focus:ring-0 placeholder-slate-600" 
-                            placeholder={isInterviewerMode ? "Reply to AI..." : "Ask AI to edit code..."} 
+                            placeholder={isLiveMode ? "AI is listening..." : isInterviewerMode ? "Reply to AI..." : "Ask AI to edit code..."} 
                         />
                         <button 
                             type="button" 
-                            onClick={toggleVoiceInput} 
-                            className={`p-1.5 rounded-full transition-all ${isListening ? 'text-red-500 bg-red-500/20 animate-pulse' : 'text-slate-500 hover:text-white'}`}
-                            title="Voice Input"
+                            onClick={isLiveMode ? onToggleLive : toggleVoiceInput} 
+                            className={`p-1.5 rounded-full transition-all ${isLiveMode || isListening ? 'text-red-500 bg-red-500/20 animate-pulse' : 'text-slate-500 hover:text-white'}`}
+                            title={isLiveMode ? "End Live Session" : "Voice Input"}
                         >
-                            {isListening ? <MicOff size={18}/> : <Mic size={18}/>}
+                            {isLiveMode || isListening ? <MicOff size={18}/> : <Mic size={18}/>}
                         </button>
                     </div>
                     <button 
@@ -767,6 +786,8 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
   const [chatInput, setChatInput] = useState('');
   const [isChatThinking, setIsChatThinking] = useState(false);
   const [isFormattingSlots, setIsFormattingSlots] = useState<Record<number, boolean>>({});
+  const [isLiveChatActive, setIsLiveChatActive] = useState(false);
+  const liveChatServiceRef = useRef<GeminiLiveService | null>(null);
   
   const [showShareModal, setShowShareModal] = useState(false);
   const [shareUrl, setShareUrl] = useState('');
@@ -1244,6 +1265,12 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
   const handleSendMessage = async (text: string) => {
     if (!text.trim() || isChatThinking) return;
     
+    if (isLiveChatActive && liveChatServiceRef.current) {
+        liveChatServiceRef.current.sendText(text);
+        setChatMessages(prev => [...prev, { role: 'user', text }]);
+        return;
+    }
+
     if (isInterviewerMode && onSendExternalMessage) {
         onSendExternalMessage(text);
         return;
@@ -1268,6 +1295,58 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
           }
       } else { setChatMessages(prev => [...prev, { role: 'ai', text: response.text || "No response." }]); }
     } catch (e: any) { setChatMessages(prev => [...prev, { role: 'ai', text: "Error: " + e.message }]); } finally { setIsChatThinking(false); }
+  };
+
+  const toggleLiveChat = async () => {
+    if (isLiveChatActive) {
+        liveChatServiceRef.current?.disconnect();
+        liveChatServiceRef.current = null;
+        setIsLiveChatActive(false);
+        setChatMessages(prev => [...prev, { role: 'ai', text: "*[System]: Live connection terminated.*" }]);
+        return;
+    }
+
+    const sysInstruction = `You are a world-class pair-programming assistant. 
+    You have direct access to the user's current code via tool calling.
+    When a user asks you to write code, modify a file, or fix a bug, use the 'update_active_file' tool.
+    Keep your spoken responses concise and helpful.`;
+
+    setIsLiveChatActive(true);
+    const service = new GeminiLiveService();
+    liveChatServiceRef.current = service;
+
+    try {
+        await service.connect('Fenrir', sysInstruction, {
+            onOpen: () => {
+                setChatMessages(prev => [...prev, { role: 'ai', text: "*[System]: Live neural link established. I can hear your voice and see your workspace.*" }]);
+            },
+            onClose: () => setIsLiveChatActive(false),
+            onError: (err) => { alert(err); setIsLiveChatActive(false); },
+            onVolumeUpdate: () => {},
+            onTranscript: (text, isUser) => {
+                const role = isUser ? 'user' : 'ai';
+                setChatMessages(prev => {
+                    if (prev.length > 0 && prev[prev.length - 1].role === role) {
+                        const last = prev[prev.length - 1];
+                        return [...prev.slice(0, -1), { ...last, text: last.text + text }];
+                    }
+                    return [...prev, { role, text, timestamp: Date.now() } as any];
+                });
+            },
+            onToolCall: async (toolCall) => {
+                for (const fc of toolCall.functionCalls) {
+                    if (fc.name === 'update_active_file') {
+                        const { new_content, summary } = fc.args as any;
+                        handleCodeChangeInSlot(new_content, focusedSlot);
+                        setChatMessages(prev => [...prev, { role: 'ai', text: `*[System]: Injected code changes via Voice Command. ${summary || ''}*` }]);
+                        service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: "Success: Workspace updated." } }]);
+                    }
+                }
+            }
+        }, [{ functionDeclarations: [updateFileTool] }]);
+    } catch (e) {
+        setIsLiveChatActive(false);
+    }
   };
 
   const handleFormatCode = async (slotIdx: number) => {
@@ -1437,6 +1516,8 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                 currentInput={chatInput} 
                 onInputChange={setChatInput} 
                 isInterviewerMode={isInterviewerMode}
+                isLiveMode={isLiveChatActive}
+                onToggleLive={toggleLiveChat}
               />
           </div>
       </div>
