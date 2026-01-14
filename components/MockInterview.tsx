@@ -443,28 +443,43 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
     
     setIsGeneratingReport(true);
     setSynthesisStep('Analyzing Neural Transcript...');
-    setSynthesisPercent(20);
+    setSynthesisPercent(10);
     
     try {
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        const historyText = transcript.map(t => `${t.role.toUpperCase()}: ${t.text}`).join('\n');
+        const interviewId = currentSessionId;
         const currentFiles = Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[];
+        
+        setSynthesisStep('Persisting Final Workspace...');
+        setSynthesisPercent(30);
+        
+        // PERSIST FINAL CODE STATE TO FIRESTORE
+        await saveCodeProject({ 
+            id: interviewId, 
+            name: `Interview_${mode}_${new Date().toLocaleDateString()}`, 
+            files: currentFiles, 
+            lastModified: Date.now(), 
+            accessLevel: 'restricted', 
+            allowedUserIds: currentUser ? [currentUser.uid] : [] 
+        });
+
+        const historyText = transcript.map(t => `${t.role.toUpperCase()}: ${t.text}`).join('\n');
         const codeText = currentFiles.map(f => `FILE: ${f.name}\nCONTENT:\n${f.content}`).join('\n\n');
 
         setSynthesisStep('Synthesizing Feedback...');
-        setSynthesisPercent(50);
+        setSynthesisPercent(60);
 
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         const prompt = `Analyze this interview. Mode: ${mode}. History: ${historyText}. Workspace: ${codeText}. 
         Return JSON: { "score": number, "technicalSkills": "string", "communication": "string", "collaboration": "string", "strengths": ["string"], "areasForImprovement": ["string"], "verdict": "string", "summary": "string", "learningMaterial": "Markdown" }`;
 
         const response = await ai.models.generateContent({ model: 'gemini-3-flash-preview', contents: prompt, config: { responseMimeType: 'application/json' } });
         const reportData = JSON.parse(response.text || '{}') as MockInterviewReport;
         setReport(reportData);
-        setSynthesisPercent(90);
-        setSynthesisStep('Archiving Workspace...');
+        
+        setSynthesisStep('Archiving Video to Drive...');
+        setSynthesisPercent(85);
 
         const videoBlob = new Blob(videoChunksRef.current, { type: 'video/webm' });
-        const interviewId = currentSessionId;
         const recording: MockInterviewRecording = { id: interviewId, userId: currentUser?.uid || 'guest', userName: currentUser?.displayName || 'Guest', userPhoto: currentUser?.photoURL, mode, language, jobDescription: jobDesc, interviewerInfo, timestamp: Date.now(), videoUrl: '', transcript, feedback: JSON.stringify(reportData), visibility };
 
         if (currentUser) {
@@ -477,7 +492,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
             await saveInterviewRecording(recording);
         }
         
-        // Fixed: Explicitly typed local backups as MockInterviewRecording[] to avoid spread type error with inferred any
         const existingBackupsRaw = localStorage.getItem('mock_interview_backups');
         let existingBackups: MockInterviewRecording[] = [];
         if (existingBackupsRaw) {
@@ -497,7 +511,11 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         setSynthesisPercent(100);
         setSynthesisStep('Refraction Complete');
         setTimeout(() => { setIsGeneratingReport(false); setView('report'); }, 800);
-    } catch (e) { setIsGeneratingReport(false); setView('hub'); }
+    } catch (e) { 
+        console.error("Report synthesis failed", e);
+        setIsGeneratingReport(false); 
+        setView('hub'); 
+    }
   };
 
   const handleStartInterview = async () => {
@@ -594,7 +612,8 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
               service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: currentFiles[0]?.content || "// No code." } }]);
             } else if (fc.name === 'update_active_file') {
               const { new_content } = fc.args as any;
-              const firstFile = Array.from(activeCodeFilesMapRef.current.values())[0];
+              const currentFiles = Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[];
+              const firstFile = currentFiles[0];
               if (firstFile) {
                 const updated = { ...firstFile, content: new_content };
                 activeCodeFilesMapRef.current.set(updated.path, updated);
@@ -626,7 +645,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
     setPasteCodeBuffer(''); setShowCodePasteOverlay(false);
   };
 
-  // Implemented missing renderInterviewsList function
   const renderInterviewsList = (list: MockInterviewRecording[], isHistory: boolean) => {
     if (list.length === 0) {
         return (
