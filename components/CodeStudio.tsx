@@ -511,7 +511,7 @@ const Slot: React.FC<SlotProps> = ({
                           {vMode === 'preview' ? (
                               lang === 'whiteboard' ? (
                                   <div className="w-full h-full">
-                                      <Whiteboard driveId={file.driveId} isReadOnly={isReadOnly} />
+                                      <Whiteboard driveId={file.driveId} initialContent={file.content} onChange={(c) => handleCodeChangeInSlot(c, idx)} isReadOnly={isReadOnly} />
                                   </div>
                               ) : lang === 'pdf' ? (
                                   <iframe 
@@ -1080,6 +1080,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
               if (activeTab === 'drive' && driveToken) {
                   const isBinary = node.name.toLowerCase().endsWith('.pdf');
                   const isYouTube = node.name.toLowerCase().endsWith('.youtube');
+                  const isWhiteboard = node.name.toLowerCase().endsWith('.draw') || node.name.toLowerCase().endsWith('.wb');
                   const mime = node.data?.mimeType || '';
                   const isAudioMime = mime.startsWith('audio/') || (mime === 'video/webm' && node.name.toLowerCase().includes('audio'));
                   const isVideoMime = mime.startsWith('video/') && !isAudioMime;
@@ -1096,8 +1097,9 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                   } else if (isVideoMime) {
                       const streamUrl = getDriveFileStreamUrl(driveToken, node.id);
                       fileData = { name: node.name, path: streamUrl, content: '[VIDEO STREAM]', language: 'video', size: node.data?.size ? parseInt(node.data.size) : undefined, loaded: true, isDirectory: false, isModified: false, driveId: node.id };
-                  } else if (node.name.toLowerCase().endsWith('.draw') || node.name.toLowerCase().endsWith('.wb')) {
-                      fileData = { name: node.name, path: `drive://${node.id}`, content: '[WHITEBOARD DATA]', language: 'whiteboard', loaded: true, isDirectory: false, isModified: false, driveId: node.id };
+                  } else if (isWhiteboard) {
+                      const text = await readDriveFile(driveToken, node.id);
+                      fileData = { name: node.name, path: `drive://${node.id}`, content: text, language: 'whiteboard', loaded: true, isDirectory: false, isModified: false, driveId: node.id };
                   } else {
                       const text = await readDriveFile(driveToken, node.id);
                       fileData = { name: node.name, path: `drive://${node.id}`, content: text, language: getLanguageFromExt(node.name), size: node.data?.size ? parseInt(node.data.size) : undefined, loaded: true, isDirectory: false, isModified: false, driveId: node.id };
@@ -1107,7 +1109,9 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                   if (ext === 'pdf' || ['mp4', 'mov', 'm4v', 'webm', 'mp3', 'wav', 'm4a', 'ogg'].includes(ext || '')) {
                       fileData = { name: node.name, path: node.data.url, content: '[MEDIA DATA]', language: getLanguageFromExt(node.name), size: node.size, loaded: true, isDirectory: false, isModified: false };
                   } else if (ext === 'draw' || ext === 'wb') {
-                      fileData = { name: node.name, path: node.data.url, content: '[WHITEBOARD DATA]', language: 'whiteboard', loaded: true, isDirectory: false, isModified: false };
+                      const res = await fetch(node.data.url);
+                      const text = await res.text();
+                      fileData = { name: node.name, path: node.id, content: text, language: 'whiteboard', loaded: true, isDirectory: false, isModified: false };
                   } else {
                       const res = await fetch(node.data.url);
                       const text = await res.text();

@@ -17,6 +17,8 @@ interface WhiteboardProps {
   isReadOnly?: boolean;
   initialColor?: string;
   backgroundColor?: string;
+  initialContent?: string;
+  onChange?: (content: string) => void;
 }
 
 const LINE_STYLES: { label: string; value: LineStyle; dash: number[] }[] = [
@@ -44,7 +46,9 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({
   driveId: propDriveId,
   isReadOnly: propReadOnly = false,
   initialColor = '#ffffff',
-  backgroundColor = '#0f172a'
+  backgroundColor = '#0f172a',
+  initialContent,
+  onChange
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -64,7 +68,6 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({
   const [startArrow, setStartArrow] = useState(false);
   const [endArrow, setEndArrow] = useState(false);
   
-  // Transformation & Selection State
   const [scale, setScale] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [boardRotation, setBoardRotation] = useState(0); 
@@ -72,7 +75,6 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({
   const [dragStartPos, setDragStartPos] = useState({ x: 0, y: 0 });
   const [activeResizeHandle, setActiveResizeHandle] = useState<ResizeHandle>(null);
 
-  // Text Tool State
   const [textInput, setTextInput] = useState({ x: 0, y: 0, value: '', visible: false, editingId: null as string | null });
   const textInputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -84,7 +86,18 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({
 
   const isDarkBackground = backgroundColor !== 'transparent' && backgroundColor !== '#ffffff';
 
+  // Load from props or cloud
   useEffect(() => {
+    if (initialContent) {
+        try {
+            const parsed = JSON.parse(initialContent);
+            if (Array.isArray(parsed)) setElements(parsed);
+        } catch (e) {
+            console.warn("Could not parse initial whiteboard content");
+        }
+        return;
+    }
+
     const params = new URLSearchParams(window.location.search);
     const id = params.get('id');
     const driveId = params.get('driveId') || propDriveId;
@@ -96,7 +109,17 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({
     } else if (driveId) {
         loadFromDrive(driveId);
     }
-  }, [propDriveId]);
+  }, [propDriveId, initialContent]);
+
+  // Sync back to editor
+  useEffect(() => {
+      if (onChange && elements.length > 0) {
+          const content = JSON.stringify(elements);
+          if (content !== initialContent) {
+              onChange(content);
+          }
+      }
+  }, [elements, onChange, initialContent]);
 
   useEffect(() => {
       if (!sessionId || sessionId.startsWith('local-')) {
@@ -162,7 +185,6 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({
       const w = el.width || 0;
       const h = el.height || 0;
       if (el.type === 'type') {
-          // Estimated bounds for text
           const lines = el.text?.split('\n') || [];
           const width = 200 * (el.fontSize || 16) / 16; 
           const height = lines.length * (el.fontSize || 16) * 1.2;
@@ -280,7 +302,6 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({
                           if (activeResizeHandle.includes('w')) { updated.x += dx; updated.width = (updated.width || 0) - dx; }
                           if (activeResizeHandle.includes('n')) { updated.y += dy; updated.height = (updated.height || 0) - dy; }
                           if (el.type === 'type') {
-                              // Proportional font resizing for text
                               const scaleFactor = 1 + (dy / 50);
                               updated.fontSize = Math.max(8, (updated.fontSize || 16) * scaleFactor);
                           }
@@ -544,7 +565,7 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({
 
                 <div className={`flex ${isDarkBackground ? 'bg-slate-800' : 'bg-slate-200'} rounded-lg p-1 mr-2`}>
                     <button onClick={() => setTool('pen')} className={`p-1.5 rounded ${tool === 'pen' ? 'bg-indigo-600 text-white shadow-lg' : (isDarkBackground ? 'text-slate-400' : 'text-slate-600')}`} title="Pen"><PenTool size={16}/></button>
-                    <button onClick={() => setTool('type')} className={`p-1.5 rounded ${tool === 'type' ? 'bg-indigo-600 text-white shadow-lg' : (isDarkBackground ? 'text-slate-400' : 'text-slate-600')}`} title="Markdown Text"><Type size={16}/></button>
+                    <button onClick={() => setTool('type')} className={`p-1.5 rounded ${tool === 'type' ? 'bg-indigo-600 text-white shadow-lg' : (isDarkBackground ? 'text-slate-400' : 'text-slate-600')}`} title="Markdown Text"><TypeIcon size={16}/></button>
                     <button onClick={() => setTool('move')} className={`p-1.5 rounded ${tool === 'move' ? 'bg-indigo-600 text-white shadow-lg' : (isDarkBackground ? 'text-slate-400' : 'text-slate-600')}`} title="Move/Resize Object"><MousePointer2 size={16}/></button>
                     <button onClick={() => setTool('eraser')} className={`p-1.5 rounded ${tool === 'eraser' ? 'bg-indigo-600 text-white shadow-lg' : (isDarkBackground ? 'text-slate-400' : 'text-slate-600')}`} title="Eraser"><Eraser size={16}/></button>
                 </div>

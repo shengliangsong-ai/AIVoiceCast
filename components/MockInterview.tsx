@@ -2,7 +2,8 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { MockInterviewRecording, TranscriptItem, CodeFile, UserProfile, Channel, CodeProject } from '../types';
 import { auth } from '../services/firebaseConfig';
-import { saveInterviewRecording, getPublicInterviews, deleteInterview, updateUserProfile, uploadFileToStorage, getUserInterviews, updateInterviewMetadata, saveCodeProject, getCodeProject, getUserProfile } from '../services/firestoreService';
+// Added missing saveRecordingReference import
+import { saveInterviewRecording, getPublicInterviews, deleteInterview, updateUserProfile, uploadFileToStorage, getUserInterviews, updateInterviewMetadata, saveCodeProject, getCodeProject, getUserProfile, saveRecordingReference } from '../services/firestoreService';
 import { GeminiLiveService } from '../services/geminiLive';
 import { GoogleGenAI, Type } from '@google/genai';
 import { generateSecureId } from '../utils/idUtils';
@@ -18,7 +19,7 @@ import {
   Youtube, AlertCircle, Eye, EyeOff, SaveAll, Wifi, WifiOff, Activity, ShieldAlert, 
   Timer, FastForward, ClipboardList, Layers, Bug, Flag, Minus, Fingerprint, FileSearch, 
   RefreshCcw, HeartHandshake, Speech, Send, History, Compass, Square, CheckSquare, 
-  Cloud, Award, Terminal, CodeSquare, Quote, Image as ImageIcon, Sparkle, LayoutPanelTop, 
+  Cloud, Award, Terminal, CodeSquare, Quote, ImageIcon, Sparkle, LayoutPanelTop, 
   TerminalSquare, FolderOpen, HardDrive, Shield, Database, Link as LinkIcon, UserCircle, 
   Calendar, Palette, Award as AwardIcon, CheckCircle2, AlertTriangle, TrendingUp, Presentation 
 } from 'lucide-react';
@@ -26,6 +27,8 @@ import { getGlobalAudioContext, getGlobalMediaStreamDest, warmUpAudioContext, st
 import { getDriveToken, signInWithGoogle, connectGoogleDrive } from '../services/authService';
 import { ensureFolder, uploadToDrive, downloadDriveFileAsBlob, deleteDriveFile, ensureCodeStudioFolder } from '../services/googleDriveService';
 import { getYouTubeVideoUrl, uploadToYouTube, getYouTubeEmbedUrl, deleteYouTubeVideo } from '../services/youtubeService';
+// Added missing saveLocalRecording import
+import { saveLocalRecording } from '../utils/db';
 
 interface OptimizedStarStory {
   title: string;
@@ -106,7 +109,6 @@ function getLanguageFromExt(filename: string): CodeFile['language'] {
     if (['cpp', 'hpp', 'cc', 'cxx'].includes(ext || '')) return 'c++';
     if (ext === 'c' || ext === 'h') return 'c';
     if (ext === 'java') return 'java';
-    // Fix: line 109 previously returned 'rust' which is not assignable to CodeFile['language']. Changing to 'rs'.
     if (ext === 'rs') return 'rs';
     if (ext === 'go') return 'go';
     if (ext === 'cs') return 'c#';
@@ -213,6 +215,9 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
   const [isAiThinking, setIsAiThinking] = useState(false);
   const [driveToken, setDriveToken] = useState<string | null>(getDriveToken());
   
+  // Added isUploadingRecording state used by recorder.onstop
+  const [isUploadingRecording, setIsUploadingRecording] = useState(false);
+
   const [timeLeft, setTimeLeft] = useState<number>(0); 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const checkpointTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -334,35 +339,69 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
           videoBitsPerSecond: 2500000 
       });
       
-      audioChunksRef.current = []; 
-      recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
+      mediaRecorderRef.current = recorder;
+      videoChunksRef.current = []; 
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) videoChunksRef.current.push(e.data); };
       
       recorder.onstop = async () => {
-          const videoBlob = new Blob(audioChunksRef.current, { type: 'video/webm' });
+          // Fix: audioChunksRef -> videoChunksRef.current
+          const videoBlob = new Blob(videoChunksRef.current, { type: 'video/webm' });
           const transcriptText = transcriptRef.current.map(t => `${t.role.toUpperCase()}: ${t.text}`).join('\n\n');
           const transcriptBlob = new Blob([transcriptText], { type: 'text/plain' });
+          
+          // Fix: Using isUploadingRecording state instead of missing name
           setIsUploadingRecording(true);
           try {
               const timestamp = Date.now();
               const recId = `session-${timestamp}`;
+              
+              // Fix: Providing actual values since 'channel' is not defined here
+              const channelTitle = `Mock Interview (${mode})`;
+              const channelImage = 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=600&q=80';
+
               await saveLocalRecording({
-                  id: recId, userId: currentUser.uid, channelId: channel.id, channelTitle: channel.title, channelImage: channel.imageUrl, timestamp, mediaUrl: URL.createObjectURL(videoBlob), mediaType: 'video/webm', transcriptUrl: URL.createObjectURL(transcriptBlob), blob: videoBlob
+                  id: recId, 
+                  userId: currentUser?.uid || 'guest', 
+                  channelId: uuid, 
+                  channelTitle: channelTitle, 
+                  channelImage: channelImage, 
+                  timestamp, 
+                  mediaUrl: URL.createObjectURL(videoBlob), 
+                  mediaType: 'video/webm', 
+                  transcriptUrl: URL.createObjectURL(transcriptBlob), 
+                  blob: videoBlob
               });
+
               const token = getDriveToken();
               if (token) {
                   const folderId = await ensureCodeStudioFolder(token);
                   const driveVideoUrl = `drive://${await uploadToDrive(token, folderId, `${recId}.webm`, videoBlob)}`;
                   const tFileId = await uploadToDrive(token, folderId, `${recId}_transcript.txt`, transcriptBlob);
+                  
+                  // Fix: Using imported saveRecordingReference and correct params
                   await saveRecordingReference({
-                      id: recId, userId: currentUser.uid, channelId: channel.id, channelTitle: channel.title, channelImage: channel.imageUrl, timestamp, mediaUrl: driveVideoUrl, driveUrl: driveVideoUrl, mediaType: 'video/webm', transcriptUrl: `drive://${tFileId}`
+                      id: recId, 
+                      userId: currentUser?.uid || 'guest', 
+                      channelId: uuid, 
+                      channelTitle: channelTitle, 
+                      channelImage: channelImage, 
+                      timestamp, 
+                      mediaUrl: driveVideoUrl, 
+                      driveUrl: driveVideoUrl, 
+                      mediaType: 'video/webm', 
+                      transcriptUrl: `drive://${tFileId}`
                   });
               }
-          } catch(e) { console.error("Neural archive failed", e); } 
-          finally { setIsUploadingRecording(false); onEndSession(); }
+          } catch(e) { 
+              console.error("Neural archive failed", e); 
+          } finally { 
+              setIsUploadingRecording(false); 
+              // Fix: setView instead of onEndSession
+              if (view === 'interview') setView('report');
+          }
           camStream.getTracks().forEach(t => t.stop());
       };
       
-      mediaRecorderRef.current = recorder;
       recorder.start(1000);
       setIsRecording(true);
 
@@ -445,7 +484,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
 
         setSynthesisStep('Synthesizing Feedback...');
         setSynthesisPercent(60);
-        // Fix: correctly initializing and using GenAI according to the guidelines
+        // correctly initializing and using GenAI according to the guidelines
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         const prompt = `Analyze this technical interview evaluation. 
         Mode: ${mode}. Candidate: ${intervieweeLinkedin}. Interviewer: ${interviewerLinkedin}. Job: ${jobDesc}.
@@ -632,7 +671,17 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
           </div>
         )}
       </main>
-      {isGeneratingReport && (<div className="fixed inset-0 z-[200] bg-slate-950/80 backdrop-blur-md flex flex-col items-center justify-center gap-8 animate-fade-in"><div className="relative"><div className="w-32 h-32 border-4 border-indigo-500/10 rounded-full"></div><div className="absolute inset-0 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"/><Activity className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-indigo-400" size={40}/><div className="absolute -bottom-10 left-1/2 -translate-x-1/2 text-3xl font-black text-white">{Math.round(synthesisPercent)}%</div></div><h3 className="text-xl font-black text-white uppercase">{synthesisStep}</h3></div>)}
+      {(isGeneratingReport || isUploadingRecording) && (
+        <div className="fixed inset-0 z-[200] bg-slate-950/80 backdrop-blur-md flex flex-col items-center justify-center gap-8 animate-fade-in">
+          <div className="relative">
+            <div className="w-32 h-32 border-4 border-indigo-500/10 rounded-full"></div>
+            <div className="absolute inset-0 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"/>
+            <Activity className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-indigo-400" size={40}/>
+            <div className="absolute -bottom-10 left-1/2 -translate-x-1/2 text-3xl font-black text-white">{Math.round(synthesisPercent)}%</div>
+          </div>
+          <h3 className="text-xl font-black text-white uppercase">{synthesisStep || (isUploadingRecording ? 'Archiving Video...' : 'Synthesizing...')}</h3>
+        </div>
+      )}
     </div>
   );
 };
