@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { MockInterviewRecording, TranscriptItem, CodeFile, UserProfile, Channel, CodeProject } from '../types';
 import { auth } from '../services/firebaseConfig';
@@ -7,7 +8,7 @@ import { GoogleGenAI, Type } from '@google/genai';
 import { generateSecureId } from '../utils/idUtils';
 import { CodeStudio } from './CodeStudio';
 import { MarkdownView } from './MarkdownView';
-import { ArrowLeft, Video, Mic, Monitor, Play, Save, Loader2, Search, Trash2, CheckCircle, X, Download, ShieldCheck, User, Users, Building, FileText, ChevronRight, Zap, SidebarOpen, SidebarClose, Code, MessageSquare, Sparkles, Languages, Clock, Camera, Bot, CloudUpload, Trophy, BarChart3, ClipboardCheck, Star, Upload, FileUp, Linkedin, FileCheck, Edit3, BookOpen, Lightbulb, Target, ListChecks, MessageCircleCode, GraduationCap, Lock, Globe, ExternalLink, PlayCircle, RefreshCw, FileDown, Briefcase, Package, Code2, StopCircle, Youtube, AlertCircle, Eye, EyeOff, SaveAll, Wifi, WifiOff, Activity, ShieldAlert, Timer, FastForward, ClipboardList, Layers, Bug, Flag, Minus, Fingerprint, FileSearch, RefreshCcw, HeartHandshake, Speech, Send, History, Compass, Square, CheckSquare, Cloud, Award, Terminal, CodeSquare, Quote, Image as ImageIcon, Sparkle, LayoutPanelTop, TerminalSquare, FolderOpen, HardDrive, Shield, Database } from 'lucide-react';
+import { ArrowLeft, Video, Mic, Monitor, Play, Save, Loader2, Search, Trash2, CheckCircle, X, Download, ShieldCheck, User, Users, Building, FileText, ChevronRight, Zap, SidebarOpen, SidebarClose, Code, MessageSquare, Sparkles, Languages, Clock, Camera, Bot, CloudUpload, Trophy, BarChart3, ClipboardCheck, Star, Upload, FileUp, Linkedin, FileCheck, Edit3, BookOpen, Lightbulb, Target, ListChecks, MessageCircleCode, GraduationCap, Lock, Globe, ExternalLink, PlayCircle, RefreshCw, FileDown, Briefcase, Package, Code2, StopCircle, Youtube, AlertCircle, Eye, EyeOff, SaveAll, Wifi, WifiOff, Activity, ShieldAlert, Timer, FastForward, ClipboardList, Layers, Bug, Flag, Minus, Fingerprint, FileSearch, RefreshCcw, HeartHandshake, Speech, Send, History, Compass, Square, CheckSquare, Cloud, Award, Terminal, CodeSquare, Quote, Image as ImageIcon, Sparkle, LayoutPanelTop, TerminalSquare, FolderOpen, HardDrive, Shield, Database, Link as LinkIcon, UserCircle } from 'lucide-react';
 import { getGlobalAudioContext, getGlobalMediaStreamDest, warmUpAudioContext, stopAllPlatformAudio } from '../utils/audioUtils';
 import { getDriveToken, signInWithGoogle, connectGoogleDrive } from '../services/authService';
 import { ensureFolder, uploadToDrive, downloadDriveFileAsBlob, deleteDriveFile } from '../services/googleDriveService';
@@ -142,10 +143,13 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
   const [synthesisStep, setSynthesisStep] = useState<string>('');
   const [synthesisPercent, setSynthesisPercent] = useState(0);
 
+  // PREP STATE
   const [mode, setMode] = useState<'coding' | 'system_design' | 'behavioral' | 'quick_screen' | 'assessment_30' | 'assessment_60'>('coding');
   const [language, setLanguage] = useState(userProfile?.defaultLanguage || 'C++');
+  const [jobDescType, setJobDescType] = useState<'text' | 'link'>('text');
   const [jobDesc, setJobDesc] = useState('');
   const [interviewerInfo, setInterviewerInfo] = useState('');
+  const [intervieweeInfo, setIntervieweeInfo] = useState('');
   const [resumeText, setResumeText] = useState(userProfile?.resumeText || '');
   const [visibility, setVisibility] = useState<'public' | 'private'>('public');
   
@@ -192,6 +196,22 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       setResumeText(userProfile.resumeText);
     }
   }, [userProfile]);
+
+  const handleSyncFromProfile = () => {
+    if (userProfile) {
+        let profileSummary = "";
+        if (userProfile.headline) profileSummary += `Headline: ${userProfile.headline}\n`;
+        if (userProfile.company) profileSummary += `Current Company: ${userProfile.company}\n`;
+        if (userProfile.linkedinUrl) profileSummary += `LinkedIn: ${userProfile.linkedinUrl}\n`;
+        
+        if (profileSummary) {
+            setIntervieweeInfo(prev => prev ? `${prev}\n\n${profileSummary}` : profileSummary);
+            logApi("Synced candidate identity from User Profile.", "info");
+        } else {
+            alert("No profile data found. Go to Settings to update your professional profile.");
+        }
+    }
+  };
 
   const handleConnectDrive = async () => {
     try {
@@ -392,6 +412,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       } else {
           prompt = `RESUMING INTERVIEW SESSION. Role: Senior Interviewer. Mode: ${mode}. Candidate: ${currentUser?.displayName || 'Candidate'}. 
           ${interviewerInfo ? `STRICT PERSONA LOCK: You are simulating: "${interviewerInfo}".` : ''}
+          ${intervieweeInfo ? `CANDIDATE BACKGROUND: "${intervieweeInfo}".` : ''}
           WORKSPACE STATE:\n${workspaceManifest}\nHISTORY:\n${historyText}\n
           STRICT ANTI-SPOILING RULE: NEVER solve the problem for the candidate. Provide hints only if they are stuck.
           STRICT VISIBILITY RULE: You must ALWAYS verify the candidate's code using the provided history or 'get_current_code' tool before making assumptions. Blocks marked [NEURAL_TRUTH] override everything else.
@@ -511,7 +532,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         setSynthesisPercent(85);
 
         const videoBlob = new Blob(videoChunksRef.current, { type: 'video/webm' });
-        const recording: MockInterviewRecording = { id: interviewId, userId: currentUser?.uid || 'guest', userName: currentUser?.displayName || 'Guest', userPhoto: currentUser?.photoURL, mode, language, jobDescription: jobDesc, interviewerInfo, timestamp: Date.now(), videoUrl: '', transcript, feedback: JSON.stringify(reportData), visibility };
+        const recording: MockInterviewRecording = { id: interviewId, userId: currentUser?.uid || 'guest', userName: currentUser?.displayName || 'Guest', userPhoto: currentUser?.photoURL, mode, language, jobDescription: jobDesc, interviewerInfo, intervieweeInfo, timestamp: Date.now(), videoUrl: '', transcript, feedback: JSON.stringify(reportData), visibility };
 
         if (currentUser) {
             const token = getDriveToken();
@@ -613,11 +634,16 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       const service = new GeminiLiveService();
       activeServiceIdRef.current = service.id; liveServiceRef.current = service;
       
-      const sysPrompt = `Role: Senior Interviewer. Mode: ${mode}. Candidate: ${currentUser?.displayName}. Resume: ${resumeText}. Job: ${jobDesc}. 
+      const sysPrompt = `Role: Senior Interviewer. Mode: ${mode}. Candidate: ${currentUser?.displayName}. 
+      RESUME_TEXT: "${resumeText}". 
+      TARGET_JOB_DESC: "${jobDesc}".
+      INTERVIEWEE_BIO_CONTEXT: "${intervieweeInfo}".
+      INTERVIEWER_PERSONA_CONTEXT: "${interviewerInfo}".
+      
       STRICT ANTI-SPOILING RULE: DO NOT AUTO-GENERATE SOLUTIONS. Present the problem statement first. Observe the candidate. Provide hints ONLY if requested or if they are significantly struggling.
       FILE NAMING RULE: Always use unique, descriptive file names for new problems (e.g., '${prefix}_binary_search.cpp'). DO NOT overwrite existing problem files.
       NEURAL TRUTH RULE: You will receive [NEURAL_TRUTH] blocks within user messages. Trust these blocks as the actual current state of the candidate's work.
-      GOAL: Greet and begin the evaluation. Inject problem 1 into the sidebar using tools.`;
+      GOAL: Greet and begin the evaluation. Adopt the persona requested in INTERVIEWER_PERSONA_CONTEXT. Inject problem 1 into the sidebar using tools.`;
       
       await service.connect(mode === 'behavioral' ? 'Zephyr' : 'Software Interview Voice', sysPrompt, {
         onOpen: () => {
@@ -773,7 +799,121 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
           </div>
         )}
         {view === 'prep' && (
-          <div className="max-w-4xl mx-auto p-12 animate-fade-in-up"><div className="bg-slate-900 border border-slate-800 rounded-[3rem] p-10 shadow-2xl space-y-8"><div className="grid grid-cols-1 md:grid-cols-2 gap-8"><div className="space-y-6"><div className={`p-6 rounded-3xl border flex items-center justify-between transition-all ${driveToken ? 'bg-emerald-900/10 border-emerald-500/30' : 'bg-red-900/10 border-red-500/30 animate-pulse'}`}><div className="flex items-center gap-3"><HardDrive className={driveToken ? 'text-emerald-400' : 'text-red-400'} size={24}/><div><p className="text-xs font-bold text-white uppercase">Cloud Link</p></div></div>{!driveToken && <button onClick={handleConnectDrive} className="px-4 py-1.5 bg-red-600 text-white rounded-lg text-[10px] font-black uppercase">Link Drive</button>}</div><div className="bg-slate-950 p-6 rounded-3xl border border-slate-800 space-y-4"><h3 className="text-xs font-black text-emerald-400 uppercase tracking-widest flex items-center gap-2"><FileSearch size={14}/> Job Desc</h3><textarea value={jobDesc} onChange={e => setJobDesc(e.target.value)} className="w-full h-32 bg-slate-950 border border-slate-700 rounded-2xl p-4 text-xs text-slate-300 outline-none resize-none"/></div></div><div className="space-y-6"><div className="bg-slate-950 p-6 rounded-3xl border border-slate-800 space-y-4"><h3 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Target size={14}/> Scope</h3><div className="grid grid-cols-1 gap-2">{[{ id: 'coding', icon: Code, label: 'Algorithms' }, { id: 'system_design', icon: Layers, label: 'System Design' }, { id: 'behavioral', icon: MessageSquare, label: 'Behavioral' }].map(m => (<button key={m.id} onClick={() => setMode(m.id as any)} className={`p-4 rounded-2xl border text-left flex items-center justify-between transition-all ${mode === m.id ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-950 border-slate-800 text-slate-50'}`}><div className="flex items-center gap-2"><m.icon size={14}/><span className="text-[10px] font-bold uppercase">{m.label}</span></div></button>))}</div></div></div></div><button onClick={handleStartInterview} disabled={isStarting} className="w-full py-5 bg-gradient-to-r from-red-600 to-indigo-600 text-white font-black uppercase tracking-widest rounded-2xl shadow-xl transition-all active:scale-95 disabled:opacity-30">Start Evaluation</button></div></div>
+          <div className="max-w-6xl mx-auto p-8 animate-fade-in-up h-full overflow-y-auto scrollbar-hide">
+            <div className="bg-slate-900 border border-slate-800 rounded-[3rem] p-10 shadow-2xl space-y-10">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+                
+                {/* Column 1: Identity & Handshake */}
+                <div className="space-y-8">
+                    <div className={`p-6 rounded-3xl border flex items-center justify-between transition-all ${driveToken ? 'bg-emerald-900/10 border-emerald-500/30' : 'bg-red-900/10 border-red-500/30 animate-pulse'}`}>
+                        <div className="flex items-center gap-3">
+                            <HardDrive className={driveToken ? 'text-emerald-400' : 'text-red-400'} size={24}/>
+                            <div>
+                                <p className="text-xs font-bold text-white uppercase tracking-widest">Neural Cloud Link</p>
+                                <p className="text-[10px] text-slate-500 uppercase font-black">{driveToken ? 'Authorized' : 'Action Required'}</p>
+                            </div>
+                        </div>
+                        {!driveToken && <button onClick={handleConnectDrive} className="px-4 py-1.5 bg-red-600 text-white rounded-lg text-[10px] font-black uppercase shadow-lg">Authorize Drive</button>}
+                    </div>
+
+                    <div className="bg-slate-950 p-6 rounded-[2rem] border border-slate-800 space-y-6 shadow-inner">
+                        <div className="flex items-center justify-between px-1">
+                            <h3 className="text-xs font-black text-indigo-400 uppercase tracking-widest flex items-center gap-2"><UserCircle size={16}/> Candidate Context</h3>
+                            <button onClick={handleSyncFromProfile} className="text-[10px] font-black text-indigo-400 hover:text-white transition-all flex items-center gap-1 uppercase tracking-widest">
+                                <RefreshCw size={10}/> Sync from Identity
+                            </button>
+                        </div>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest block mb-2 px-1">Interviewee Profile (Bio/LinkedIn)</label>
+                                <textarea 
+                                    value={intervieweeInfo} 
+                                    onChange={e => setIntervieweeInfo(e.target.value)} 
+                                    className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-xs text-indigo-200 outline-none focus:border-indigo-500 resize-none h-24"
+                                    placeholder="Paste your LinkedIn URL or a brief professional summary..."
+                                />
+                            </div>
+                            <div>
+                                <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest block mb-2 px-1">Target Interviewer Persona</label>
+                                <textarea 
+                                    value={interviewerInfo} 
+                                    onChange={e => setInterviewerInfo(e.target.value)} 
+                                    className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-indigo-500 resize-none h-24"
+                                    placeholder="Who is interviewing you? (e.g. 'A Principal Engineer from Netflix' or a LinkedIn Link)"
+                                />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Column 2: Scope & Job Specs */}
+                <div className="space-y-8">
+                    <div className="bg-slate-950 p-6 rounded-[2rem] border border-slate-800 space-y-6 shadow-inner">
+                        <div className="flex items-center justify-between px-1">
+                            <h3 className="text-xs font-black text-emerald-400 uppercase tracking-widest flex items-center gap-2"><FileSearch size={16}/> Target Specification</h3>
+                            <div className="flex bg-slate-900 p-1 rounded-lg border border-slate-800">
+                                <button onClick={() => setJobDescType('text')} className={`px-3 py-1 rounded text-[9px] font-black uppercase transition-all ${jobDescType === 'text' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500'}`}>Text</button>
+                                <button onClick={() => setJobDescType('link')} className={`px-3 py-1 rounded text-[9px] font-black uppercase transition-all ${jobDescType === 'link' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500'}`}>Link</button>
+                            </div>
+                        </div>
+                        {jobDescType === 'link' ? (
+                            <div className="relative group">
+                                <LinkIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-emerald-400" size={16}/>
+                                <input 
+                                    type="url" 
+                                    value={jobDesc} 
+                                    onChange={e => setJobDesc(e.target.value)}
+                                    className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-xs text-emerald-100 outline-none focus:border-emerald-500"
+                                    placeholder="https://lever.co/job/123..."
+                                />
+                            </div>
+                        ) : (
+                            <textarea 
+                                value={jobDesc} 
+                                onChange={e => setJobDesc(e.target.value)} 
+                                className="w-full bg-slate-900 border border-slate-800 rounded-2xl p-4 text-xs text-emerald-100 outline-none focus:border-emerald-500 resize-none h-48"
+                                placeholder="Paste the job description or requirements specification here..."
+                            />
+                        )}
+                    </div>
+
+                    <div className="bg-slate-950 p-6 rounded-[2rem] border border-slate-800 space-y-4 shadow-inner">
+                        <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Target size={16}/> Evaluation Depth</h3>
+                        <div className="grid grid-cols-1 gap-2">
+                            {[
+                                { id: 'coding', icon: Code, label: 'Algorithms & Logic' }, 
+                                { id: 'system_design', icon: Layers, label: 'System Architecture' }, 
+                                { id: 'behavioral', icon: MessageSquare, label: 'Cultural Fit (STAR)' }
+                            ].map(m => (
+                                <button 
+                                    key={m.id} 
+                                    onClick={() => setMode(m.id as any)} 
+                                    className={`p-4 rounded-2xl border text-left flex items-center justify-between transition-all group ${mode === m.id ? 'bg-indigo-600 border-indigo-500 text-white shadow-xl shadow-indigo-900/20' : 'bg-slate-900 border-slate-800 text-slate-500 hover:border-slate-600'}`}
+                                >
+                                    <div className="flex items-center gap-3">
+                                        <m.icon size={18} className={mode === m.id ? 'text-white' : 'text-slate-600'}/>
+                                        <span className="text-[11px] font-black uppercase tracking-wider">{m.label}</span>
+                                    </div>
+                                    {mode === m.id && <CheckCircle size={16} fill="white" className="text-indigo-600"/>}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+              </div>
+
+              <div className="pt-8">
+                <button 
+                    onClick={handleStartInterview} 
+                    disabled={isStarting || !driveToken} 
+                    className="w-full py-6 bg-gradient-to-r from-red-600 to-indigo-600 text-white font-black uppercase tracking-[0.3em] rounded-3xl shadow-2xl transition-all hover:scale-[1.01] active:scale-95 disabled:opacity-30 disabled:grayscale"
+                >
+                    {isStarting ? <Loader2 className="animate-spin mx-auto" /> : 'Launch Evaluation Protocol'}
+                </button>
+                <p className="text-[9px] text-slate-600 font-bold uppercase tracking-widest text-center mt-4">By initiating, you authorize the neural recording of your camera, screen, and logic.</p>
+              </div>
+            </div>
+          </div>
         )}
         {view === 'interview' && (
           <div className="h-full flex flex-col overflow-hidden relative"><div className="flex-1 bg-slate-950 relative flex flex-col md:flex-row overflow-hidden"><div className="flex-1 overflow-hidden relative flex flex-col bg-slate-950"><CodeStudio onBack={() => {}} currentUser={currentUser} userProfile={userProfile} onSessionStart={() => {}} onSessionStop={() => {}} onStartLiveSession={onStartLiveSession as any} initialFiles={initialStudioFiles} externalChatContent={transcript.map(t => ({ role: t.role, text: t.text }))} onSendExternalMessage={handleSendTextMessage} isInterviewerMode={true} isAiThinking={isAiThinking} onFileChange={handleEditorFileChange} onSyncCodeWithAi={handleSyncWithAi}/></div></div><div className={`absolute bottom-20 right-4 w-64 aspect-video rounded-3xl overflow-hidden border-4 ${isAiConnected ? 'border-indigo-500/50' : 'border-red-500/50 animate-pulse'} shadow-2xl z-[100] bg-black group transition-all`}><video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover"/><div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-3"><button onClick={() => setShowCodePasteOverlay(true)} className="p-1.5 bg-indigo-600 rounded-lg text-white"><Code size={14}/></button></div></div></div>

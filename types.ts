@@ -516,6 +516,7 @@ export interface MockInterviewRecording {
   language?: string;
   jobDescription: string;
   interviewerInfo?: string; // Target interviewer profile
+  intervieweeInfo?: string; // NEW: Candidate background/profile
   timestamp: number;
   videoUrl: string; // Drive Link
   transcript?: TranscriptItem[];
