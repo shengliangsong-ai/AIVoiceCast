@@ -17,7 +17,15 @@ const APP_STATE_FILE = 'aivoicecast_state_v2.json';
  * native browser Range Requests (streaming) for private Drive files.
  */
 export function getDriveFileStreamUrl(accessToken: string, fileId: string): string {
+  // Ensure the URL is properly formatted for the media endpoint
   return `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&access_token=${accessToken}`;
+}
+
+/**
+ * Returns the Google Drive Preview link which is the most reliable for PDFs.
+ */
+export function getDrivePreviewUrl(fileId: string): string {
+  return `https://drive.google.com/file/d/${fileId}/preview`;
 }
 
 /**

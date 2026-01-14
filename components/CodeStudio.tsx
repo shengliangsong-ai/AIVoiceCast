@@ -3,8 +3,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { CodeProject, CodeFile, UserProfile, Channel, CursorPosition, CloudItem } from '../types';
 import { ArrowLeft, Save, Plus, Github, Cloud, HardDrive, Code, X, ChevronRight, ChevronDown, File, Folder, DownloadCloud, Loader2, CheckCircle, AlertTriangle, Info, FolderPlus, FileCode, RefreshCw, LogIn, CloudUpload, Trash2, ArrowUp, Edit2, FolderOpen, MoreVertical, Send, MessageSquare, Bot, Mic, MicOff, Sparkles, SidebarClose, SidebarOpen, Users, Eye, FileText as FileTextIcon, Image as ImageIcon, StopCircle, Minus, Maximize2, Minimize2, Lock, Unlock, Share2, Terminal as TerminalIcon, Copy, WifiOff, PanelRightClose, PanelRightOpen, PanelLeftClose, PanelLeftOpen, Monitor, Laptop, PenTool, Edit3, ShieldAlert, ZoomIn, ZoomOut, Columns, Rows, Grid2X2, Square as SquareIcon, GripVertical, GripHorizontal, FileSearch, Indent, Wand2, Check, Link, MousePointer2, Activity, Key, Search, FilePlus, FileUp, Play, Trash, ExternalLink, GraduationCap, ShieldCheck, Youtube, Video, Zap } from 'lucide-react';
 import { listCloudDirectory, saveProjectToCloud, deleteCloudItem, createCloudFolder, subscribeToCodeProject, saveCodeProject, updateCodeFile, updateCursor, claimCodeProjectLock, updateProjectActiveFile, deleteCodeFile, updateProjectAccess, sendShareNotification, deleteCloudFolderRecursive } from '../services/firestoreService';
-import { ensureCodeStudioFolder, listDriveFiles, readDriveFile, saveToDrive, deleteDriveFile, createDriveFolder, DriveFile, moveDriveFile, shareFileWithEmail, getDriveFileSharingLink, downloadDriveFileAsBlob, getDriveFileStreamUrl } from '../services/googleDriveService';
-// Added signInWithGitHub to fixes missing import error on line 795
+import { ensureCodeStudioFolder, listDriveFiles, readDriveFile, saveToDrive, deleteDriveFile, createDriveFolder, DriveFile, moveDriveFile, shareFileWithEmail, getDriveFileSharingLink, downloadDriveFileAsBlob, getDriveFileStreamUrl, getDrivePreviewUrl } from '../services/googleDriveService';
 import { connectGoogleDrive, getDriveToken, signInWithGoogle, signInWithGitHub } from '../services/authService';
 import { fetchRepoInfo, fetchRepoContents, fetchFileContent, updateRepoFile, fetchUserRepos, fetchRepoSubTree, deleteRepoFile } from '../services/githubService';
 import { MarkdownView } from './MarkdownView';
@@ -327,7 +326,7 @@ const AIChatPanel = ({ isOpen, onClose, messages, onSendMessage, isThinking, cur
                     </div>
                     <div className="flex gap-1 mb-3">
                         {['cpp', 'python', 'js'].map(l => (
-                            <button key={l} onClick={() => setPasteLang(l)} className={`px-2 py-0.5 rounded text-[8px] font-black uppercase border transition-all ${pasteLang === l ? 'bg-indigo-600 border-indigo-400 text-white' : 'bg-slate-950 border-slate-800 text-slate-500'}`}>{l}</button>
+                            <button key={l} onClick={() => setPasteLang(l)} className={`px-2 py-0.5 rounded text-[8px] font-black uppercase border transition-all ${pasteLang === l ? 'bg-indigo-600 border-indigo-400 text-white' : 'bg-slate-950 border-slate-800 text-slate-50'}`}>{l}</button>
                         ))}
                     </div>
                     <textarea 
@@ -419,11 +418,10 @@ const Slot: React.FC<SlotProps> = ({
     const output = terminalOutputs[idx] || [];
     const running = isRunning[idx];
     
-    // Strict visibility logic based on layoutMode
     const isVisible = useMemo(() => {
         if (layoutMode === 'single') return idx === 0;
         if (layoutMode === 'quad') return true;
-        return idx < 2; // split-v and split-h
+        return idx < 2; 
     }, [layoutMode, idx]);
 
     if (!isVisible) return null;
@@ -499,10 +497,22 @@ const Slot: React.FC<SlotProps> = ({
                               lang === 'whiteboard' ? (
                                   <div className="w-full h-full"><Whiteboard isReadOnly={isReadOnly} /></div>
                               ) : lang === 'pdf' ? (
-                                  <iframe src={file.path} className="w-full h-full border-none bg-white" title="PDF Viewer" />
+                                  <iframe 
+                                      src={file.path} 
+                                      className="w-full h-full border-none bg-white" 
+                                      title="PDF Viewer" 
+                                      sandbox="allow-scripts allow-same-origin"
+                                  />
                               ) : lang === 'video' ? (
                                   <div className="w-full h-full bg-black flex items-center justify-center relative">
-                                      <video src={file.path} controls autoPlay className="max-w-full max-h-full" onClick={(e) => e.stopPropagation()} />
+                                      <video 
+                                          src={file.path} 
+                                          controls 
+                                          autoPlay 
+                                          crossOrigin="anonymous"
+                                          className="max-w-full max-h-full" 
+                                          onClick={(e) => e.stopPropagation()} 
+                                      />
                                       {isStreamUrl && (
                                           <div className="absolute top-4 left-4 z-20 px-3 py-1 bg-black/60 backdrop-blur-md rounded-full border border-white/10 text-[9px] font-bold text-white uppercase tracking-widest flex items-center gap-2 pointer-events-none">
                                               <Activity size={10} className="text-emerald-400 animate-pulse"/> Seeking Active
@@ -607,7 +617,6 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
   const clientId = useMemo(() => generateSecureId().substring(0, 8), []);
   const myColor = useMemo(() => CURSOR_COLORS[Math.floor(Math.random() * CURSOR_COLORS.length)], []);
 
-  // UI Requirement: Default to 1 coding frame
   const [layoutMode, setLayoutMode] = useState<LayoutMode>('single');
   const [activeSlots, setActiveSlots] = useState<(CodeFile | null)[]>([null, null, null, null]);
   const [focusedSlot, setFocusedSlot] = useState<number>(0);
@@ -625,20 +634,12 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       return null;
   }, [initialFiles]);
 
-  /**
-   * LRU Rotation Logic:
-   * Newly opened file moves to Slot 0.
-   * If capacity (based on layoutMode) is exceeded, oldest is dropped.
-   */
   const updateSlotsLRU = useCallback((file: CodeFile) => {
     const maxVisible = layoutMode === 'single' ? 1 : (layoutMode === 'quad' ? 4 : 2);
     
     setActiveSlots(prev => {
-        // Remove existing copy of the file if present
         const filtered = prev.filter(s => s !== null && s.path !== file.path);
-        // Add new file to position 0 (Primary Slot)
         const next = [file, ...filtered].slice(0, maxVisible);
-        // Fill remaining slots with null to maintain array size 4
         while (next.length < 4) next.push(null);
         return next;
     });
@@ -665,7 +666,6 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
 
         let highestPriorityFile: CodeFile | null = null;
         
-        // Detect NEW files created by AI (not seen in previous sync)
         for (const file of initialFiles) {
             if (!lastFilePathsRef.current.has(file.path)) {
                 highestPriorityFile = file;
@@ -674,10 +674,8 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
         }
         
         if (highestPriorityFile) {
-            // Logic for "Newly opened file is in cell0 (left). cell1 is right. LRU to rotate them."
             updateSlotsLRU(highestPriorityFile);
         } else {
-            // Update contents of already active slots if they changed remotely
             setActiveSlots(prev => prev.map((s) => {
                 if (!s) return null;
                 const match = initialFiles.find(f => f.path === s.path);
@@ -689,7 +687,6 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
             }));
         }
 
-        // Keep local tracking references in sync
         lastFilePathsRef.current = new Set(initialFiles.map(f => f.path));
         initialFiles.forEach(f => {
             if (!internalFileContentRef.current.has(f.path) || internalFileContentRef.current.get(f.path) !== f.content) {
@@ -1040,15 +1037,27 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                   if (isYouTube) {
                       const text = await readDriveFile(driveToken, node.id);
                       fileData = { name: node.name, path: `drive://${node.id}`, content: text, language: 'youtube', loaded: true, isDirectory: false, isModified: false };
-                  } else if (isBinary || isVideo) {
-                      // HIGH PERFORMANCE: For large media/pdf files, use direct API streaming link
-                      // This avoids downloading the entire multi-GB file before playback
+                  } else if (isBinary) {
+                      // IMPROVED: For PDFs, use the Drive Preview UI which is more robust
+                      const previewUrl = getDrivePreviewUrl(node.id);
+                      fileData = { 
+                          name: node.name, 
+                          path: previewUrl, 
+                          content: '[BINARY DOCUMENT]', 
+                          language: 'pdf', 
+                          size: node.data?.size ? parseInt(node.data.size) : undefined,
+                          loaded: true, 
+                          isDirectory: false, 
+                          isModified: false 
+                      };
+                  } else if (isVideo) {
+                      // HIGH PERFORMANCE: For large media files, use direct API streaming link
                       const streamUrl = getDriveFileStreamUrl(driveToken, node.id);
                       fileData = { 
                           name: node.name, 
                           path: streamUrl, 
                           content: '[STREAMING MEDIA]', 
-                          language: isBinary ? 'pdf' : 'video', 
+                          language: 'video', 
                           size: node.data?.size ? parseInt(node.data.size) : undefined,
                           loaded: true, 
                           isDirectory: false, 
@@ -1108,7 +1117,6 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
             await deleteCodeFile(project.id, node.id);
         }
         
-        // Remove from active slots if present
         setActiveSlots(prev => prev.map(s => s?.path === node.id ? null : s));
         refreshExplorer();
     } catch(e: any) {

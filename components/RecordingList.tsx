@@ -6,8 +6,9 @@ import { getLocalRecordings, deleteLocalRecording } from '../utils/db';
 import { Play, FileText, Trash2, Calendar, Clock, Loader2, Video, X, HardDriveDownload, Sparkles, Mic, Monitor, CheckCircle, Languages, AlertCircle, ShieldOff, Volume2, Camera, Youtube, ExternalLink, HelpCircle, Info, Link as LinkIcon, Copy, CloudUpload, HardDrive, LogIn, Check, Terminal, Activity, ShieldAlert, History, Zap, Download, Share2, Square, CheckSquare } from 'lucide-react';
 import { auth } from '../services/firebaseConfig';
 import { getYouTubeEmbedUrl, uploadToYouTube, getYouTubeVideoUrl, deleteYouTubeVideo } from '../services/youtubeService';
-import { getDriveToken, signInWithGoogle } from '../services/authService';
-import { ensureCodeStudioFolder, uploadToDrive, downloadDriveFileAsBlob, deleteDriveFile } from '../services/googleDriveService';
+/* Fix: Added connectGoogleDrive to the imports from authService */
+import { getDriveToken, signInWithGoogle, connectGoogleDrive } from '../services/authService';
+import { ensureCodeStudioFolder, uploadToDrive, downloadDriveFileAsBlob, deleteDriveFile, getDriveFileStreamUrl } from '../services/googleDriveService';
 import { ShareModal } from './ShareModal';
 
 interface RecordingListProps {
@@ -40,7 +41,6 @@ export const RecordingList: React.FC<RecordingListProps> = ({ onBack, onStartLiv
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [copyingId, setCopyingId] = useState<string | null>(null);
   
-  // Selection State
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
 
@@ -49,12 +49,10 @@ export const RecordingList: React.FC<RecordingListProps> = ({ onBack, onStartLiv
   const [recordCamera, setRecordCamera] = useState(true);
   const [recordScreen, setRecordScreen] = useState(true);
 
-  // Sharing State
   const [showShareModal, setShowShareModal] = useState(false);
   const [shareUrl, setShareUrl] = useState('');
   const [sharingTitle, setSharingTitle] = useState('');
 
-  // Diagnostic State
   const [syncLogs, setSyncLogs] = useState<SyncLog[]>([]);
   const [showSyncLog, setShowSyncLog] = useState(false);
 
@@ -118,7 +116,6 @@ export const RecordingList: React.FC<RecordingListProps> = ({ onBack, onStartLiv
               return urlObj.pathname.slice(1);
           }
       } catch (e) {
-          // Regex fallback for non-standard or dirty strings
           const match = url.match(/(?:v=|\/)([0-9A-Za-z_-]{11})/);
           return match ? match[1] : null;
       }
@@ -181,24 +178,22 @@ export const RecordingList: React.FC<RecordingListProps> = ({ onBack, onStartLiv
           return;
       }
 
-      // Prioritize YouTube for immediate embed if it's the main mediaUrl
       if (isYouTubeUrl(rec.mediaUrl)) {
           setResolvedMediaUrl(rec.mediaUrl);
           setActiveMediaId(rec.id);
           return;
       }
 
-      // Handle Drive resolution
       if (isDriveUrl(rec.mediaUrl) || (rec.driveUrl && isDriveUrl(rec.driveUrl))) {
           setResolvingId(rec.id);
           try {
-              const token = getDriveToken();
-              if (!token) throw new Error("Google access required.");
+              /* Fix: connectGoogleDrive is now imported correctly from authService */
+              const token = getDriveToken() || await connectGoogleDrive();
               const driveUri = isDriveUrl(rec.mediaUrl) ? rec.mediaUrl : rec.driveUrl!;
               const fileId = driveUri.replace('drive://', '').split('&')[0];
-              const blob = await downloadDriveFileAsBlob(token, fileId);
-              const url = URL.createObjectURL(blob);
-              setResolvedMediaUrl(url);
+              // IMPROVED: Use direct stream URL instead of downloading the full blob
+              const streamUrl = getDriveFileStreamUrl(token, fileId);
+              setResolvedMediaUrl(streamUrl);
               setActiveMediaId(rec.id);
           } catch (e: any) {
               alert("Drive Access Denied: " + e.message);
@@ -279,10 +274,9 @@ export const RecordingList: React.FC<RecordingListProps> = ({ onBack, onStartLiv
             ...rec,
             userId: currentUser.uid,
             mediaUrl: videoUrl,
-            driveUrl: originalDriveUrl // Preserve the drive URL
+            driveUrl: originalDriveUrl 
         };
         
-        // Handle transcript sync if not already in cloud
         if (!isDriveUrl(rec.transcriptUrl)) {
             const transcriptText = `Neural Transcript: ${rec.channelTitle}\nID: ${rec.id}`;
             const transcriptBlob = new Blob([transcriptText], { type: 'text/plain' });
@@ -337,7 +331,6 @@ export const RecordingList: React.FC<RecordingListProps> = ({ onBack, onStartLiv
         let mediaUrl = "";
         let driveUrl = "";
 
-        // Upload to Drive first for safety
         addSyncLog("Syncing to Google Drive...", 'info');
         const driveFileId = await uploadToDrive(token!, folderId, `${rec.id}.webm`, videoBlob);
         driveUrl = `drive://${driveFileId}`;
@@ -403,11 +396,7 @@ export const RecordingList: React.FC<RecordingListProps> = ({ onBack, onStartLiv
                 await deleteYouTubeVideo(token, videoId); 
                 addSyncLog(`YouTube asset purged.`, 'success');
             } catch (e: any) {
-                if (e.message?.includes('403')) {
-                    addSyncLog(`YouTube Purge FAILED: Missing Scope. Re-login required.`, 'error');
-                } else {
-                    addSyncLog(`YouTube Purge FAILED: ${e.message}`, 'error');
-                }
+                addSyncLog(`YouTube Purge FAILED: ${e.message}`, 'error');
             }
         }
     }
@@ -577,7 +566,6 @@ export const RecordingList: React.FC<RecordingListProps> = ({ onBack, onStartLiv
         </div>
       </div>
 
-      {/* Bulk Action Bar */}
       {!loading && recordings.length > 0 && (
           <div className={`p-4 rounded-2xl border transition-all duration-300 flex items-center justify-between ${selectedIds.size > 0 ? 'bg-indigo-600 border-indigo-400 shadow-xl shadow-indigo-900/20' : 'bg-slate-900 border-slate-800'}`}>
               <div className="flex items-center gap-4">
@@ -626,7 +614,6 @@ export const RecordingList: React.FC<RecordingListProps> = ({ onBack, onStartLiv
             const isLocal = rec.mediaUrl.startsWith('blob:') || rec.mediaUrl.startsWith('data:');
             const isSelected = selectedIds.has(rec.id);
             
-            // Check for presence of both
             const hasYoutube = isYouTubeUrl(rec.mediaUrl) || (rec.driveUrl && isYouTubeUrl(rec.mediaUrl));
             const hasDrive = isDriveUrl(rec.mediaUrl) || (rec.driveUrl && isDriveUrl(rec.driveUrl));
             
@@ -773,12 +760,13 @@ export const RecordingList: React.FC<RecordingListProps> = ({ onBack, onStartLiv
                                 src={resolvedMediaUrl} 
                                 controls 
                                 autoPlay 
+                                crossOrigin="anonymous"
                                 className="max-w-full max-h-full h-auto w-auto object-contain"
                             />
                         </div>
                         ) : (
                         <div className="bg-slate-950 p-6 rounded-2xl border border-slate-800 flex items-center gap-6 shadow-inner w-full">
-                            <audio src={resolvedMediaUrl} controls autoPlay className="flex-1" />
+                            <audio src={resolvedMediaUrl} controls autoPlay crossOrigin="anonymous" className="flex-1" />
                         </div>
                         )}
                     </div>
@@ -828,7 +816,6 @@ export const RecordingList: React.FC<RecordingListProps> = ({ onBack, onStartLiv
           </div>
       )}
 
-      {/* Manual Recorder Form */}
       {isRecorderModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md animate-fade-in">
             <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-md shadow-2xl overflow-hidden animate-fade-in-up">
