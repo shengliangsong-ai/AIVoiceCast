@@ -7,8 +7,7 @@ import { GoogleGenAI, Type } from '@google/genai';
 import { generateSecureId } from '../utils/idUtils';
 import { CodeStudio } from './CodeStudio';
 import { MarkdownView } from './MarkdownView';
-// Fixed: Added Calendar to lucide-react imports
-import { ArrowLeft, Video, Mic, Monitor, Play, Save, Loader2, Search, Trash2, CheckCircle, X, Download, ShieldCheck, User, Users, Building, FileText, ChevronRight, Zap, SidebarOpen, SidebarClose, Code, MessageSquare, Sparkles, Languages, Clock, Camera, Bot, CloudUpload, Trophy, BarChart3, ClipboardCheck, Star, Upload, FileUp, Linkedin, FileCheck, Edit3, BookOpen, Lightbulb, Target, ListChecks, MessageCircleCode, GraduationCap, Lock, Globe, ExternalLink, PlayCircle, RefreshCw, FileDown, Briefcase, Package, Code2, StopCircle, Youtube, AlertCircle, Eye, EyeOff, SaveAll, Wifi, WifiOff, Activity, ShieldAlert, Timer, FastForward, ClipboardList, Layers, Bug, Flag, Minus, Fingerprint, FileSearch, RefreshCcw, HeartHandshake, Speech, Send, History, Compass, Square, CheckSquare, Cloud, Award, Terminal, CodeSquare, Quote, Image as ImageIcon, Sparkle, LayoutPanelTop, TerminalSquare, FolderOpen, HardDrive, Shield, Database, Link as LinkIcon, UserCircle, Calendar } from 'lucide-react';
+import { ArrowLeft, Video, Mic, Monitor, Play, Save, Loader2, Search, Trash2, CheckCircle, X, Download, ShieldCheck, User, Users, Building, FileText, ChevronRight, Zap, SidebarOpen, SidebarClose, Code, MessageSquare, Sparkles, Languages, Clock, Camera, Bot, CloudUpload, Trophy, BarChart3, ClipboardCheck, Star, Upload, FileUp, Linkedin, FileCheck, Edit3, BookOpen, Lightbulb, Target, ListChecks, MessageCircleCode, GraduationCap, Lock, Globe, ExternalLink, PlayCircle, RefreshCw, FileDown, Briefcase, Package, Code2, StopCircle, Youtube, AlertCircle, Eye, EyeOff, SaveAll, Wifi, WifiOff, Activity, ShieldAlert, Timer, FastForward, ClipboardList, Layers, Bug, Flag, Minus, Fingerprint, FileSearch, RefreshCcw, HeartHandshake, Speech, Send, History, Compass, Square, CheckSquare, Cloud, Award, Terminal, CodeSquare, Quote, Image as ImageIcon, Sparkle, LayoutPanelTop, TerminalSquare, FolderOpen, HardDrive, Shield, Database, Link as LinkIcon, UserCircle, Calendar, Palette } from 'lucide-react';
 import { getGlobalAudioContext, getGlobalMediaStreamDest, warmUpAudioContext, stopAllPlatformAudio } from '../utils/audioUtils';
 import { getDriveToken, signInWithGoogle, connectGoogleDrive } from '../services/authService';
 import { ensureFolder, uploadToDrive, downloadDriveFileAsBlob, deleteDriveFile, ensureCodeStudioFolder } from '../services/googleDriveService';
@@ -80,7 +79,7 @@ const createInterviewFileTool: any = {
   }
 };
 
-type VideoFilter = 'none' | 'blur' | 'sepia' | 'executive' | 'hacker';
+type VideoFilter = 'none' | 'blur' | 'studio-noir' | 'executive';
 
 function getLanguageFromExt(filename: string): CodeFile['language'] {
     if (!filename) return 'text';
@@ -111,22 +110,6 @@ const CURSOR_COLORS = [
     '#4ade80', '#34d399', '#2dd4bf', '#22d3ee', '#38bdf8', 
     '#60a5fa', '#818cf8', '#a78bfa', '#c084fc', '#e879f9', '#fb7185'
 ];
-
-const FileIcon = ({ filename }: { filename: string }) => {
-    if (!filename) return <File size={16} className="text-slate-500" />;
-    const lang = getLanguageFromExt(filename);
-    if (lang === 'javascript' || lang === 'typescript' || lang === 'javascript (react)' || lang === 'typescript (react)') return <FileCode size={16} className="text-yellow-400" />;
-    if (lang === 'python') return <FileCode size={16} className="text-blue-400" />;
-    if (lang === 'c++' || lang === 'c') return <FileCode size={16} className="text-indigo-400" />;
-    if (lang === 'html') return <FileCode size={16} className="text-orange-400" />;
-    if (lang === 'css') return <FileCode size={16} className="text-blue-300" />;
-    if (lang === 'json') return <FileCode size={16} className="text-green-400" />;
-    if (lang === 'markdown') return <FileTextIcon size={16} className="text-slate-400" />;
-    if (lang === 'plantuml') return <ImageIcon size={16} className="text-pink-400" />;
-    if (lang === 'whiteboard') return <PenTool size={16} className="text-pink-500" />;
-    if (lang === 'pdf') return <FileTextIcon size={16} className="text-red-400" />;
-    return <File size={16} className="text-slate-500" />;
-};
 
 export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfile, onStartLiveSession }) => {
   const currentUser = auth?.currentUser;
@@ -188,7 +171,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
 
   const [activeRecording, setActiveRecording] = useState<MockInterviewRecording | null>(null);
 
-  const [videoFilter, setVideoFilter] = useState<VideoFilter>('none');
   const [currentSessionId, setCurrentSessionId] = useState<string>('');
   const [sessionPrefix, setSessionPrefix] = useState<string>('');
   
@@ -197,17 +179,18 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
 
   const [report, setReport] = useState<MockInterviewReport | null>(null);
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
-  const [sessionProject, setSessionProject] = useState<CodeProject | null>(null);
-  const [loadingProject, setLoadingProject] = useState(false);
 
   const liveServiceRef = useRef<GeminiLiveService | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const videoChunksRef = useRef<Blob[]>([]);
-  const videoBlobRef = useRef<Blob | null>(null);
   
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const activeStreamRef = useRef<MediaStream | null>(null);
   const activeScreenStreamRef = useRef<MediaStream | null>(null);
+
+  // Filter State
+  const [activeVideoFilter, setActiveVideoFilter] = useState<VideoFilter>('none');
+  const [showFilterMenu, setShowFilterMenu] = useState(false);
 
   const logApi = (msg: string, type: 'info' | 'error' | 'warn' = 'info') => {
     const time = new Date().toLocaleTimeString();
@@ -223,6 +206,13 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
   useEffect(() => {
     transcriptRef.current = transcript;
   }, [transcript]);
+
+  // Fix: Camera Auto-mount logic
+  useEffect(() => {
+      if (view === 'interview' && localVideoRef.current && activeStreamRef.current) {
+          localVideoRef.current.srcObject = activeStreamRef.current;
+      }
+  }, [view, isAiConnected]);
 
   useEffect(() => {
     if (userProfile?.resumeText && !resumeText) {
@@ -434,8 +424,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
     }
   };
 
-  const [syncingId, setSyncingId] = useState<string | null>(null);
-
   const handleStartInterview = async () => {
     if (!driveToken) return alert("Please connect to Google Drive first.");
     setIsStarting(true); isEndingRef.current = false;
@@ -446,7 +434,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
 
     let camStream: MediaStream | null = null;
     let screenStream: MediaStream | null = null;
-    try { screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true }); } catch(e) {}
+    try { screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: "always" } as any, audio: true }); } catch(e) {}
     try { camStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true }); } catch(e) { alert("Camera/Mic mandatory."); setIsStarting(false); return; }
 
     const audioCtx = getGlobalAudioContext();
@@ -482,9 +470,16 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         }
         if (camVideo.readyState >= 2) {
           const pipW = 320; const realH = (pipW * camVideo.videoHeight) / camVideo.videoWidth;
+          drawCtx.save();
+          
+          // Apply Neural Filters to Recording too
+          const filter = (document.getElementById('mock-camera-preview') as any)?.style.filter;
+          if (filter) drawCtx.filter = filter;
+
           drawCtx.strokeStyle = '#6366f1'; drawCtx.lineWidth = 4;
           drawCtx.strokeRect(canvas.width - pipW - 24, canvas.height - realH - 24, pipW, realH);
           drawCtx.drawImage(camVideo, canvas.width - pipW - 24, canvas.height - realH - 24, pipW, realH);
+          drawCtx.restore();
         }
         requestAnimationFrame(drawFrame);
       };
@@ -524,7 +519,8 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         onClose: () => { if (activeServiceIdRef.current === service.id) { setIsAiConnected(false); handleReconnectAi(true); } },
         onError: () => { if (activeServiceIdRef.current === service.id) handleReconnectAi(true); },
         onVolumeUpdate: () => {},
-        onTranscript: (text, isUser) => {
+        /* Fix: Added explicit types to resolve 'unknown' during concatenation */
+        onTranscript: (text: string, isUser: boolean) => {
           if (activeServiceIdRef.current !== service.id) return;
           if (!isUser) setIsAiThinking(false);
           const role = isUser ? 'user' : 'ai';
@@ -553,7 +549,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
             } else if (fc.name === 'create_interview_file') {
               const { filename, content } = fc.args as any;
               let finalFilename = filename;
-              if (prefix) { const base = filename.split('/').pop(); if (!base.startsWith(prefix)) finalFilename = `${prefix}_${base}`; }
+              if (prefix) { const base = filename.split('/').pop() || ''; if (!base.startsWith(prefix)) finalFilename = `${prefix}_${base}`; }
               const path = `drive://${uuid}/${finalFilename}`;
               const newFile: CodeFile = { name: finalFilename, path, language: getLanguageFromExt(finalFilename) as any, content, loaded: true, isDirectory: false, isModified: false };
               activeCodeFilesMapRef.current.set(path, newFile);
@@ -587,7 +583,8 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
           onClose: () => { if (activeServiceIdRef.current === service.id) { setIsAiConnected(false); if (!isEndingRef.current && isAuto && reconnectAttemptsRef.current < 5) { reconnectAttemptsRef.current++; handleReconnectAi(true); } } },
           onError: () => { if (activeServiceIdRef.current === service.id) handleReconnectAi(true); },
           onVolumeUpdate: () => {},
-          onTranscript: (text, isUser) => {
+          /* Fix: Added explicit types to resolve 'unknown' during concatenation */
+          onTranscript: (text: string, isUser: boolean) => {
             if (activeServiceIdRef.current !== service.id) return;
             if (!isUser) setIsAiThinking(false);
             const role = isUser ? 'user' : 'ai';
@@ -715,6 +712,15 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
     );
   };
 
+  const getFilterStyle = (f: VideoFilter) => {
+      switch(f) {
+          case 'blur': return 'blur(10px)';
+          case 'studio-noir': return 'grayscale(1) contrast(1.2) brightness(0.9)';
+          case 'executive': return 'sepia(0.2) contrast(1.1) brightness(1.05) saturate(1.1)';
+          default: return 'none';
+      }
+  };
+
   return (
     <div className="h-full flex flex-col bg-slate-950 text-slate-100 overflow-hidden relative">
       <header className="h-16 border-b border-slate-800 bg-slate-900/50 flex items-center justify-between px-6 backdrop-blur-md shrink-0 z-40">
@@ -759,8 +765,8 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                     <div className="bg-slate-950 p-6 rounded-[2rem] border border-slate-800 space-y-6 shadow-inner">
                         <div className="flex items-center justify-between px-1"><h3 className="text-xs font-black text-indigo-400 uppercase tracking-widest flex items-center gap-2"><UserCircle size={16}/> Professional Identity</h3><button onClick={handleSyncFromProfile} className="text-[10px] font-black text-indigo-400 hover:text-white transition-all flex items-center gap-1 uppercase tracking-widest"><RefreshCw size={10}/> Sync Profile</button></div>
                         <div className="space-y-4">
-                            <div><label className="text-[9px] font-black text-slate-500 uppercase tracking-widest block mb-2 px-1">Interviewee LinkedIn</label><input type="url" value={intervieweeLinkedin} onChange={e => setIntervieweeLinkedin(e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-xs text-indigo-200 outline-none focus:border-indigo-500" placeholder="https://linkedin.com/in/you"/></div>
-                            <div><label className="text-[9px] font-black text-slate-500 uppercase tracking-widest block mb-2 px-1">Interviewer LinkedIn (Target Persona)</label><input type="url" value={interviewerLinkedin} onChange={e => setInterviewerLinkedin(e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-indigo-500" placeholder="https://linkedin.com/in/interviewer-profile"/></div>
+                            <div><label className="text-[9px] font-black text-slate-500 uppercase tracking-widest block mb-2 px-1">Interviewee LinkedIn</label><input type="url" value={intervieweeLinkedin} onChange={e => setIntervieweeLinkedin(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-xs text-indigo-200 outline-none focus:border-indigo-500" placeholder="https://linkedin.com/in/you"/></div>
+                            <div><label className="text-[9px] font-black text-slate-500 uppercase tracking-widest block mb-2 px-1">Interviewer LinkedIn (Target Persona)</label><input type="url" value={interviewerLinkedin} onChange={e => setInterviewerLinkedin(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-xs text-white outline-none focus:border-indigo-500" placeholder="https://linkedin.com/in/interviewer-profile"/></div>
                         </div>
                     </div>
                     <div className="bg-slate-950 p-6 rounded-[2rem] border border-slate-800 space-y-4 shadow-inner">
@@ -792,13 +798,13 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                             <h3 className="text-xs font-black text-emerald-400 uppercase tracking-widest flex items-center gap-2"><FileSearch size={16}/> Target Specification</h3>
                             <div className="flex bg-slate-900 p-1 rounded-lg border border-slate-800">
                                 <button onClick={() => setJobDescType('text')} className={`px-3 py-1 rounded text-[9px] font-black uppercase transition-all ${jobDescType === 'text' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500'}`}>Text</button>
-                                <button onClick={() => setJobDescType('link')} className={`px-3 py-1 rounded text-[9px] font-black uppercase transition-all ${jobDescType === 'link' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500'}`}>Link</button>
+                                <button onClick={() => setJobDescType('link')} className={`px-3 py-1 rounded text-[9px] font-black uppercase transition-all ${jobDescType === 'link' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-50'}`}>Link</button>
                             </div>
                         </div>
                         {jobDescType === 'link' ? (
-                            <input type="url" value={jobDesc} onChange={e => setJobDesc(e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-xs text-emerald-100 outline-none focus:border-emerald-500" placeholder="https://lever.co/job/123..."/>
+                            <input type="url" value={jobDesc} onChange={e => setJobDesc(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-xs text-emerald-100 outline-none focus:border-emerald-500" placeholder="https://lever.co/job/123..."/>
                         ) : (
-                            <textarea value={jobDesc} onChange={e => setJobDesc(e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-2xl p-4 text-xs text-emerald-100 outline-none focus:border-emerald-500 resize-none h-48" placeholder="Paste job description..."/>
+                            <textarea value={jobDesc} onChange={e => setJobDesc(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-xs text-emerald-100 outline-none focus:border-emerald-500 resize-none h-48" placeholder="Paste job description..."/>
                         )}
                         <div className="mt-4">
                             <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2 mb-3"><Timer size={16}/> Session Chronometry</h3>
@@ -847,9 +853,51 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                     <CodeStudio onBack={() => {}} currentUser={currentUser} userProfile={userProfile} onSessionStart={() => {}} onSessionStop={() => {}} onStartLiveSession={onStartLiveSession as any} initialFiles={initialStudioFiles} externalChatContent={transcript.map(t => ({ role: t.role, text: t.text }))} onSendExternalMessage={handleSendTextMessage} isInterviewerMode={true} isAiThinking={isAiThinking} onFileChange={handleEditorFileChange} onSyncCodeWithAi={handleSyncWithAi}/>
                 </div>
             </div>
+            
+            {/* Camera Preview Area with Background Filters */}
             <div className={`absolute bottom-20 right-4 w-64 aspect-video rounded-3xl overflow-hidden border-4 ${isAiConnected ? 'border-indigo-500/50' : 'border-red-500/50 animate-pulse'} shadow-2xl z-[100] bg-black group transition-all`}>
-                <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover"/>
-                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-3"><button onClick={() => setShowCodePasteOverlay(true)} className="p-1.5 bg-indigo-600 rounded-lg text-white"><Code size={14}/></button></div>
+                <video 
+                    id="mock-camera-preview"
+                    ref={localVideoRef} 
+                    autoPlay 
+                    muted 
+                    playsInline 
+                    className="w-full h-full object-cover transition-all"
+                    style={{ filter: getFilterStyle(activeVideoFilter) }}
+                />
+                
+                {/* Neural Lenses Overlay */}
+                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-3">
+                    <div className="flex justify-between items-start">
+                        <button onClick={() => setShowCodePasteOverlay(true)} className="p-1.5 bg-indigo-600 rounded-lg text-white shadow-lg"><Code size={14}/></button>
+                        <div className="relative">
+                            <button 
+                                onClick={() => setShowFilterMenu(!showFilterMenu)}
+                                className={`p-1.5 rounded-lg text-white shadow-lg transition-all ${activeVideoFilter !== 'none' ? 'bg-pink-600' : 'bg-slate-800'}`}
+                            >
+                                <Palette size={14}/>
+                            </button>
+                            
+                            {showFilterMenu && (
+                                <div className="absolute top-full right-0 mt-2 w-40 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden z-50">
+                                    {(['none', 'blur', 'studio-noir', 'executive'] as VideoFilter[]).map(f => (
+                                        <button 
+                                            key={f}
+                                            onClick={() => { setActiveVideoFilter(f); setShowFilterMenu(false); }}
+                                            className={`w-full text-left px-3 py-2 text-[10px] font-black uppercase transition-all ${activeVideoFilter === f ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}
+                                        >
+                                            {f === 'none' ? 'Natural feed' : f.replace('-', ' ')}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
+                        <span className="text-[10px] font-black uppercase text-white tracking-widest shadow-black drop-shadow-md">Neural Lens: {activeVideoFilter}</span>
+                    </div>
+                </div>
             </div>
           </div>
         )}
