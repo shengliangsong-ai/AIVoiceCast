@@ -243,9 +243,10 @@ export interface CloudItem {
   url?: string;
 }
 
-export type ToolType = 'pen' | 'eraser' | 'rect' | 'circle' | 'line' | 'arrow' | 'triangle' | 'star' | 'type' | 'move';
+export type ToolType = 'pen' | 'eraser' | 'rect' | 'circle' | 'line' | 'arrow' | 'triangle' | 'star' | 'type' | 'move' | 'hand';
 export type LineStyle = 'solid' | 'dashed' | 'dotted' | 'dash-dot' | 'long-dash';
 export type BrushType = 'standard' | 'pencil' | 'marker' | 'airbrush' | 'calligraphy-pen' | 'writing-brush';
+export type CapStyle = 'none' | 'arrow' | 'circle';
 
 export interface WhiteboardElement {
   id: string;
@@ -263,8 +264,10 @@ export interface WhiteboardElement {
   endY?: number;
   borderRadius?: number;
   rotation?: number;
-  startArrow?: boolean;
-  endArrow?: boolean;
+  startArrow?: boolean; // Legacy
+  endArrow?: boolean;   // Legacy
+  startCap?: CapStyle;
+  endCap?: CapStyle;
   text?: string;
   fontSize?: number;
 }
