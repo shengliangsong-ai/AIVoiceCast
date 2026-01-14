@@ -1,9 +1,10 @@
 
 import React, { useState, useEffect, useMemo, ErrorInfo, ReactNode, Component } from 'react';
+// Fixed redundant imports of Video/VideoIcon and duplicate Maximize2/Minimize2
 import { 
   Podcast, Search, LayoutGrid, RefreshCw, 
-  Home, Video as VideoIcon, User, ArrowLeft, Play, Gift, 
-  Calendar, Briefcase, Users, Disc, FileText, Code, Wand2, PenTool, Rss, Loader2, MessageSquare, AppWindow, Square, Menu, X, Shield, Plus, Rocket, Book, AlertTriangle, Terminal, Trash2, LogOut, Truck, Maximize2, Minimize2, Wallet, Sparkles, Coins, Cloud, Video, ChevronDown, Command, Activity
+  Home, Video, User, ArrowLeft, Play, Gift, 
+  Calendar, Briefcase, Users, Disc, FileText, Code, Wand2, PenTool, Rss, Loader2, MessageSquare, AppWindow, Square, Menu, X, Shield, Plus, Rocket, Book, AlertTriangle, Terminal, Trash2, LogOut, Truck, Maximize2, Minimize2, Wallet, Sparkles, Coins, Cloud, ChevronDown, Command, Activity
 } from 'lucide-react';
 
 import { Channel, UserProfile, ViewState, TranscriptItem, CodeFile } from './types';
@@ -55,7 +56,7 @@ import { ensureCodeStudioFolder, loadAppStateFromDrive, saveAppStateToDrive } fr
 import { getUserChannels, saveUserChannel } from './utils/db';
 import { HANDCRAFTED_CHANNELS } from './utils/initialData';
 import { stopAllPlatformAudio } from './utils/audioUtils';
-// Fix: Added publishChannelToFirestore to imports
+// Fixed: Consolidated publishChannelToFirestore into a single import
 import { subscribeToPublicChannels, voteChannel, addCommentToChannel, deleteCommentFromChannel, updateCommentInChannel, getUserProfile, claimCoinCheck, syncUserProfile, publishChannelToFirestore } from './services/firestoreService';
 
 interface ErrorBoundaryProps {
@@ -277,9 +278,8 @@ const App: React.FC = () => {
     window.history.replaceState({}, '', url.toString());
   };
 
-  // Fix: Corrected parameter order to match sub-components (CalendarView, MentorBooking, etc)
+  // Consistently handled start live session
   const handleStartLiveSession = (channel: Channel, context?: string, recordingEnabled?: boolean, bookingId?: string, videoEnabled?: boolean, cameraEnabled?: boolean, activeSegment?: { index: number, lectureId: string }, initialTranscript?: TranscriptItem[], existingDiscussionId?: string) => {
-    // Store current viewState as returnTo context
     setLiveSessionParams({ channel, context, recordingEnabled, videoEnabled, cameraEnabled, bookingId, activeSegment, initialTranscript, existingDiscussionId, returnTo: viewState });
     handleSetViewState('live_session');
   };
@@ -382,7 +382,6 @@ const App: React.FC = () => {
   const handleUpdateChannel = async (updated: Channel) => {
       await saveUserChannel(updated);
       setUserChannels(prev => prev.map(c => c.id === updated.id ? updated : c));
-      // If it's a public channel, publish it
       if (updated.visibility === 'public') {
           await publishChannelToFirestore(updated);
       }
