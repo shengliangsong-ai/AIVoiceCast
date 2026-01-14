@@ -4,8 +4,9 @@ import { CodeProject, CodeFile, UserProfile, Channel, CursorPosition, CloudItem 
 import { ArrowLeft, Save, Plus, Github, Cloud, HardDrive, Code, X, ChevronRight, ChevronDown, File, Folder, DownloadCloud, Loader2, CheckCircle, AlertTriangle, Info, FolderPlus, FileCode, RefreshCw, LogIn, CloudUpload, Trash2, ArrowUp, Edit2, FolderOpen, MoreVertical, Send, MessageSquare, Bot, Mic, MicOff, Sparkles, SidebarClose, SidebarOpen, Users, Eye, FileText as FileTextIcon, Image as ImageIcon, StopCircle, Minus, Maximize2, Minimize2, Lock, Unlock, Share2, Terminal as TerminalIcon, Copy, WifiOff, PanelRightClose, PanelRightOpen, PanelLeftClose, PanelLeftOpen, Monitor, Laptop, PenTool, Edit3, ShieldAlert, ZoomIn, ZoomOut, Columns, Rows, Grid2X2, Square as SquareIcon, GripVertical, GripHorizontal, FileSearch, Indent, Wand2, Check, Link, MousePointer2, Activity, Key, Search, FilePlus, FileUp, Play, Trash, ExternalLink, GraduationCap, ShieldCheck, Youtube, Video, Zap } from 'lucide-react';
 import { listCloudDirectory, saveProjectToCloud, deleteCloudItem, createCloudFolder, subscribeToCodeProject, saveCodeProject, updateCodeFile, updateCursor, claimCodeProjectLock, updateProjectActiveFile, deleteCodeFile, updateProjectAccess, sendShareNotification, deleteCloudFolderRecursive } from '../services/firestoreService';
 import { ensureCodeStudioFolder, listDriveFiles, readDriveFile, saveToDrive, deleteDriveFile, createDriveFolder, DriveFile, moveDriveFile, shareFileWithEmail, getDriveFileSharingLink, downloadDriveFileAsBlob, getDriveFileStreamUrl } from '../services/googleDriveService';
-import { connectGoogleDrive, getDriveToken, signInWithGitHub } from '../services/authService';
-import { fetchRepoInfo, fetchRepoContents, fetchFileContent, updateRepoFile, fetchUserRepos, fetchRepoSubTree } from '../services/githubService';
+// Added signInWithGitHub to fixes missing import error on line 795
+import { connectGoogleDrive, getDriveToken, signInWithGoogle, signInWithGitHub } from '../services/authService';
+import { fetchRepoInfo, fetchRepoContents, fetchFileContent, updateRepoFile, fetchUserRepos, fetchRepoSubTree, deleteRepoFile } from '../services/githubService';
 import { MarkdownView } from './MarkdownView';
 import { Whiteboard } from './Whiteboard';
 import { ShareModal } from './ShareModal';
@@ -53,6 +54,7 @@ function getLanguageFromExt(filename: string): CodeFile['language'] {
     if (ext === 'jsx') return 'javascript (react)';
     if (ext === 'tsx') return 'typescript (react)';
     if (ext === 'js') return 'javascript';
+    if (ext === 'sh') return 'shell';
     if (ext === 'ts') return 'typescript';
     if (ext === 'py') return 'python';
     if (['cpp', 'hpp', 'cc', 'cxx'].includes(ext || '')) return 'c++';
@@ -130,15 +132,26 @@ const FileTreeItem = ({ node, depth, activeId, onSelect, onToggle, onDelete, onS
                 {node.type === 'file' && node.size !== undefined && (
                     <span className="text-[9px] font-mono text-slate-600 group-hover:text-slate-400 mr-2">{formatSize(node.size)}</span>
                 )}
-                {node.type === 'file' && (
-                    <button 
-                        onClick={(e) => { e.stopPropagation(); onShare(node); }}
-                        className="p-1 opacity-0 group-hover:opacity-100 hover:bg-slate-700 rounded text-slate-400 hover:text-indigo-400 transition-all"
-                        title="Share File"
-                    >
-                        <Share2 size={12}/>
-                    </button>
-                )}
+                <div className="flex items-center gap-1">
+                    {node.type === 'file' && onShare && (
+                        <button 
+                            onClick={(e) => { e.stopPropagation(); onShare(node); }}
+                            className="p-1 opacity-0 group-hover:opacity-100 hover:bg-slate-700 rounded text-slate-400 hover:text-indigo-400 transition-all"
+                            title="Share File"
+                        >
+                            <Share2 size={12}/>
+                        </button>
+                    )}
+                    {onDelete && (
+                        <button 
+                            onClick={(e) => { e.stopPropagation(); onDelete(node); }}
+                            className="p-1 opacity-0 group-hover:opacity-100 hover:bg-slate-700 rounded text-slate-400 hover:text-red-400 transition-all"
+                            title="Delete"
+                        >
+                            <Trash2 size={12}/>
+                        </button>
+                    )}
+                </div>
             </div>
             {isExpanded && node.children && (
                 <div>
@@ -455,7 +468,7 @@ const Slot: React.FC<SlotProps> = ({
                           <FileIcon filename={file.name} />
                           <span className={`text-xs font-bold truncate ${isFocused ? 'text-indigo-200' : 'text-slate-400'}`}>{file.name}</span>
                           {isStreamUrl && (
-                              <div className="hidden sm:flex items-center gap-1 text-[8px] font-black bg-indigo-900/40 text-indigo-400 border border-indigo-500/30 px-1.5 py-0.5 rounded-full uppercase tracking-widest">
+                              <div className="hidden sm:flex items-center gap-1 text-[8px] font-black bg-indigo-900/40 text-indigo-400 border border-indigo-500/30 px-1.5 py-0.5 rounded-full uppercase tracking-widest pointer-events-none">
                                   <Zap size={8} fill="currentColor"/> Neural Stream
                               </div>
                           )}
@@ -489,9 +502,9 @@ const Slot: React.FC<SlotProps> = ({
                                   <iframe src={file.path} className="w-full h-full border-none bg-white" title="PDF Viewer" />
                               ) : lang === 'video' ? (
                                   <div className="w-full h-full bg-black flex items-center justify-center relative">
-                                      <video src={file.path} controls autoPlay className="max-w-full max-h-full" />
+                                      <video src={file.path} controls autoPlay className="max-w-full max-h-full" onClick={(e) => e.stopPropagation()} />
                                       {isStreamUrl && (
-                                          <div className="absolute top-4 left-4 z-20 px-3 py-1 bg-black/60 backdrop-blur-md rounded-full border border-white/10 text-[9px] font-bold text-white uppercase tracking-widest flex items-center gap-2">
+                                          <div className="absolute top-4 left-4 z-20 px-3 py-1 bg-black/60 backdrop-blur-md rounded-full border border-white/10 text-[9px] font-bold text-white uppercase tracking-widest flex items-center gap-2 pointer-events-none">
                                               <Activity size={10} className="text-emerald-400 animate-pulse"/> Seeking Active
                                           </div>
                                       )}
@@ -1068,6 +1081,43 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       } else { toggleFolder(node); }
   };
 
+  const handleDeleteExplorerItem = async (node: TreeNode) => {
+    if (node.type === 'folder') {
+        if (!confirm(`Are you sure you want to delete folder "${node.name}" and all its contents?`)) return;
+        setIsExplorerLoading(true);
+        try {
+            if (activeTab === 'drive' && driveToken) await deleteDriveFile(driveToken, node.id);
+            else if (activeTab === 'cloud') await deleteCloudFolderRecursive(node.id);
+            refreshExplorer();
+        } catch(e: any) { alert(e.message); }
+        finally { setIsExplorerLoading(false); }
+        return;
+    }
+
+    if (!confirm(`Permanently delete file "${node.name}"?`)) return;
+    setIsExplorerLoading(true);
+    try {
+        if (activeTab === 'drive' && driveToken) {
+            await deleteDriveFile(driveToken, node.id);
+        } else if (activeTab === 'github' && githubToken && project.github) {
+            const { owner, repo, branch } = project.github;
+            await deleteRepoFile(githubToken, owner, repo, node.id, node.data.sha, `Delete ${node.name}`, branch);
+        } else if (activeTab === 'cloud') {
+            await deleteCloudItem(node.id);
+        } else if (activeTab === 'session' && isLive) {
+            await deleteCodeFile(project.id, node.id);
+        }
+        
+        // Remove from active slots if present
+        setActiveSlots(prev => prev.map(s => s?.path === node.id ? null : s));
+        refreshExplorer();
+    } catch(e: any) {
+        alert("Delete failed: " + e.message);
+    } finally {
+        setIsExplorerLoading(false);
+    }
+  };
+
   const updateSlotFile = async (file: CodeFile | null, slotIndex: number) => {
       if (file) {
           updateSlotsLRU(file);
@@ -1270,13 +1320,13 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                           <div className="px-3 py-1 mb-2">
                               <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Interview Artifacts</span>
                           </div>
-                          {sessionTree.map(node => <FileTreeItem key={node.id} node={node} depth={0} activeId={activeFile?.path} onSelect={handleExplorerSelect} onToggle={toggleFolder} onShare={()=>{}} expandedIds={expandedIds} loadingIds={loadingIds}/>)}
+                          {sessionTree.map(node => <FileTreeItem key={node.id} node={node} depth={0} activeId={activeFile?.path} onSelect={handleExplorerSelect} onToggle={toggleFolder} onDelete={handleDeleteExplorerItem} onShare={null} expandedIds={expandedIds} loadingIds={loadingIds}/>)}
                       </div>
                   )}
 
-                  {activeTab === 'drive' && (driveToken ? <div className="flex-1 overflow-y-auto scrollbar-hide py-2">{driveTree.map(node => <FileTreeItem key={node.id} node={node} depth={0} activeId={activeFile?.path?.replace('drive://','')} onSelect={handleExplorerSelect} onToggle={toggleFolder} onShare={()=>{}} expandedIds={expandedIds} loadingIds={loadingIds}/>)}</div> : <div className="p-12 text-center flex flex-col items-center justify-center h-full gap-4"><button onClick={handleConnectDrive} className="px-6 py-2 bg-indigo-600 text-white text-xs font-bold rounded-xl shadow-lg">Connect G-Drive</button></div>)}
+                  {activeTab === 'drive' && (driveToken ? <div className="flex-1 overflow-y-auto scrollbar-hide py-2">{driveTree.map(node => <FileTreeItem key={node.id} node={node} depth={0} activeId={activeFile?.path?.replace('drive://','')} onSelect={handleExplorerSelect} onToggle={toggleFolder} onDelete={handleDeleteExplorerItem} onShare={()=>{}} expandedIds={expandedIds} loadingIds={loadingIds}/>)}</div> : <div className="p-12 text-center flex flex-col items-center justify-center h-full gap-4"><button onClick={handleConnectDrive} className="px-6 py-2 bg-indigo-600 text-white text-xs font-bold rounded-xl shadow-lg">Connect G-Drive</button></div>)}
                   
-                  {activeTab === 'cloud' && (currentUser ? <div className="flex-1 overflow-y-auto scrollbar-hide py-2">{cloudTree.map(node => <FileTreeItem key={node.id} node={node} depth={0} onSelect={handleExplorerSelect} onToggle={toggleFolder} onShare={()=>{}} expandedIds={expandedIds} loadingIds={loadingIds}/>)}</div> : <div className="p-12 text-center flex flex-col items-center justify-center h-full gap-4"><p className="text-xs text-slate-400">Sign in for Private Cloud.</p></div>)}
+                  {activeTab === 'cloud' && (currentUser ? <div className="flex-1 overflow-y-auto scrollbar-hide py-2">{cloudTree.map(node => <FileTreeItem key={node.id} node={node} depth={0} onSelect={handleExplorerSelect} onToggle={toggleFolder} onDelete={handleDeleteExplorerItem} onShare={()=>{}} expandedIds={expandedIds} loadingIds={loadingIds}/>)}</div> : <div className="p-12 text-center flex flex-col items-center justify-center h-full gap-4"><p className="text-xs text-slate-400">Sign in for Private Cloud.</p></div>)}
 
                   {activeTab === 'github' && (
                       <div className="flex-1 flex flex-col overflow-hidden">
@@ -1287,7 +1337,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                           ) : githubTree.length > 0 ? (
                               <div className="flex-1 flex flex-col overflow-hidden">
                                   <div className="p-3 bg-slate-950 border-b border-slate-800 flex items-center justify-between"><div className="flex items-center gap-2 overflow-hidden"><Github size={12} className="text-slate-500"/><span className="text-[10px] font-bold text-indigo-300 truncate uppercase tracking-widest">{project.github?.owner}/{project.github?.repo}</span></div><div className="flex items-center gap-2"><button onClick={() => { localStorage.removeItem('github_token'); setGithubToken(null); setGithubTree([]); }} className="text-slate-500 hover:text-red-400" title="Disconnect GitHub"><LogIn size={12} className="rotate-180"/></button><button onClick={() => setGithubTree([])} className="text-slate-500 hover:text-white" title="Change Repository"><RefreshCw size={12}/></button></div></div>
-                                  <div className="flex-1 overflow-y-auto scrollbar-hide py-2">{githubTree.map(node => <FileTreeItem key={node.id} node={node} depth={0} activeId={activeFile?.path} onSelect={handleExplorerSelect} onToggle={toggleFolder} onShare={()=>{}} expandedIds={expandedIds} loadingIds={loadingIds}/>)}</div>
+                                  <div className="flex-1 overflow-y-auto scrollbar-hide py-2">{githubTree.map(node => <FileTreeItem key={node.id} node={node} depth={0} activeId={activeFile?.path} onSelect={handleExplorerSelect} onToggle={toggleFolder} onDelete={handleDeleteExplorerItem} onShare={()=>{}} expandedIds={expandedIds} loadingIds={loadingIds}/>)}</div>
                               </div>
                           ) : (
                               <div className="flex-1 flex flex-col overflow-hidden">

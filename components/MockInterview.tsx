@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { MockInterviewRecording, TranscriptItem, CodeFile, UserProfile, Channel, CodeProject } from '../types';
 import { auth } from '../services/firebaseConfig';
@@ -410,7 +411,8 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
 
         setSynthesisStep('Synthesizing Feedback...');
         setSynthesisPercent(60);
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+        // Cleaned up init based on guidelines
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         const prompt = `Analyze this technical interview evaluation. 
         Mode: ${mode}. Candidate: ${intervieweeLinkedin}. Interviewer: ${interviewerLinkedin}. Job: ${jobDesc}.
         History: ${historyText}. Workspace: ${codeText}. 
