@@ -130,7 +130,7 @@ const FileTreeItem = ({ node, depth, activeId, onSelect, onToggle, onDelete, onS
                             node={child} 
                             depth={depth + 1} 
                             activeId={activeId} 
-                            onSelect={onSelect} 
+                            onSelect={child.type === 'folder' ? undefined : () => onSelect(child)} 
                             onToggle={onToggle}
                             onDelete={onDelete}
                             onShare={onShare}
@@ -520,22 +520,20 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
             lastSessionIdRef.current = sid;
         }
 
-        // Detect if there is a BRAND NEW file (not just an update)
-        const currentPaths = new Set(initialFiles.map(f => f.path));
-        let newFileToOpen: CodeFile | null = null;
+        // NEURAL SYNC FIX: Explicitly check for files not in the current active slots
+        const activePaths = new Set(activeSlots.filter(s => s !== null).map(s => s!.path));
+        let highestPriorityFile: CodeFile | null = null;
         
+        // 1. Detect BRAND NEW files (created by AI tool)
         for (const file of initialFiles) {
             if (!lastFilePathsRef.current.has(file.path)) {
-                newFileToOpen = file;
+                highestPriorityFile = file;
                 break;
             }
         }
-        lastFilePathsRef.current = currentPaths;
-
-        if (newFileToOpen) {
-            updateSlotsLRU(newFileToOpen);
-        } else {
-            // Update contents of existing slots if they changed in the background
+        
+        // 2. If no new file detected, check if we should update content of active slots
+        if (!highestPriorityFile) {
             setActiveSlots(prev => prev.map((s) => {
                 if (!s) return null;
                 const match = initialFiles.find(f => f.path === s.path);
@@ -545,8 +543,13 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                 }
                 return s;
             }));
+        } else {
+            // Found a brand new file (AI problem injected) -> Focus it immediately
+            updateSlotsLRU(highestPriorityFile);
         }
 
+        // Update tracking refs
+        lastFilePathsRef.current = new Set(initialFiles.map(f => f.path));
         initialFiles.forEach(f => {
             if (!internalFileContentRef.current.has(f.path) || internalFileContentRef.current.get(f.path) !== f.content) {
                 internalFileContentRef.current.set(f.path, f.content);
@@ -1175,7 +1178,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
           <ShareModal 
             isOpen={true} 
             onClose={() => setShowShareModal(false)} 
-            onShare={handleUpdateAccess}
+            onShare={handleUpdateAccess} 
             link={shareUrl} 
             title={project.name}
             currentAccess={project.accessLevel}

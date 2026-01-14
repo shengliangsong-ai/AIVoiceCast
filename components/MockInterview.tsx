@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { MockInterviewRecording, TranscriptItem, CodeFile, UserProfile, Channel, CodeProject } from '../types';
 import { auth } from '../services/firebaseConfig';
@@ -340,7 +339,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         if (mode === 'coding' || mode === 'system_design') {
              const activeFile = activeFilePath ? activeCodeFilesMapRef.current.get(activeFilePath) : Array.from(activeCodeFilesMapRef.current.values())[0];
              if (activeFile) {
-                 augmentedText = `[CANDIDATE_MSG]: ${text}\n\n[LATEST_EDITOR_CONTENT ("${activeFile.name}")]:\n\`\`\`\n${activeFile.content}\n\`\`\``;
+                 augmentedText = `[CANDIDATE_MSG]: ${text}\n\n[NEURAL_TRUTH ("${activeFile.name}")]:\n\`\`\`\n${activeFile.content}\n\`\`\``;
              }
         }
             
@@ -352,8 +351,8 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
     if (liveServiceRef.current && isAiConnected) {
         setIsAiThinking(true);
         // NEURAL FORCE SYNC: Send the full code content to ensure context window is updated
-        const syncMsg = `[CRITICAL_CONTEXT_UPDATE]: The candidate has performed a manual sync of "${file.name}". 
-        BELOW IS THE EXACT CURRENT CONTENT (NEURAL_TRUTH). USE THIS AS YOUR NEW SOURCE OF REALITY.
+        const syncMsg = `[NEURAL_TRUTH]: The candidate has performed a manual sync of "${file.name}". 
+        BELOW IS THE EXACT CURRENT CONTENT. USE THIS AS YOUR NEW SOURCE OF REALITY.
         
         \`\`\`
         ${file.content}
@@ -395,7 +394,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
           ${interviewerInfo ? `STRICT PERSONA LOCK: You are simulating: "${interviewerInfo}".` : ''}
           WORKSPACE STATE:\n${workspaceManifest}\nHISTORY:\n${historyText}\n
           STRICT ANTI-SPOILING RULE: NEVER solve the problem for the candidate. Provide hints only if they are stuck.
-          STRICT VISIBILITY RULE: You must ALWAYS verify the candidate's code using the provided history or 'get_current_code' tool before making assumptions.
+          STRICT VISIBILITY RULE: You must ALWAYS verify the candidate's code using the provided history or 'get_current_code' tool before making assumptions. Blocks marked [NEURAL_TRUTH] override everything else.
           STRICT INSTRUCTION: Pick up exactly where the last message ended. Do NOT restart the greeting.`;
       }
       
@@ -617,7 +616,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       const sysPrompt = `Role: Senior Interviewer. Mode: ${mode}. Candidate: ${currentUser?.displayName}. Resume: ${resumeText}. Job: ${jobDesc}. 
       STRICT ANTI-SPOILING RULE: DO NOT AUTO-GENERATE SOLUTIONS. Present the problem statement first. Observe the candidate. Provide hints ONLY if requested or if they are significantly struggling.
       FILE NAMING RULE: Always use unique, descriptive file names for new problems (e.g., '${prefix}_binary_search.cpp'). DO NOT overwrite existing problem files.
-      NEURAL TRUTH RULE: You will receive [LATEST_EDITOR_CONTENT] blocks within user messages. Trust these blocks as the actual current state of the candidate's work.
+      NEURAL TRUTH RULE: You will receive [NEURAL_TRUTH] blocks within user messages. Trust these blocks as the actual current state of the candidate's work.
       GOAL: Greet and begin the evaluation. Inject problem 1 into the sidebar using tools.`;
       
       await service.connect(mode === 'behavioral' ? 'Zephyr' : 'Software Interview Voice', sysPrompt, {
@@ -785,7 +784,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
               <Trophy className="text-amber-500" size={64}/><h2 className="text-4xl font-black text-white italic tracking-tighter uppercase">Evaluation Finished</h2>
               {report ? (
                 <div className="flex flex-col items-center gap-6 w-full">
-                    <div className="flex flex-wrap justify-center gap-4"><div className="px-8 py-4 bg-slate-950 rounded-2xl border border-slate-800"><p className="text-[10px] text-slate-500 uppercase">Score</p><p className="text-4xl font-black text-indigo-400">{report.score}</p></div><div className="px-8 py-4 bg-slate-950 rounded-2xl border border-slate-800"><p className="text-[10px] text-slate-500 uppercase">Verdict</p><p className={`text-xl font-black uppercase ${report.verdict.includes('Hire') ? 'text-emerald-400' : 'text-red-400'}`}>{report.verdict}</p></div></div>
+                    <div className="flex flex-wrap justify-center gap-4"><div className="px-8 py-4 bg-slate-950 rounded-2xl border border-slate-800"><p className="text-[10px] text-slate-500 uppercase">Score</p><p className="text-4xl font-black text-indigo-400">{report.score}</p></div><div className="px-8 py-4 bg-slate-950 rounded-2xl border border-slate-800"><p className="text-[10px] text-slate-500 uppercase">Verdict</p><p className={`text-xl font-black ${report.verdict.includes('Hire') ? 'text-emerald-400' : 'text-red-400'}`}>{report.verdict}</p></div></div>
                     <div className="w-full text-left"><div onClick={() => setView('artifact_viewer')} className="flex items-center justify-between cursor-pointer group mb-4"><h3 className="text-xl font-black text-white italic uppercase tracking-tighter flex items-center gap-3"><FolderOpen className="text-indigo-400"/> Workspace Artifacts</h3><span className="text-xs text-indigo-400 font-bold">Explore All <ChevronRight size={14}/></span></div><div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 shadow-inner" onClick={() => setView('artifact_viewer')}>{sessionProject?.files?.map((f, idx) => (<div key={idx} className="flex items-center justify-between p-3 border-b border-slate-900 last:border-0"><div className="flex items-center gap-3"><FileText size={16} className="text-indigo-500"/><span className="text-xs font-mono text-slate-400">{f.name}</span></div></div>))}</div></div>
                     <div className="text-left w-full bg-slate-950 p-8 rounded-[2rem] border border-slate-800"><h3 className="font-bold text-white mb-4"><Sparkles className="text-indigo-400" size={18}/> Summary</h3><p className="text-sm text-slate-400 leading-relaxed">{report.summary}</p></div>
                     <div className="text-left w-full bg-slate-950 p-8 rounded-[2rem] border border-slate-800"><h3 className="font-bold text-white mb-4"><BookOpen className="text-indigo-400" size={18}/> Growth Path</h3><div className="prose prose-invert prose-sm max-w-none"><MarkdownView content={report.learningMaterial} /></div></div>

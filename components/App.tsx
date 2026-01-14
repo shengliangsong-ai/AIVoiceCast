@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, ErrorInfo, ReactNode, Component } from 'react';
 import { 
   Podcast, Search, LayoutGrid, RefreshCw, 
@@ -48,14 +47,12 @@ import { GraphStudio } from './GraphStudio';
 
 import { getCurrentUser, getDriveToken } from '../services/authService';
 import { auth, db } from '../services/firebaseConfig';
-// FIXED: Using @firebase/ scoped packages for more reliable resolution of modular exports
 import { onAuthStateChanged } from '@firebase/auth';
 import { onSnapshot, doc } from '@firebase/firestore';
 import { ensureCodeStudioFolder, loadAppStateFromDrive, saveAppStateToDrive } from '../services/googleDriveService';
 import { getUserChannels, saveUserChannel } from '../utils/db';
 import { HANDCRAFTED_CHANNELS } from '../utils/initialData';
 import { stopAllPlatformAudio } from '../utils/audioUtils';
-// Fix: Added publishChannelToFirestore to imports
 import { subscribeToPublicChannels, voteChannel, addCommentToChannel, deleteCommentFromChannel, updateCommentInChannel, getUserProfile, claimCoinCheck, syncUserProfile, publishChannelToFirestore } from '../services/firestoreService';
 
 interface ErrorBoundaryProps {
@@ -92,7 +89,7 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
               <AlertTriangle className="text-red-500" size={32} />
             </div>
             <h1 className="text-2xl font-bold text-white mb-2">Application Crash Detected</h1>
-            <p className="text-slate-400 mb-6">A runtime error occurred in the UI component tree. This is often caused by missing data or a browser incompatibility.</p>
+            <p className="text-slate-400 mb-6">A runtime error occurred in the UI component tree.</p>
             <div className="bg-black/50 rounded-xl p-4 mb-8 font-mono text-xs text-red-300 overflow-x-auto border border-slate-800">
               {this.state.error?.toString()}
             </div>
@@ -277,9 +274,7 @@ const App: React.FC = () => {
     window.history.replaceState({}, '', url.toString());
   };
 
-  // Fix: Corrected parameter order to match sub-components (CalendarView, MentorBooking, etc)
   const handleStartLiveSession = (channel: Channel, context?: string, recordingEnabled?: boolean, bookingId?: string, videoEnabled?: boolean, cameraEnabled?: boolean, activeSegment?: { index: number, lectureId: string }, initialTranscript?: TranscriptItem[], existingDiscussionId?: string) => {
-    // Store current viewState as returnTo context
     setLiveSessionParams({ channel, context, recordingEnabled, videoEnabled, cameraEnabled, bookingId, activeSegment, initialTranscript, existingDiscussionId, returnTo: viewState });
     handleSetViewState('live_session');
   };
@@ -295,7 +290,10 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const activeAuth = auth;
-    if (!activeAuth) return;
+    if (!activeAuth) {
+        setAuthLoading(false);
+        return;
+    }
 
     const unsubscribe = onAuthStateChanged(activeAuth, async (user) => {
         if (user) {
@@ -382,7 +380,6 @@ const App: React.FC = () => {
   const handleUpdateChannel = async (updated: Channel) => {
       await saveUserChannel(updated);
       setUserChannels(prev => prev.map(c => c.id === updated.id ? updated : c));
-      // If it's a public channel, publish it
       if (updated.visibility === 'public') {
           await publishChannelToFirestore(updated);
       }
@@ -416,7 +413,7 @@ const App: React.FC = () => {
       );
   }
 
-  const isPublicView = ['mission', 'careers', 'user_guide', 'card_workshop', 'icon_viewer', 'shipping_viewer', 'check_viewer'].includes(viewState as string);
+  const isPublicView = ['mission', 'careers', 'user_guide', 'card_workshop', 'card_viewer', 'icon_viewer', 'shipping_viewer', 'check_viewer'].includes(viewState as string);
 
   if (!currentUser && !isPublicView) {
       return <LoginPage onMissionClick={() => handleSetViewState('mission')} onPrivacyClick={() => setIsPrivacyOpen(true)} />;
@@ -462,7 +459,7 @@ const App: React.FC = () => {
                         ))}
                       </div>
                       <div className="p-3 bg-slate-950 border-t border-slate-800 flex justify-center">
-                        <p className="text-[8px] font-black text-slate-600 uppercase tracking-[0.2em]">Neural Prism v4.5.0</p>
+                        <p className="text-[8px] font-black text-slate-600 uppercase tracking-[0.2em]">Neural Prism v4.5.1</p>
                       </div>
                     </div>
                   </>
