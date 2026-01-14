@@ -81,6 +81,9 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({
   const [dragStartPos, setDragStartPos] = useState({ x: 0, y: 0 });
   const [activeResizeHandle, setActiveResizeHandle] = useState<ResizeHandle>(null);
 
+  // Stabilizing state for VFS sync to prevent "blinking" loop
+  const lastKnownContentRef = useRef<string>('');
+
   // Curve Drawing State
   const [partialPoints, setPartialPoints] = useState<{x: number, y: number}[]>([]);
   const [mousePos, setMousePos] = useState<{x: number, y: number}>({x:0, y:0});
@@ -135,10 +138,13 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({
 
   // Load from props or cloud
   useEffect(() => {
-    if (initialContent) {
+    if (initialContent && initialContent !== lastKnownContentRef.current) {
         try {
             const parsed = JSON.parse(initialContent);
-            if (Array.isArray(parsed)) setElements(parsed);
+            if (Array.isArray(parsed)) {
+                setElements(parsed);
+                lastKnownContentRef.current = initialContent;
+            }
         } catch (e) {
             console.warn("Could not parse initial whiteboard content");
         }
@@ -162,11 +168,13 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({
   useEffect(() => {
       if (onChange && elements.length > 0) {
           const content = JSON.stringify(elements);
-          if (content !== initialContent) {
+          // Only push updates if something actually changed to prevent feedback loop/blinking
+          if (content !== lastKnownContentRef.current) {
+              lastKnownContentRef.current = content;
               onChange(content);
           }
       }
-  }, [elements, onChange, initialContent]);
+  }, [elements, onChange]);
 
   useEffect(() => {
       if (!sessionId || sessionId.startsWith('local-')) {
@@ -175,7 +183,11 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({
       }
       setIsLoading(true);
       const unsubscribe = subscribeToWhiteboard(sessionId, (remoteElements) => {
-          setElements(remoteElements);
+          const content = JSON.stringify(remoteElements);
+          if (content !== lastKnownContentRef.current) {
+              setElements(remoteElements);
+              lastKnownContentRef.current = content;
+          }
           setIsLoading(false);
           setIsLive(true);
       });
@@ -191,7 +203,10 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({
           const token = getDriveToken() || await connectGoogleDrive();
           const content = await readDriveFile(token, fileId);
           const parsed = JSON.parse(content);
-          if (Array.isArray(parsed)) setElements(parsed);
+          if (Array.isArray(parsed)) {
+              setElements(parsed);
+              lastKnownContentRef.current = content;
+          }
       } catch (e: any) {
           console.error("Drive load failed", e);
       } finally {
@@ -802,7 +817,7 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({
 
             <div className="flex items-center gap-2">
                 <button onClick={() => setScale(prev => Math.min(prev * 1.2, 5))} className={`p-1.5 rounded ${isDarkBackground ? 'hover:bg-slate-800 text-slate-400' : 'hover:bg-slate-200 text-slate-600'} mr-1`} title="Zoom In"><ZoomIn size={16}/></button>
-                <button onClick={() => setScale(prev => Math.max(prev / 1.2, 0.2))} className={`p-1.5 rounded ${isDarkBackground ? 'hover:bg-slate-800 text-slate-400' : 'hover:bg-slate-200 text-slate-600'}`} title="Zoom Out"><ZoomOut size={16}/></button>
+                <button onClick={() => setScale(prev => Math.max(prev / 1.2, 0.2))} className={`p-1.5 rounded ${isDarkBackground ? 'hover:bg-slate-800 text-slate-400' : 'hover:bg-slate-200 text-slate-600'} mr-1`} title="Zoom Out"><ZoomOut size={16}/></button>
                 <button onClick={handleResetView} className={`p-1.5 rounded ${isDarkBackground ? 'text-slate-400 hover:text-white' : 'text-slate-600 hover:text-black'}`} title="Reset View"><RefreshCcw size={16}/></button>
                 <div className={`w-px h-6 ${isDarkBackground ? 'bg-slate-800' : 'bg-slate-200'} mx-1`}></div>
                 <button onClick={() => setElements(prev => prev.slice(0, -1))} className={`p-1.5 rounded transition-colors ${isDarkBackground ? 'hover:bg-slate-800 text-slate-400' : 'hover:bg-slate-200 text-slate-600'}`} title="Undo"><Undo size={16} /></button>

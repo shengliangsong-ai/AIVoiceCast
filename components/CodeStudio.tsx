@@ -948,6 +948,28 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       });
   }, [isLive, project.id, activeFile?.path, clientId, currentUser, myColor]);
 
+  const refreshExplorer = async () => {
+      setIsExplorerLoading(true);
+      try {
+          if (activeTab === 'drive' && driveToken) {
+              const rootId = driveRootId || await ensureCodeStudioFolder(driveToken);
+              setDriveRootId(rootId);
+              const files = await listDriveFiles(driveToken, rootId);
+              setDriveItems([{ id: rootId, name: 'CodeStudio', mimeType: 'application/vnd.google-apps.folder', isLoaded: true }, ...files.map(f => ({ ...f, parentId: rootId, isLoaded: false }))]);
+          } else if (activeTab === 'cloud' && currentUser) {
+              const items = await listCloudDirectory(`projects/${currentUser.uid}`);
+              setCloudItems(items);
+          } else if (activeTab === 'github' && githubToken) {
+              if (project.github && githubTree.length === 0) {
+                   await handleAutoLoadDefaultRepo(githubToken, `${project.github.owner}/${project.github.repo}`);
+              } else {
+                  const repos = await fetchUserRepos(githubToken);
+                  setGithubRepos(repos);
+              }
+          }
+      } finally { setIsExplorerLoading(false); }
+  };
+
   const handleSmartSave = async (targetFileOverride?: CodeFile) => {
     const fileToSave = targetFileOverride || activeFile;
     if (!fileToSave || (!fileToSave.isModified && saveStatus === 'saved')) return;
@@ -967,6 +989,8 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
         }
         if (isLive && lockStatus === 'mine') await updateCodeFile(project.id, fileToSave);
         setSaveStatus('saved');
+        // Auto-refresh sidebar after save completes
+        await refreshExplorer();
     } catch(e: any) { 
         console.error("Save failed", e);
         setSaveStatus('modified'); 
@@ -1007,28 +1031,6 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
 
   const handleUpdateAccess = async (uids: string[], isPublic: boolean, perm: 'read' | 'write') => {
       await updateProjectAccess(project.id, isPublic ? 'public' : 'restricted', uids);
-  };
-
-  const refreshExplorer = async () => {
-      setIsExplorerLoading(true);
-      try {
-          if (activeTab === 'drive' && driveToken) {
-              const rootId = driveRootId || await ensureCodeStudioFolder(driveToken);
-              setDriveRootId(rootId);
-              const files = await listDriveFiles(driveToken, rootId);
-              setDriveItems([{ id: rootId, name: 'CodeStudio', mimeType: 'application/vnd.google-apps.folder', isLoaded: true }, ...files.map(f => ({ ...f, parentId: rootId, isLoaded: false }))]);
-          } else if (activeTab === 'cloud' && currentUser) {
-              const items = await listCloudDirectory(`projects/${currentUser.uid}`);
-              setCloudItems(items);
-          } else if (activeTab === 'github' && githubToken) {
-              if (project.github && githubTree.length === 0) {
-                   await handleAutoLoadDefaultRepo(githubToken, `${project.github.owner}/${project.github.repo}`);
-              } else {
-                  const repos = await fetchUserRepos(githubToken);
-                  setGithubRepos(repos);
-              }
-          }
-      } finally { setIsExplorerLoading(false); }
   };
 
   const handleCreateNewFile = () => {
