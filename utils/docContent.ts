@@ -14,7 +14,7 @@ export const APP_COMPARISON_DOC: CommunityDiscussion = {
   designDoc: `
 # Neural Prism: Architecture of Accessibility
 
-**Revision:** 4.4.0 | **Author:** Lead Architect | **Date:** Dec 22, 2025
+**Revision:** 4.5.0 | **Author:** Lead Architect | **Date:** Dec 22, 2025
 
 ## 1. Philosophical Refraction
 The Neural Prism Platform moves beyond the "Knowledge OS" model. Our core architecture acts as a **refractive lens** for AI Super-Intelligence. 
@@ -54,8 +54,9 @@ Intelligence is Refracted, not Retained.
 - **Personal Storage:** All created assets (PDFs, Code, Records) are funneled directly into the user's private Google Drive.
 
 ## 6. Stability Protocols
-v4.4.0 maintains the "Resilient Dream Machine" standard:
+v4.5.0 maintains the "Resilient Dream Machine" standard:
 - **Preemptive Rotation:** Continuous AI availability for long-running human activities.
+- **Neural Snapshot Sync:** Mandatory code-in-prompt bundling for zero-latency visibility.
 - **Multi-modal Grounding:** The AI sees the user's physical or digital context in real-time.
 
 ## 7. Vision Statement

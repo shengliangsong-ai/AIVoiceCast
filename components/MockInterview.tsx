@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { MockInterviewRecording, TranscriptItem, CodeFile, UserProfile, Channel, CodeProject } from '../types';
 import { auth } from '../services/firebaseConfig';
@@ -352,7 +353,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         setIsAiThinking(true);
         // NEURAL FORCE SYNC: Send the full code content to ensure context window is updated
         const syncMsg = `[CRITICAL_CONTEXT_UPDATE]: The candidate has performed a manual sync of "${file.name}". 
-        BELOW IS THE EXACT CURRENT CONTENT. USE THIS AS THE SOURCE OF TRUTH.
+        BELOW IS THE EXACT CURRENT CONTENT (NEURAL_TRUTH). USE THIS AS YOUR NEW SOURCE OF REALITY.
         
         \`\`\`
         ${file.content}
@@ -616,7 +617,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       const sysPrompt = `Role: Senior Interviewer. Mode: ${mode}. Candidate: ${currentUser?.displayName}. Resume: ${resumeText}. Job: ${jobDesc}. 
       STRICT ANTI-SPOILING RULE: DO NOT AUTO-GENERATE SOLUTIONS. Present the problem statement first. Observe the candidate. Provide hints ONLY if requested or if they are significantly struggling.
       FILE NAMING RULE: Always use unique, descriptive file names for new problems (e.g., '${prefix}_binary_search.cpp'). DO NOT overwrite existing problem files.
-      VISIBILITY RULE: When the user trigger a sync or sends a message, use the code snapshot provided in the prompt or 'get_current_code' tool to see the actual implementation.
+      NEURAL TRUTH RULE: You will receive [LATEST_EDITOR_CONTENT] blocks within user messages. Trust these blocks as the actual current state of the candidate's work.
       GOAL: Greet and begin the evaluation. Inject problem 1 into the sidebar using tools.`;
       
       await service.connect(mode === 'behavioral' ? 'Zephyr' : 'Software Interview Voice', sysPrompt, {
