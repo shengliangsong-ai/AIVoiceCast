@@ -40,6 +40,7 @@ interface CodeStudioProps {
   isInterviewerMode?: boolean;
   isAiThinking?: boolean;
   onFileChange?: (file: CodeFile) => void;
+  onSyncCodeWithAi?: (file: CodeFile) => void;
 }
 
 function getLanguageFromExt(filename: string): CodeFile['language'] {
@@ -129,7 +130,7 @@ const FileTreeItem = ({ node, depth, activeId, onSelect, onToggle, onDelete, onS
                             node={child} 
                             depth={depth + 1} 
                             activeId={activeId} 
-                            onSelect={node} 
+                            onSelect={onSelect} 
                             onToggle={onToggle}
                             onDelete={onDelete}
                             onShare={onShare}
@@ -324,19 +325,21 @@ interface SlotProps {
     handleFormatCode: (idx: number) => void;
     handleCodeChangeInSlot: (c: string, idx: number) => void;
     updateSlotFile: (f: CodeFile | null, idx: number) => void;
+    onSyncCodeWithAi?: (file: CodeFile) => void;
     fontSize: number;
     indentMode: IndentMode;
     isLive: boolean;
     lockStatus: string;
     broadcastCursor: (line: number, col: number) => void;
     isReadOnly?: boolean;
+    isInterviewerMode?: boolean;
 }
 
 const Slot: React.FC<SlotProps> = ({ 
     idx, activeSlots, focusedSlot, setFocusedSlot, slotViewModes, toggleSlotViewMode,
     isFormattingSlots, terminalOutputs, setTerminalOutputs, isTerminalOpen, setIsTerminalOpen,
     isRunning, layoutMode, innerSplitRatio, handleRunCode, handleFormatCode,
-    handleCodeChangeInSlot, updateSlotFile, fontSize, indentMode, isLive, lockStatus, broadcastCursor, isReadOnly = false
+    handleCodeChangeInSlot, updateSlotFile, onSyncCodeWithAi, fontSize, indentMode, isLive, lockStatus, broadcastCursor, isReadOnly = false, isInterviewerMode = false
 }) => {
     const file = activeSlots[idx];
     const isFocused = focusedSlot === idx;
@@ -369,6 +372,12 @@ const Slot: React.FC<SlotProps> = ({
                           <span className={`text-xs font-bold truncate ${isFocused ? 'text-indigo-200' : 'text-slate-400'}`}>{file.name}</span>
                       </div>
                       <div className="flex items-center gap-1">
+                          {isInterviewerMode && (
+                              <button onClick={(e) => { e.stopPropagation(); onSyncCodeWithAi?.(file); }} className="p-1.5 bg-indigo-600/20 text-indigo-400 hover:bg-indigo-600 hover:text-white rounded flex items-center gap-1 text-[10px] font-black uppercase transition-all" title="Send current code to AI">
+                                  <Send size={14}/>
+                                  <span className="hidden md:inline">Sync AI</span>
+                              </button>
+                          )}
                           {canRun && (
                               <button onClick={(e) => { e.stopPropagation(); handleRunCode(idx); }} disabled={running} className={`p-1.5 rounded flex items-center gap-1 text-[10px] font-black uppercase transition-all ${running ? 'text-indigo-400' : 'text-emerald-400 hover:bg-emerald-600/10'}`} title="Compile & Run">
                                   {running ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} fill="currentColor" />}
@@ -441,7 +450,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
   onBack, currentUser, userProfile, sessionId: propSessionId, accessKey, 
   onSessionStart, onSessionStop, onStartLiveSession, initialFiles,
   externalChatContent, onSendExternalMessage, isInterviewerMode = false,
-  isAiThinking = false, onFileChange
+  isAiThinking = false, onFileChange, onSyncCodeWithAi
 }) => {
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
   const [githubLinkingError, setGithubLinkingError] = useState<string | null>(null);
@@ -464,39 +473,33 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
   const [focusedSlot, setFocusedSlot] = useState<number>(0);
   const [slotViewModes, setSlotViewModes] = useState<Record<number, 'code' | 'preview'>>({ 0: 'code' });
   
-  // Ref to track internal versions of file content to prevent unnecessary overwrites
   const internalFileContentRef = useRef<Map<string, string>>(new Map());
   const lastSessionIdRef = useRef<string | null>(null);
 
   const currentSessionIdFromPaths = useMemo(() => {
       const firstPath = initialFiles?.[0]?.path;
       if (firstPath?.startsWith('drive://')) {
-          return firstPath.split('/')[2]; // drive://SESSION_ID/filename
+          return firstPath.split('/')[2]; 
       }
       return null;
   }, [initialFiles]);
 
   /**
-   * Helper to update active slots using LRU logic.
-   * New or newly focused files are always shifted to Slot 0.
+   * Helper to update active slots using dynamic LRU logic.
+   * New or newly focused files are pushed to Slot 0.
+   * Eviction strictly follows current visible capacity (maxVisible).
    */
   const updateSlotsLRU = useCallback((file: CodeFile) => {
-    // Correctly calculate max visible based on current Tie-View (Layout)
     const maxVisible = layoutMode === 'single' ? 1 : (layoutMode === 'quad' ? 4 : 2);
     
     setActiveSlots(prev => {
-        // 1. Remove this file if it already exists in any of the 4 slots
         const filtered = prev.filter(s => s !== null && s.path !== file.path);
-        // 2. Put the new file at the very front (index 0 / MRU)
-        // 3. Keep only 'maxVisible' files total. The overflow is dropped from view.
         const next = [file, ...filtered].slice(0, maxVisible);
-        // 4. Pad to 4 so the UI grid always has indices 0-3 available to map
         while (next.length < 4) next.push(null);
         return next;
     });
     setFocusedSlot(0);
     
-    // Auto-detect view mode for the newly opened file in Slot 0
     const lang = getLanguageFromExt(file.name);
     setSlotViewModes(prev => ({
         ...prev,
@@ -509,21 +512,17 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
         const sid = currentSessionIdFromPaths;
         const isNewSession = sid !== lastSessionIdRef.current;
 
-        // If we detect a new session ID in the paths, wipe all local state 
         if (isNewSession) {
             setActiveSlots([null, null, null, null]);
             internalFileContentRef.current.clear();
             lastSessionIdRef.current = sid;
         }
 
-        // Determine if a new file was ADDED by the AI (interviewer)
         const latestFile = initialFiles[initialFiles.length - 1];
 
-        // If a new file was added (not present in our internal map yet)
         if (latestFile && !internalFileContentRef.current.has(latestFile.path)) {
             updateSlotsLRU(latestFile);
         } else {
-            // Otherwise just update content for existing slots if they changed externally
             setActiveSlots(prev => prev.map((s) => {
                 if (!s) return null;
                 const match = initialFiles.find(f => f.path === s.path);
@@ -535,7 +534,6 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
             }));
         }
 
-        // Always sync the internal tracking map
         initialFiles.forEach(f => {
             if (!internalFileContentRef.current.has(f.path) || internalFileContentRef.current.get(f.path) !== f.content) {
                 internalFileContentRef.current.set(f.path, f.content);
@@ -913,7 +911,6 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
           updateSlotsLRU(file);
           if (isLive && lockStatus === 'mine' && file.path) updateProjectActiveFile(project.id, file.path);
       } else {
-          // If closing a file, just remove from slots
           setActiveSlots(prev => prev.map((s, i) => i === slotIndex ? null : s));
       }
       
@@ -929,7 +926,6 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       setActiveSlots(newSlots);
       setSaveStatus('modified');
       
-      // Critical: Update internal ref so we don't accidentally "sync back" old state from parent
       internalFileContentRef.current.set(file.path, newCode);
       
       if (onFileChange) onFileChange(updatedFile);
@@ -1058,7 +1054,6 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
   }, [cloudItems]);
 
   const filteredRepos = useMemo(() => {
-      // FIX: use githubSearchQuery instead of searchQuery which is not defined here
       if (!githubSearchQuery.trim()) return githubRepos;
       return githubRepos.filter(r => r.full_name.toLowerCase().includes(githubSearchQuery.toLowerCase()));
   }, [githubRepos, githubSearchQuery]);
@@ -1134,7 +1129,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                           ) : (
                               <div className="flex-1 flex flex-col overflow-hidden">
                                   <div className="p-3"><div className="relative"><Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" size={14}/><input type="text" value={githubSearchQuery} onChange={e => setGithubSearchQuery(e.target.value)} placeholder="Search repositories..." className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-8 pr-3 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500"/></div></div>
-                                  <div className="flex-1 overflow-y-auto scrollbar-hide">{filteredRepos.length === 0 ? <div className="p-8 text-center text-slate-600 text-xs italic">No repositories found.</div> : filteredRepos.map(repo => <button key={repo.id} onClick={() => handleSelectRepo(repo)} className="w-full text-left p-3 border-b border-slate-800 hover:bg-slate-800 transition-colors group"><div className="flex items-center justify-between mb-1"><span className="text-xs font-bold text-slate-300 group-hover:text-white truncate">{repo.name}</span><span className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded border ${repo.private ? 'bg-amber-900/20 text-amber-500 border-amber-900/50' : 'bg-emerald-900/20 text-emerald-400 border-emerald-900/50'}`}>{repo.private ? 'Private' : 'Public'}</span></div><p className="text-[10px] text-slate-500 line-clamp-1">{repo.description || 'No description provided.'}</p></button>)}</div>
+                                  <div className="flex-1 overflow-y-auto scrollbar-hide">{filteredRepos.length === 0 ? <div className="p-8 text-center text-slate-600 text-xs italic">No repositories found.</div> : filteredRepos.map(repo => <button key={repo.id} onClick={() => handleSelectRepo(repo)} className="w-full text-left p-3 border-b border-slate-800 hover:bg-slate-800 transition-colors group"><div className="flex items-center justify-between mb-1"><span className="text-xs font-bold text-slate-300 group-hover:text-white truncate">{repo.name}</span><span className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded border ${repo.private ? 'bg-amber-900/20 text-amber-500 border-amber-900/50' : 'bg-emerald-900/20 text-emerald-500 border-emerald-900/50'}`}>{repo.private ? 'Private' : 'Public'}</span></div><p className="text-[10px] text-slate-500 line-clamp-1">{repo.description || 'No description provided.'}</p></button>)}</div>
                                   <div className="p-3 bg-slate-950 border-t border-slate-800 text-center"><button onClick={() => { localStorage.removeItem('github_token'); setGithubToken(null); }} className="text-[9px] font-black text-slate-500 uppercase hover:text-red-400">Logout GitHub</button></div>
                               </div>
                           )}
@@ -1145,7 +1140,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
           <div onMouseDown={() => setIsDraggingLeft(true)} className="w-1 cursor-col-resize hover:bg-indigo-500/50 z-30 shrink-0 bg-slate-800/20"></div>
           <div ref={centerContainerRef} className={`flex-1 bg-slate-950 flex min-w-0 relative ${layoutMode === 'quad' ? 'grid grid-cols-2 grid-rows-2' : layoutMode === 'split-v' ? 'flex-row' : layoutMode === 'split-h' ? 'flex-col' : 'flex-col'}`}>
               {[0, 1, 2, 3].map(i => (
-                  <Slot key={i} idx={i} activeSlots={activeSlots} focusedSlot={focusedSlot} setFocusedSlot={setFocusedSlot} slotViewModes={slotViewModes} toggleSlotViewMode={toggleSlotViewMode} isFormattingSlots={isFormattingSlots} terminalOutputs={terminalOutputs} setTerminalOutputs={setTerminalOutputs} isTerminalOpen={isTerminalOpen} setIsTerminalOpen={setIsTerminalOpen} isRunning={isRunning} layoutMode={layoutMode} innerSplitRatio={innerSplitRatio} handleRunCode={handleRunCode} handleFormatCode={handleFormatCode} handleCodeChangeInSlot={handleCodeChangeInSlot} updateSlotFile={updateSlotFile} fontSize={fontSize} indentMode={indentMode} isLive={isLive} lockStatus={lockStatus} broadcastCursor={broadcastCursor} isReadOnly={isSharedViewOnly} />
+                  <Slot key={i} idx={i} activeSlots={activeSlots} focusedSlot={focusedSlot} setFocusedSlot={setFocusedSlot} slotViewModes={slotViewModes} toggleSlotViewMode={toggleSlotViewMode} isFormattingSlots={isFormattingSlots} terminalOutputs={terminalOutputs} setTerminalOutputs={setTerminalOutputs} isTerminalOpen={isTerminalOpen} setIsTerminalOpen={setIsTerminalOpen} isRunning={isRunning} layoutMode={layoutMode} innerSplitRatio={innerSplitRatio} handleRunCode={handleRunCode} handleFormatCode={handleFormatCode} handleCodeChangeInSlot={handleCodeChangeInSlot} updateSlotFile={updateSlotFile} onSyncCodeWithAi={onSyncCodeWithAi} fontSize={fontSize} indentMode={indentMode} isLive={isLive} lockStatus={lockStatus} broadcastCursor={broadcastCursor} isReadOnly={isSharedViewOnly} isInterviewerMode={isInterviewerMode} />
               ))}
           </div>
           <div onMouseDown={() => setIsDraggingRight(true)} className="w-1 cursor-col-resize hover:bg-indigo-500/50 z-30 shrink-0 bg-slate-800/20"></div>

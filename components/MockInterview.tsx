@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { MockInterviewRecording, TranscriptItem, CodeFile, UserProfile, Channel, CodeProject } from '../types';
 import { auth } from '../services/firebaseConfig';
@@ -338,6 +337,15 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
     }
   };
 
+  const handleSyncWithAi = useCallback((file: CodeFile) => {
+    if (liveServiceRef.current && isAiConnected) {
+        setIsAiThinking(true);
+        const syncMsg = `[SYSTEM_SYNC]: The candidate has manually updated the file "${file.name}". Please observe the latest implementation:\n\n\`\`\`\n${file.content}\n\`\`\``;
+        liveServiceRef.current.sendText(syncMsg);
+        logApi(`Sent manual sync for ${file.name} to AI context.`);
+    }
+  }, [isAiConnected]);
+
   const handleEditorFileChange = useCallback((file: CodeFile) => {
     activeCodeFilesMapRef.current.set(file.path, file);
     setInitialStudioFiles(prev => {
@@ -413,7 +421,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                       service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: "Editor updated." } }]);
                   } else if (fc.name === 'create_interview_file') {
                       const { filename, content } = fc.args as any;
-                      // ENFORCEMENT: Prepend prefix if missing
+                      // ENFORCEMENT: Prefix check for AI file creation
                       let finalFilename = filename;
                       if (sessionPrefix && !filename.startsWith(sessionPrefix)) {
                           finalFilename = `${sessionPrefix}_${filename}`;
@@ -451,7 +459,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         setSynthesisStep('Persisting Final Workspace...');
         setSynthesisPercent(30);
         
-        // PERSIST FINAL CODE STATE TO FIRESTORE
         await saveCodeProject({ 
             id: interviewId, 
             name: `Interview_${mode}_${new Date().toLocaleDateString()}`, 
@@ -468,8 +475,8 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         setSynthesisPercent(60);
 
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        const prompt = `Analyze this interview. Mode: ${mode}. History: ${historyText}. Workspace: ${codeText}. 
-        Return JSON: { "score": number, "technicalSkills": "string", "communication": "string", "collaboration": "string", "strengths": ["string"], "areasForImprovement": ["string"], "verdict": "string", "summary": "string", "learningMaterial": "Markdown" }`;
+        const prompt = `Analyze this technical interview. Mode: ${mode}. History: ${historyText}. Workspace: ${codeText}. 
+        Return JSON: { "score": number (0-100 scale), "technicalSkills": "string", "communication": "string", "collaboration": "string", "strengths": ["string"], "areasForImprovement": ["string"], "verdict": "string", "summary": "string", "learningMaterial": "Markdown" }`;
 
         const response = await ai.models.generateContent({ model: 'gemini-3-flash-preview', contents: prompt, config: { responseMimeType: 'application/json' } });
         const reportData = JSON.parse(response.text || '{}') as MockInterviewReport;
@@ -622,7 +629,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
               service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: "Updated." } }]);
             } else if (fc.name === 'create_interview_file') {
               const { filename, content } = fc.args as any;
-              // ENFORCEMENT: Prepend prefix if missing
+              // ENFORCEMENT: Prefix check for AI file creation
               let finalFilename = filename;
               if (prefix && !filename.startsWith(prefix)) {
                   finalFilename = `${prefix}_${filename}`;
@@ -736,7 +743,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
           <div className="max-w-4xl mx-auto p-12 animate-fade-in-up"><div className="bg-slate-900 border border-slate-800 rounded-[3rem] p-10 shadow-2xl space-y-8"><div className="grid grid-cols-1 md:grid-cols-2 gap-8"><div className="space-y-6"><div className={`p-6 rounded-3xl border flex items-center justify-between transition-all ${driveToken ? 'bg-emerald-900/10 border-emerald-500/30' : 'bg-red-900/10 border-red-500/30 animate-pulse'}`}><div className="flex items-center gap-3"><HardDrive className={driveToken ? 'text-emerald-400' : 'text-red-400'} size={24}/><div><p className="text-xs font-bold text-white uppercase">Cloud Link</p></div></div>{!driveToken && <button onClick={handleConnectDrive} className="px-4 py-1.5 bg-red-600 text-white rounded-lg text-[10px] font-black uppercase">Link Drive</button>}</div><div className="bg-slate-950 p-6 rounded-3xl border border-slate-800 space-y-4"><h3 className="text-xs font-black text-emerald-400 uppercase tracking-widest flex items-center gap-2"><FileSearch size={14}/> Job Desc</h3><textarea value={jobDesc} onChange={e => setJobDesc(e.target.value)} className="w-full h-32 bg-slate-950 border border-slate-700 rounded-2xl p-4 text-xs text-slate-300 outline-none resize-none"/></div></div><div className="space-y-6"><div className="bg-slate-950 p-6 rounded-3xl border border-slate-800 space-y-4"><h3 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Target size={14}/> Scope</h3><div className="grid grid-cols-1 gap-2">{[{ id: 'coding', icon: Code, label: 'Algorithms' }, { id: 'system_design', icon: Layers, label: 'System Design' }, { id: 'behavioral', icon: MessageSquare, label: 'Behavioral' }].map(m => (<button key={m.id} onClick={() => setMode(m.id as any)} className={`p-4 rounded-2xl border text-left flex items-center justify-between transition-all ${mode === m.id ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-950 border-slate-800 text-slate-50'}`}><div className="flex items-center gap-2"><m.icon size={14}/><span className="text-[10px] font-bold uppercase">{m.label}</span></div></button>))}</div></div></div></div><button onClick={handleStartInterview} disabled={isStarting} className="w-full py-5 bg-gradient-to-r from-red-600 to-indigo-600 text-white font-black uppercase tracking-widest rounded-2xl shadow-xl transition-all active:scale-95 disabled:opacity-30">Start Evaluation</button></div></div>
         )}
         {view === 'interview' && (
-          <div className="h-full flex flex-col overflow-hidden relative"><div className="flex-1 bg-slate-950 relative flex flex-col md:flex-row overflow-hidden"><div className="flex-1 overflow-hidden relative flex flex-col bg-slate-950"><CodeStudio onBack={() => {}} currentUser={currentUser} userProfile={userProfile} onSessionStart={() => {}} onSessionStop={() => {}} onStartLiveSession={onStartLiveSession as any} initialFiles={initialStudioFiles} externalChatContent={transcript.map(t => ({ role: t.role, text: t.text }))} onSendExternalMessage={handleSendTextMessage} isInterviewerMode={true} isAiThinking={isAiThinking} onFileChange={handleEditorFileChange}/></div></div><div className={`absolute bottom-20 right-4 w-64 aspect-video rounded-3xl overflow-hidden border-4 ${isAiConnected ? 'border-indigo-500/50' : 'border-red-500/50 animate-pulse'} shadow-2xl z-[100] bg-black group transition-all`}><video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover"/><div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-3"><button onClick={() => setShowCodePasteOverlay(true)} className="p-1.5 bg-indigo-600 rounded-lg text-white"><Code size={14}/></button></div></div></div>
+          <div className="h-full flex flex-col overflow-hidden relative"><div className="flex-1 bg-slate-950 relative flex flex-col md:flex-row overflow-hidden"><div className="flex-1 overflow-hidden relative flex flex-col bg-slate-950"><CodeStudio onBack={() => {}} currentUser={currentUser} userProfile={userProfile} onSessionStart={() => {}} onSessionStop={() => {}} onStartLiveSession={onStartLiveSession as any} initialFiles={initialStudioFiles} externalChatContent={transcript.map(t => ({ role: t.role, text: t.text }))} onSendExternalMessage={handleSendTextMessage} isInterviewerMode={true} isAiThinking={isAiThinking} onFileChange={handleEditorFileChange} onSyncCodeWithAi={handleSyncWithAi}/></div></div><div className={`absolute bottom-20 right-4 w-64 aspect-video rounded-3xl overflow-hidden border-4 ${isAiConnected ? 'border-indigo-500/50' : 'border-red-500/50 animate-pulse'} shadow-2xl z-[100] bg-black group transition-all`}><video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover"/><div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-3"><button onClick={() => setShowCodePasteOverlay(true)} className="p-1.5 bg-indigo-600 rounded-lg text-white"><Code size={14}/></button></div></div></div>
         )}
         {view === 'report' && (
           <div className="max-w-4xl mx-auto p-8 animate-fade-in-up space-y-12 pb-32 overflow-y-auto h-full scrollbar-hide">
