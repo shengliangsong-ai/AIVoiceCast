@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { MockInterviewRecording, TranscriptItem, CodeFile, UserProfile, Channel, CodeProject } from '../types';
 import { auth } from '../services/firebaseConfig';
@@ -8,7 +7,20 @@ import { GoogleGenAI, Type } from '@google/genai';
 import { generateSecureId } from '../utils/idUtils';
 import { CodeStudio } from './CodeStudio';
 import { MarkdownView } from './MarkdownView';
-import { ArrowLeft, Video, Mic, Monitor, Play, Save, Loader2, Search, Trash2, CheckCircle, X, Download, ShieldCheck, User, Users, Building, FileText, ChevronRight, Zap, SidebarOpen, SidebarClose, Code, MessageSquare, Sparkles, Languages, Clock, Camera, Bot, CloudUpload, Trophy, BarChart3, ClipboardCheck, Star, Upload, FileUp, Linkedin, FileCheck, Edit3, BookOpen, Lightbulb, Target, ListChecks, MessageCircleCode, GraduationCap, Lock, Globe, ExternalLink, PlayCircle, RefreshCw, FileDown, Briefcase, Package, Code2, StopCircle, Youtube, AlertCircle, Eye, EyeOff, SaveAll, Wifi, WifiOff, Activity, ShieldAlert, Timer, FastForward, ClipboardList, Layers, Bug, Flag, Minus, Fingerprint, FileSearch, RefreshCcw, HeartHandshake, Speech, Send, History, Compass, Square, CheckSquare, Cloud, Award, Terminal, CodeSquare, Quote, Image as ImageIcon, Sparkle, LayoutPanelTop, TerminalSquare, FolderOpen, HardDrive, Shield, Database, Link as LinkIcon, UserCircle, Calendar, Palette, Award as AwardIcon, CheckCircle2, AlertTriangle, TrendingUp, Presentation } from 'lucide-react';
+import { 
+  ArrowLeft, Video, Mic, Monitor, Play, Save, Loader2, Search, Trash2, CheckCircle, X, 
+  Download, ShieldCheck, User, Users, Building, FileText, ChevronRight, Zap, SidebarOpen, 
+  SidebarClose, Code, MessageSquare, Sparkles, Languages, Clock, Camera, Bot, CloudUpload, 
+  Trophy, BarChart3, ClipboardCheck, Star, Upload, FileUp, Linkedin, FileCheck, Edit3, 
+  BookOpen, Lightbulb, Target, ListChecks, MessageCircleCode, GraduationCap, Lock, Globe, 
+  ExternalLink, PlayCircle, RefreshCw, FileDown, Briefcase, Package, Code2, StopCircle, 
+  Youtube, AlertCircle, Eye, EyeOff, SaveAll, Wifi, WifiOff, Activity, ShieldAlert, 
+  Timer, FastForward, ClipboardList, Layers, Bug, Flag, Minus, Fingerprint, FileSearch, 
+  RefreshCcw, HeartHandshake, Speech, Send, History, Compass, Square, CheckSquare, 
+  Cloud, Award, Terminal, CodeSquare, Quote, Image as ImageIcon, Sparkle, LayoutPanelTop, 
+  TerminalSquare, FolderOpen, HardDrive, Shield, Database, Link as LinkIcon, UserCircle, 
+  Calendar, Palette, Award as AwardIcon, CheckCircle2, AlertTriangle, TrendingUp, Presentation 
+} from 'lucide-react';
 import { getGlobalAudioContext, getGlobalMediaStreamDest, warmUpAudioContext, stopAllPlatformAudio } from '../utils/audioUtils';
 import { getDriveToken, signInWithGoogle, connectGoogleDrive } from '../services/authService';
 import { ensureFolder, uploadToDrive, downloadDriveFileAsBlob, deleteDriveFile, ensureCodeStudioFolder } from '../services/googleDriveService';
@@ -106,6 +118,12 @@ function getLanguageFromExt(filename: string): CodeFile['language'] {
     return 'text';
 }
 
+const CURSOR_COLORS = [
+    '#f87171', '#fb923c', '#fbbf24', '#facc15', '#a3e635', 
+    '#4ade80', '#34d399', '#2dd4bf', '#22d3ee', '#38bdf8', 
+    '#60a5fa', '#818cf8', '#a78bfa', '#c084fc', '#e879f9', '#fb7185'
+];
+
 /**
  * Reusable Report Rendering Component
  */
@@ -123,7 +141,7 @@ const EvaluationReportDisplay = ({ report }: { report: MockInterviewReport }) =>
                 </div>
                 <div className="px-10 py-6 bg-slate-900 rounded-[2rem] border border-slate-800 shadow-2xl flex flex-col items-center min-w-[220px] justify-center">
                     <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-2">Verdict</p>
-                    <div className={`px-6 py-2 rounded-xl border text-lg font-black uppercase tracking-tighter ${report.verdict.toLowerCase().includes('hire') ? 'bg-emerald-900/20 border-emerald-500/30 text-emerald-400' : 'bg-red-900/20 border-red-500/30 text-red-400'}`}>
+                    <div className={`px-6 py-2 rounded-xl border text-lg font-black uppercase tracking-tighter ${String(report.verdict).toLowerCase().includes('hire') ? 'bg-emerald-900/20 border-emerald-500/30 text-emerald-400' : 'bg-red-900/20 border-red-500/30 text-red-400'}`}>
                         {report.verdict}
                     </div>
                 </div>
@@ -211,7 +229,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
   const [isAiThinking, setIsAiThinking] = useState(false);
   const [driveToken, setDriveToken] = useState<string | null>(getDriveToken());
   
-  // Declared only once at the component root
   const [timeLeft, setTimeLeft] = useState<number>(0); 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const checkpointTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -440,13 +457,12 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         CRITICAL: Use a strict 0-100 integer scale. Return JSON: { "score": integer, "technicalSkills": "string", "communication": "string", "collaboration": "string", "strengths": ["string"], "areasForImprovement": ["string"], "verdict": "string", "summary": "string", "learningMaterial": "Markdown" }`;
 
         const response = await ai.models.generateContent({ model: 'gemini-3-flash-preview', contents: prompt, config: { responseMimeType: 'application/json' } });
-        // Fixed: Argument of type 'unknown' is not assignable to parameter of type 'string'
-        const reportData = JSON.parse(response.text ?? '{}') as MockInterviewReport;
+        // Fix: Cast response.text to string to avoid 'unknown' type error in some environments
+        const reportData = JSON.parse((response.text as string) || '{}') as MockInterviewReport;
         setReport(reportData);
         
         setSynthesisStep('Archiving Video to Drive...');
         setSynthesisPercent(85);
-        // Fixed: Ensure videoChunksRef.current is treated as BlobPart array
         const videoBlob = new Blob(videoChunksRef.current as BlobPart[], { type: 'video/webm' });
         const recording: MockInterviewRecording = { id: interviewId, userId: currentUser?.uid || 'guest', userName: currentUser?.displayName || 'Guest', userPhoto: currentUser?.photoURL, mode, language, jobDescription: jobDesc, interviewerInfo: interviewerLinkedin, intervieweeInfo: intervieweeLinkedin, timestamp: Date.now(), videoUrl: '', transcript: latestTranscript, feedback: JSON.stringify(reportData), visibility };
 
@@ -760,72 +776,183 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         </div>
         <div className="flex items-center gap-3">
             {view === 'interview' && (<div className={`px-4 py-1.5 rounded-2xl border bg-slate-950/50 flex items-center gap-2 ${timeLeft < 300 ? 'border-red-500/50 text-red-400 animate-pulse' : 'border-indigo-500/30 text-indigo-400'}`}><Timer size={14}/><span className="font-mono text-base font-black tabular-nums">{formatTime(timeLeft)}</span></div>)}
+            {(view === 'report' || view === 'coaching' || view === 'artifact_viewer') && (<button onClick={() => { setView('hub'); loadInterviewsInternal(); }} className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-black uppercase tracking-widest border border-slate-700"><History size={14}/><span>History</span></button>)}
             {view === 'interview' && (<button onClick={handleEndInterview} className="px-6 py-2 bg-red-600 hover:bg-red-500 text-white rounded-xl text-xs font-black uppercase tracking-widest shadow-lg active:scale-95">End Session</button>)}
         </div>
       </header>
       <main className="flex-1 overflow-hidden relative">
+        {isCheckpointing && (<div className="absolute inset-0 z-[110] bg-slate-950/80 backdrop-blur-md flex flex-col items-center justify-center gap-6 animate-fade-in"><div className="p-8 bg-slate-900 border border-indigo-500/30 rounded-[3rem] flex flex-col items-center shadow-2xl"><div className="w-20 h-20 bg-indigo-600/10 rounded-3xl flex items-center justify-center mb-6 border border-indigo-500/20"><Database size={40} className="text-indigo-400 animate-pulse"/></div><h3 className="text-xl font-black text-white uppercase tracking-widest mb-2">Neural Checkpoint</h3><p className="text-xs text-slate-500 uppercase font-black text-center max-w-xs">Rotating AI connection & Archiving Progress...</p></div></div>)}
+        
         {view === 'hub' && (
           <div className="max-w-6xl mx-auto p-8 space-y-12 animate-fade-in overflow-y-auto h-full scrollbar-hide">
-            <div className="bg-indigo-600 rounded-[3rem] p-12 shadow-2xl relative overflow-hidden flex flex-col md:flex-row items-center gap-10"><div className="relative z-10 flex-1 space-y-6"><h2 className="text-5xl font-black text-white italic tracking-tighter uppercase leading-none">Validate your<br/>Potential.</h2><button onClick={() => setView('prep')} className="px-10 py-5 bg-white text-indigo-600 font-black uppercase tracking-widest rounded-2xl shadow-2xl hover:scale-105 transition-all flex items-center gap-3"><Zap size={20} fill="currentColor"/> Begin Preparation</button></div></div>
+            <div className="bg-indigo-600 rounded-[3rem] p-12 shadow-2xl relative overflow-hidden flex flex-col md:flex-row items-center gap-10"><div className="relative z-10 flex-1 space-y-6"><h2 className="text-5xl font-black text-white italic tracking-tighter uppercase leading-none">Validate your<br/>Potential.</h2><button onClick={() => setView('prep')} className="px-10 py-5 bg-white text-indigo-600 font-black uppercase tracking-widest rounded-2xl shadow-2xl hover:scale-105 transition-all flex items-center gap-3"><Zap size={20} fill="currentColor"/> Begin Preparation</button></div><div className="relative z-10 hidden lg:block"><Bot size={100} className="text-indigo-400 animate-pulse"/></div></div>
             <div className="space-y-8">
                 <div className="flex justify-between items-center">
                     <div className="flex bg-slate-900 p-1 rounded-2xl border border-slate-800 w-fit shadow-lg">
                         <button onClick={() => setHubTab('history')} className={`px-6 py-2 rounded-xl text-xs font-black uppercase transition-all ${hubTab === 'history' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-50'}`}>History</button>
+                        <button onClick={() => setHubTab('explore')} className={`px-6 py-2 rounded-xl text-xs font-black uppercase transition-all ${hubTab === 'explore' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-50'}`}>Discovery</button>
                     </div>
+                    {selectedIds.size > 0 && (
+                        <button onClick={handleDeleteSelected} disabled={isBulkDeleting} className="flex items-center gap-2 px-4 py-2 bg-red-600/10 hover:bg-red-600 text-red-400 hover:text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all">{isBulkDeleting ? <Loader2 size={14} className="animate-spin"/> : <Trash2 size={14}/>} Purge {selectedIds.size}</button>
+                    )}
                 </div>
-                {loading ? <div className="py-20 text-center"><Loader2 className="animate-spin mx-auto text-indigo-400" size={32}/></div> : renderInterviewsList(myInterviews)}
+                {loading ? <div className="py-20 text-center"><Loader2 className="animate-spin mx-auto text-indigo-400" size={32}/></div> : renderInterviewsList(hubTab === 'history' ? myInterviews : publicInterviews)}
             </div>
           </div>
         )}
+
         {view === 'prep' && (
           <div className="max-w-6xl mx-auto p-8 animate-fade-in-up h-full overflow-y-auto scrollbar-hide">
             <div className="bg-slate-900 border border-slate-800 rounded-[3rem] p-10 shadow-2xl space-y-10">
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
                 <div className="space-y-8">
                     <div className={`p-6 rounded-3xl border flex items-center justify-between transition-all ${driveToken ? 'bg-emerald-900/10 border-emerald-500/30' : 'bg-red-900/10 border-red-500/30 animate-pulse'}`}>
-                        <div className="flex items-center gap-3"><HardDrive className={driveToken ? 'text-emerald-400' : 'text-red-400'} size={24}/><div><p className="text-xs font-bold text-white uppercase tracking-widest">Neural Cloud Link</p></div></div>
+                        <div className="flex items-center gap-3"><HardDrive className={driveToken ? 'text-emerald-400' : 'text-red-400'} size={24}/><div><p className="text-xs font-bold text-white uppercase tracking-widest">Neural Cloud Link</p><p className="text-[10px] text-slate-500 uppercase font-black">{driveToken ? 'Authorized' : 'Action Required'}</p></div></div>
                         {!driveToken && <button onClick={handleConnectDrive} className="px-4 py-1.5 bg-red-600 text-white rounded-lg text-[10px] font-black uppercase shadow-lg">Authorize Drive</button>}
                     </div>
                     <div className="bg-slate-950 p-6 rounded-[2rem] border border-slate-800 space-y-6 shadow-inner">
                         <div className="flex items-center justify-between px-1"><h3 className="text-xs font-black text-indigo-400 uppercase tracking-widest flex items-center gap-2"><UserCircle size={16}/> Professional Identity</h3><button onClick={handleSyncFromProfile} className="text-[10px] font-black text-indigo-400 hover:text-white transition-all flex items-center gap-1 uppercase tracking-widest"><RefreshCw size={10}/> Sync Profile</button></div>
-                        <input type="url" value={intervieweeLinkedin} onChange={e => setIntervieweeLinkedin(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-xs text-indigo-200 outline-none focus:border-indigo-500" placeholder="LinkedIn URL"/>
+                        <div className="space-y-4">
+                            <div><label className="text-[9px] font-black text-slate-500 uppercase tracking-widest block mb-2 px-1">Interviewee LinkedIn</label><input type="url" value={intervieweeLinkedin} onChange={e => setIntervieweeLinkedin(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-xs text-indigo-200 outline-none focus:border-indigo-500" placeholder="https://linkedin.com/in/you"/></div>
+                            <div><label className="text-[9px] font-black text-slate-500 uppercase tracking-widest block mb-2 px-1">Interviewer LinkedIn (Target Persona)</label><input type="url" value={interviewerLinkedin} onChange={e => setInterviewerLinkedin(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-xs text-white outline-none focus:border-indigo-500" placeholder="https://linkedin.com/in/interviewer-profile"/></div>
+                        </div>
+                    </div>
+                    <div className="bg-slate-950 p-6 rounded-[2rem] border border-slate-800 space-y-4 shadow-inner">
+                        <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Target size={16}/> Evaluation Depth</h3>
+                        <div className="grid grid-cols-1 gap-2">
+                            {[
+                                { id: 'coding', icon: Code, label: 'Algorithms & Logic' }, 
+                                { id: 'system_design', icon: Layers, label: 'System Architecture' }, 
+                                { id: 'behavioral', icon: MessageSquare, label: 'Cultural Fit (STAR)' }
+                            ].map(m => (
+                                <button 
+                                    key={m.id} 
+                                    onClick={() => setMode(m.id as any)} 
+                                    className={`p-4 rounded-2xl border text-left flex items-center justify-between transition-all group ${mode === m.id ? 'bg-indigo-600 border-indigo-500 text-white shadow-xl shadow-indigo-900/20' : 'bg-slate-900 border-slate-800 text-slate-500 hover:border-slate-600'}`}
+                                >
+                                    <div className="flex items-center gap-3">
+                                        <m.icon size={18} className={mode === m.id ? 'text-white' : 'text-slate-600'}/>
+                                        <span className="text-[11px] font-black uppercase tracking-wider">{m.label}</span>
+                                    </div>
+                                    {mode === m.id && <CheckCircle size={16} fill="white" className="text-indigo-600"/>}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+                <div className="space-y-8">
+                    <div className="bg-slate-950 p-6 rounded-[2rem] border border-slate-800 space-y-6 shadow-inner h-full">
+                        <div className="flex items-center justify-between px-1">
+                            <h3 className="text-xs font-black text-emerald-400 uppercase tracking-widest flex items-center gap-2"><FileSearch size={16}/> Target Specification</h3>
+                            <div className="flex bg-slate-900 p-1 rounded-lg border border-slate-800">
+                                <button onClick={() => setJobDescType('text')} className={`px-3 py-1 rounded text-[9px] font-black uppercase transition-all ${jobDescType === 'text' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500'}`}>Text</button>
+                                <button onClick={() => setJobDescType('link')} className={`px-3 py-1 rounded text-[9px] font-black uppercase transition-all ${jobDescType === 'link' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-50'}`}>Link</button>
+                            </div>
+                        </div>
+                        {jobDescType === 'link' ? (
+                            <input type="url" value={jobDesc} onChange={e => setJobDesc(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-xs text-emerald-100 outline-none focus:border-emerald-500" placeholder="https://lever.co/job/123..."/>
+                        ) : (
+                            <textarea value={jobDesc} onChange={e => setJobDesc(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-xs text-emerald-100 outline-none focus:border-emerald-500 resize-none h-48" placeholder="Paste job description..."/>
+                        )}
+                        <div className="mt-4">
+                            <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2 mb-3"><Timer size={16}/> Session Chronometry</h3>
+                            <div className="flex bg-slate-900 p-1 rounded-2xl border border-slate-800">
+                                {[15, 25, 30, 45, 60].map(m => (
+                                    <button key={m} onClick={() => setDurationMinutes(m)} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase transition-all ${durationMinutes === m ? 'bg-indigo-600 text-white shadow-xl' : 'text-slate-500 hover:text-slate-300'}`}>{m}m</button>
+                                ))}
+                            </div>
+                        </div>
                     </div>
                 </div>
               </div>
               <div className="pt-8">
                 <button onClick={handleStartInterview} disabled={isStarting || !driveToken} className="w-full py-6 bg-gradient-to-r from-red-600 to-indigo-600 text-white font-black uppercase tracking-[0.3em] rounded-3xl shadow-2xl transition-all hover:scale-[1.01] active:scale-95 disabled:opacity-30">
-                    {isStarting ? <Loader2 className="animate-spin mx-auto" /> : `Launch Evaluation`}
+                    {isStarting ? <Loader2 className="animate-spin mx-auto" /> : `Launch ${durationMinutes}min ${mode.toUpperCase()} Evaluation`}
                 </button>
               </div>
             </div>
           </div>
         )}
+
         {view === 'interview' && (
           <div className="h-full flex flex-col overflow-hidden relative">
             <div className="flex-1 bg-slate-950 relative flex flex-col md:flex-row overflow-hidden">
                 <CodeStudio onBack={() => {}} currentUser={currentUser} userProfile={userProfile} onSessionStart={() => {}} onSessionStop={() => {}} onStartLiveSession={onStartLiveSession as any} initialFiles={initialStudioFiles} externalChatContent={transcript.map(t => ({ role: t.role, text: t.text }))} onSendExternalMessage={handleSendTextMessage} isInterviewerMode={true} isAiThinking={isAiThinking} onFileChange={handleEditorFileChange} onSyncCodeWithAi={handleSyncWithAi}/>
             </div>
+            
             <div className={`absolute bottom-20 right-4 w-64 aspect-video rounded-3xl overflow-hidden border-4 ${isAiConnected ? 'border-indigo-500/50' : 'border-red-500/50 animate-pulse'} shadow-2xl z-[100] bg-black group transition-all`}>
                 <video id="mock-camera-preview" ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover transition-all" style={{ filter: getFilterStyle(activeVideoFilter) }} />
+                
+                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-3">
+                    <div className="flex justify-between items-start">
+                        <button onClick={() => setShowCodePasteOverlay(true)} className="p-1.5 bg-indigo-600 rounded-lg text-white shadow-lg"><Code size={14}/></button>
+                        <div className="relative">
+                            <button onClick={() => setShowFilterMenu(!showFilterMenu)} className={`p-1.5 rounded-lg text-white shadow-lg transition-all ${activeVideoFilter !== 'none' ? 'bg-pink-600' : 'bg-slate-800'}`}><Palette size={14}/></button>
+                            {showFilterMenu && (
+                                <div className="absolute top-full right-0 mt-2 w-40 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden z-50">
+                                    {(['none', 'blur', 'studio-noir', 'executive'] as VideoFilter[]).map(f => (
+                                        <button key={f} onClick={() => { setActiveVideoFilter(f); setShowFilterMenu(false); }} className={`w-full text-left px-3 py-2 text-[10px] font-black uppercase transition-all ${activeVideoFilter === f ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>{f === 'none' ? 'Natural feed' : f.replace('-', ' ')}</button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
+                        <span className="text-[10px] font-black uppercase text-white tracking-widest shadow-black drop-shadow-md">Neural Lens: {activeVideoFilter}</span>
+                    </div>
+                </div>
             </div>
           </div>
         )}
+
         {view === 'report' && (
           <div className="max-w-4xl mx-auto p-8 animate-fade-in-up space-y-12 pb-32 overflow-y-auto h-full scrollbar-hide">
             <div className="bg-slate-900 border border-slate-800 rounded-[3rem] p-10 flex flex-col items-center text-center space-y-6 shadow-2xl">
               <Trophy className="text-amber-500" size={64}/><h2 className="text-4xl font-black text-white italic tracking-tighter uppercase">Evaluation Finished</h2>
-              {report ? <EvaluationReportDisplay report={report} /> : <Loader2 size={32} className="animate-spin text-indigo-400" />}
+              {report ? (
+                <div className="flex flex-col items-center gap-6 w-full">
+                    <EvaluationReportDisplay report={report} />
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
+                        <div className="bg-slate-950 p-6 rounded-3xl border border-slate-800 text-left">
+                            <h3 className="text-xs font-black text-indigo-400 uppercase tracking-widest mb-3 flex items-center gap-2"><User size={14}/> Context Refraction</h3>
+                            <div className="space-y-2">
+                                <p className="text-xs text-slate-400"><span className="text-slate-600 font-bold uppercase mr-2">Mode:</span> {mode.toUpperCase()}</p>
+                                <p className="text-xs text-slate-400 truncate"><span className="text-slate-600 font-bold uppercase mr-2">Target JD:</span> {jobDesc || 'General Tech'}</p>
+                            </div>
+                        </div>
+                        <div className="bg-slate-950 p-6 rounded-3xl border border-slate-800 text-left">
+                            <h3 className="text-xs font-black text-emerald-400 uppercase tracking-widest mb-3 flex items-center gap-2"><ShieldCheck size={14}/> Verified Artifacts</h3>
+                            <button onClick={() => setView('artifact_viewer')} className="w-full py-2 bg-indigo-600/10 hover:bg-indigo-600 text-indigo-400 hover:text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all">Explore Session Workspace</button>
+                        </div>
+                    </div>
+                </div>
+              ) : <Loader2 size={32} className="animate-spin text-indigo-400" />}
             </div>
           </div>
         )}
+
         {view === 'artifact_viewer' && activeRecording && (
           <div className="h-full flex flex-col bg-slate-950 animate-fade-in overflow-hidden">
              <div className="flex-1 overflow-y-auto p-8 space-y-12 scrollbar-hide pb-32">
                 <div className="max-w-4xl mx-auto space-y-8">
                     <div className="bg-slate-900 border border-slate-800 rounded-[3rem] p-10 shadow-2xl relative overflow-hidden">
-                        <h2 className="text-4xl font-black text-white italic tracking-tighter uppercase">{activeRecording.mode.replace('_', ' ')} Evaluation</h2>
+                        <div className="absolute top-0 right-0 p-12 bg-indigo-500/10 blur-[100px] rounded-full"></div>
+                        <h2 className="text-4xl font-black text-white italic tracking-tighter uppercase relative z-10">{activeRecording.mode.replace('_', ' ')} Evaluation</h2>
+                        <div className="flex items-center gap-6 text-sm text-slate-500 mt-2 relative z-10">
+                            <span className="flex items-center gap-2"><User size={16}/> @{activeRecording.userName}</span>
+                            <span className="flex items-center gap-2"><Calendar size={16}/> {new Date(activeRecording.timestamp).toLocaleDateString()}</span>
+                        </div>
                     </div>
-                    {parsedHistoricalReport && <EvaluationReportDisplay report={parsedHistoricalReport} />}
+                    {parsedHistoricalReport && (
+                        <div className="space-y-6">
+                            <div className="flex items-center gap-2 px-2">
+                                <AwardIcon className="text-amber-500" size={24} />
+                                <h3 className="text-xl font-bold text-white">Evaluation Synthesis</h3>
+                            </div>
+                            <EvaluationReportDisplay report={parsedHistoricalReport} />
+                        </div>
+                    )}
                     <div className="bg-slate-900 border border-slate-800 rounded-[3rem] p-10 shadow-2xl">
                         <h3 className="text-xl font-bold text-white mb-8 flex items-center gap-2"><History size={24} className="text-indigo-400"/> Session Transcript</h3>
                         <div className="space-y-6">
@@ -842,6 +969,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
           </div>
         )}
       </main>
+      {isGeneratingReport && (<div className="fixed inset-0 z-[200] bg-slate-950/80 backdrop-blur-md flex flex-col items-center justify-center gap-8 animate-fade-in"><div className="relative"><div className="w-32 h-32 border-4 border-indigo-500/10 rounded-full"></div><div className="absolute inset-0 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"/><Activity className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-indigo-400" size={40}/><div className="absolute -bottom-10 left-1/2 -translate-x-1/2 text-3xl font-black text-white">{Math.round(synthesisPercent)}%</div></div><h3 className="text-xl font-black text-white uppercase">{synthesisStep}</h3></div>)}
     </div>
   );
 };

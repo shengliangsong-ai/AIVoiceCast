@@ -1,6 +1,4 @@
-
 import React, { useState, useEffect, useMemo, ErrorInfo, ReactNode, Component } from 'react';
-// Fixed redundant imports of Video/VideoIcon and duplicate Maximize2/Minimize2
 import { 
   Podcast, Search, LayoutGrid, RefreshCw, 
   Home, Video, User, ArrowLeft, Play, Gift, 
