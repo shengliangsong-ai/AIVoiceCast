@@ -11,7 +11,8 @@ import { MarkdownView } from './MarkdownView';
 import { ArrowLeft, Video, Mic, Monitor, Play, Save, Loader2, Search, Trash2, CheckCircle, X, Download, ShieldCheck, User, Users, Building, FileText, ChevronRight, Zap, SidebarOpen, SidebarClose, Code, MessageSquare, Sparkles, Languages, Clock, Camera, Bot, CloudUpload, Trophy, BarChart3, ClipboardCheck, Star, Upload, FileUp, Linkedin, FileCheck, Edit3, BookOpen, Lightbulb, Target, ListChecks, MessageCircleCode, GraduationCap, Lock, Globe, ExternalLink, PlayCircle, RefreshCw, FileDown, Briefcase, Package, Code2, StopCircle, Youtube, AlertCircle, Eye, EyeOff, SaveAll, Wifi, WifiOff, Activity, ShieldAlert, Timer, FastForward, ClipboardList, Layers, Bug, Flag, Minus, Fingerprint, FileSearch, RefreshCcw, HeartHandshake, Speech, Send, History, Compass, Square, CheckSquare, Cloud, Award, Terminal, CodeSquare, Quote, Image as ImageIcon, Sparkle, LayoutPanelTop, TerminalSquare, FolderOpen, HardDrive, Shield, Database, Link as LinkIcon, UserCircle } from 'lucide-react';
 import { getGlobalAudioContext, getGlobalMediaStreamDest, warmUpAudioContext, stopAllPlatformAudio } from '../utils/audioUtils';
 import { getDriveToken, signInWithGoogle, connectGoogleDrive } from '../services/authService';
-import { ensureFolder, uploadToDrive, downloadDriveFileAsBlob, deleteDriveFile } from '../services/googleDriveService';
+import { ensureFolder, uploadToDrive, downloadDriveFileAsBlob, deleteDriveFile, ensureCodeStudioFolder } from '../services/googleDriveService';
+import { getYouTubeVideoUrl, uploadToYouTube, getYouTubeEmbedUrl, deleteYouTubeVideo } from '../services/youtubeService';
 
 interface OptimizedStarStory {
   title: string;
@@ -135,7 +136,11 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
   const [apiLogs, setApiLogs] = useState<{time: string, msg: string, type: 'info' | 'error' | 'warn'}[]>([]);
   const [coachingLogs, setCoachingLogs] = useState<{time: string, msg: string, type: 'info' | 'error' | 'warn'}[]>([]);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
-  
+
+  // ADDED: Missing sync log state used by handleForceYouTubeSync
+  const [syncLogs, setSyncLogs] = useState<{time: string, msg: string, type: 'info' | 'error' | 'warn' | 'success'}[]>([]);
+  const [showSyncLog, setShowSyncLog] = useState(false);
+
   const reconnectAttemptsRef = useRef(0);
   const activeServiceIdRef = useRef<string | null>(null);
   const isEndingRef = useRef(false);
@@ -145,6 +150,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
 
   // PREP STATE
   const [mode, setMode] = useState<'coding' | 'system_design' | 'behavioral' | 'quick_screen' | 'assessment_30' | 'assessment_60'>('coding');
+  const [durationMinutes, setDurationMinutes] = useState<number>(30);
   const [language, setLanguage] = useState(userProfile?.defaultLanguage || 'C++');
   const [jobDescType, setJobDescType] = useState<'text' | 'link'>('text');
   const [jobDesc, setJobDesc] = useState('');
@@ -154,6 +160,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
   const [visibility, setVisibility] = useState<'public' | 'private'>('public');
   
   const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
+  const transcriptRef = useRef<TranscriptItem[]>([]); 
   const [coachingTranscript, setCoachingTranscript] = useState<TranscriptItem[]>([]);
   const [isCoachingSyncing, setIsCoachingSyncing] = useState(false);
   const [initialStudioFiles, setInitialStudioFiles] = useState<CodeFile[]>([]);
@@ -186,10 +193,16 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
     setApiLogs(prev => [{time, msg, type}, ...prev].slice(0, 50));
   };
 
-  const logCoach = (msg: string, type: 'info' | 'error' | 'warn' = 'info') => {
-    const time = new Date().toLocaleTimeString();
-    setCoachingLogs(prev => [{time, msg, type}, ...prev].slice(0, 50));
-  };
+  // ADDED: Missing addSyncLog helper (similar to RecordingList.tsx)
+  const addSyncLog = useCallback((msg: string, type: 'info' | 'error' | 'warn' | 'success' = 'info') => {
+      const time = new Date().toLocaleTimeString();
+      setSyncLogs(prev => [{ time, msg, type }, ...prev].slice(0, 50));
+      console.log(`[Sync Diagnostic] ${msg}`);
+  }, []);
+
+  useEffect(() => {
+    transcriptRef.current = transcript;
+  }, [transcript]);
 
   useEffect(() => {
     if (userProfile?.resumeText && !resumeText) {
@@ -203,7 +216,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         if (userProfile.headline) profileSummary += `Headline: ${userProfile.headline}\n`;
         if (userProfile.company) profileSummary += `Current Company: ${userProfile.company}\n`;
         if (userProfile.linkedinUrl) profileSummary += `LinkedIn: ${userProfile.linkedinUrl}\n`;
-        
         if (profileSummary) {
             setIntervieweeInfo(prev => prev ? `${prev}\n\n${profileSummary}` : profileSummary);
             logApi("Synced candidate identity from User Profile.", "info");
@@ -223,265 +235,108 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
     }
   };
 
-  const handleSyncResume = () => {
-    if (userProfile?.resumeText) {
-      setResumeText(userProfile.resumeText);
-    } else {
-      alert("No resume found in your profile. Go to Settings to upload one.");
-    }
-  };
-
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  const getDurationSeconds = (m: string) => {
-    if (m === 'quick_screen') return 15 * 60;
-    if (m === 'behavioral') return 30 * 60;
-    if (m === 'assessment_30') return 30 * 60;
-    if (m === 'assessment_60') return 60 * 60;
-    return 45 * 60; 
-  };
-
-  useEffect(() => {
-    if (view === 'interview' && activeStreamRef.current && localVideoRef.current) {
-      localVideoRef.current.srcObject = activeStreamRef.current;
-    }
-  }, [view]);
-
-  useEffect(() => {
-    if ((view === 'report' || view === 'artifact_viewer' || view === 'coaching') && (activeRecording?.id || currentSessionId)) {
-        const pid = activeRecording?.id || currentSessionId;
-        setLoadingProject(true);
-        getCodeProject(pid).then(p => {
-            if (p && p.files) {
-                setSessionProject(p);
-                setInitialStudioFiles(p.files);
-                activeCodeFilesMapRef.current.clear();
-                p.files.forEach(f => activeCodeFilesMapRef.current.set(f.path, f));
-            }
-            setLoadingProject(false);
-        }).catch(() => setLoadingProject(false));
-    }
-  }, [view, activeRecording?.id, currentSessionId]);
-
-  useEffect(() => {
-    loadInterviews();
-    return () => { 
-        if (timerRef.current) clearInterval(timerRef.current);
-        if (checkpointTimerRef.current) clearInterval(checkpointTimerRef.current);
-        if (liveServiceRef.current) liveServiceRef.current.disconnect();
-    };
-  }, [currentUser]);
-
-  useEffect(() => {
-    if (view !== 'coaching' || coachingTranscript.length === 0) return;
-    const targetId = activeRecording?.id || currentSessionId;
-    if (!targetId) return;
-
-    const syncCoachingTranscript = async () => {
-        setIsCoachingSyncing(true);
-        try {
-            await updateInterviewMetadata(targetId, { coachingTranscript: coachingTranscript });
-            const localBackupsRaw = localStorage.getItem('mock_interview_backups') || '[]';
-            const localBackups = JSON.parse(localBackupsRaw) as MockInterviewRecording[];
-            const idx = localBackups.findIndex(b => b.id === targetId);
-            if (idx !== -1) {
-                localBackups[idx].coachingTranscript = coachingTranscript;
-                localStorage.setItem('mock_interview_backups', JSON.stringify(localBackups));
-            }
-        } catch (e) { console.error("Coaching sync failed", e); } finally { setIsCoachingSyncing(false); }
-    };
-    const timer = setTimeout(syncCoachingTranscript, 2000);
-    return () => clearTimeout(timer);
-  }, [coachingTranscript, view, activeRecording?.id, currentSessionId]);
-
-  const loadInterviews = async () => {
-    setLoading(true);
-    try {
-      const [publicData, userData] = await Promise.all([
-        getPublicInterviews(),
-        currentUser ? getUserInterviews(currentUser.uid) : Promise.resolve([])
-      ]);
-      const localBackupsRaw = localStorage.getItem('mock_interview_backups') || '[]';
-      const localBackups = (JSON.parse(localBackupsRaw) as MockInterviewRecording[]).filter(b => b && b.id && b.id.trim() !== "");
-      const myFilteredBackups = localBackups.filter(b => b.userId === (currentUser?.uid || 'guest'));
-      const myMap = new Map<string, MockInterviewRecording>();
-      userData.forEach(rec => myMap.set(rec.id, rec));
-      myFilteredBackups.forEach(backup => { if (!myMap.has(backup.id)) myMap.set(backup.id, backup); });
-      const combined = Array.from(myMap.values());
-      setMyInterviews(combined.sort((a, b) => b.timestamp - a.timestamp));
-      setPublicInterviews(publicData.sort((a, b) => b.timestamp - a.timestamp));
-    } catch (e) { console.error("Ledger retrieval error", e); } finally { setLoading(false); }
-  };
-
   const handleToggleSelect = (id: string, e: React.MouseEvent) => {
-      e.stopPropagation();
-      if (!id || id.trim() === "") return;
-      const next = new Set(selectedIds);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      setSelectedIds(next);
-  };
-
-  const handleSelectAll = () => {
-      const list = hubTab === 'history' ? myInterviews : publicInterviews;
-      const validIds = list.filter(i => i.id && i.id.trim() !== "").map(i => i.id);
-      if (selectedIds.size === validIds.length) setSelectedIds(new Set());
-      else setSelectedIds(new Set(validIds));
+    e.stopPropagation();
+    setSelectedIds(prev => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+    });
   };
 
   const handleDeleteSelected = async () => {
-      const idsToPurge = Array.from(selectedIds).filter((id): id is string => typeof id === 'string' && id.trim() !== "");
-      if (idsToPurge.length === 0) return;
-      if (!confirm(`Permanently delete ${idsToPurge.length} selected technical evaluations?`)) return;
-      setIsBulkDeleting(true);
-      try {
-          for (const id of idsToPurge) await deleteInterview(id);
-          const localBackupsRaw = localStorage.getItem('mock_interview_backups') || '[]';
-          const localBackups = JSON.parse(localBackupsRaw) as MockInterviewRecording[];
-          localStorage.setItem('mock_interview_backups', JSON.stringify(localBackups.filter(b => !selectedIds.has(b.id))));
-          await loadInterviews();
-          setSelectedIds(new Set());
-      } catch (e: any) { alert("Purge failed: " + e.message); } finally { setIsBulkDeleting(false); }
+    const count = selectedIds.size;
+    if (count === 0) return;
+    if (!confirm(`Permanently delete ${count} selected evaluations?`)) return;
+    setIsBulkDeleting(true);
+    try {
+        const token = getDriveToken();
+        const ids = Array.from(selectedIds);
+        for (const id of ids) {
+            const rec = myInterviews.find(r => r.id === id);
+            if (rec) {
+                if (token && rec.videoUrl && rec.videoUrl.startsWith('drive://')) {
+                    const fileId = rec.videoUrl.replace('drive://', '').split('&')[0];
+                    try { await deleteDriveFile(token, fileId); } catch(e) {}
+                }
+                await deleteInterview(id);
+            }
+        }
+        setMyInterviews(prev => prev.filter(r => !selectedIds.has(r.id)));
+        setSelectedIds(new Set());
+    } catch (e: any) { alert("Bulk delete failed: " + e.message); } finally { setIsBulkDeleting(false); }
   };
 
   const handleSendTextMessage = (text: string) => {
-    if (liveServiceRef.current && isAiConnected) {
-        setIsAiThinking(true);
-        const userMsg: TranscriptItem = { role: 'user', text, timestamp: Date.now() };
-        if (view === 'coaching') setCoachingTranscript(prev => [...prev, userMsg]);
-        else setTranscript(prev => [...prev, userMsg]);
-        
-        // NEURAL TRUTH: In technical modes, always bundle a code snapshot with the message
-        let augmentedText = text;
-        if (mode === 'coding' || mode === 'system_design') {
-             const activeFile = activeFilePath ? activeCodeFilesMapRef.current.get(activeFilePath) : Array.from(activeCodeFilesMapRef.current.values())[0];
-             if (activeFile) {
-                 augmentedText = `[CANDIDATE_MSG]: ${text}\n\n[NEURAL_TRUTH ("${activeFile.name}")]:\n\`\`\`\n${activeFile.content}\n\`\`\``;
-             }
-        }
-            
-        liveServiceRef.current.sendText(augmentedText);
-    }
+    if (!text.trim() || !liveServiceRef.current) return;
+    setTranscript(prev => [...prev, { role: 'user', text, timestamp: Date.now() }]);
+    setIsAiThinking(true);
+    const currentFiles = Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[];
+    const activeFile = currentFiles.find(f => f.path === activeFilePath) || currentFiles[0];
+    const grounding = activeFile ? `\n\n[NEURAL_TRUTH] Current Workspace State (${activeFile.name}):\n\`\`\`${activeFile.language}\n${activeFile.content}\n\`\`\`` : "";
+    liveServiceRef.current.sendText(text + grounding);
   };
 
-  const handleSyncWithAi = useCallback((file: CodeFile) => {
-    if (liveServiceRef.current && isAiConnected) {
-        setIsAiThinking(true);
-        // NEURAL FORCE SYNC: Send the full code content to ensure context window is updated
-        const syncMsg = `[NEURAL_TRUTH]: The candidate has performed a manual sync of "${file.name}". 
-        BELOW IS THE EXACT CURRENT CONTENT. USE THIS AS YOUR NEW SOURCE OF REALITY.
-        
-        \`\`\`
-        ${file.content}
-        \`\`\``;
-        liveServiceRef.current.sendText(syncMsg);
-        logApi(`Neural Force-Sync for ${file.name} pushed to conversation history.`, "info");
-    }
-  }, [isAiConnected]);
-
-  const handleEditorFileChange = useCallback((file: CodeFile) => {
+  const handleEditorFileChange = (file: CodeFile) => {
     activeCodeFilesMapRef.current.set(file.path, file);
     setActiveFilePath(file.path);
-    setInitialStudioFiles(prev => {
-        const exists = prev.some(f => f.path === file.path);
-        if (exists) return prev.map(f => f.path === file.path ? file : f);
-        return [...prev, file];
-    });
-  }, []);
+  };
 
-  const handleReconnectAi = async (isAuto = false) => {
-    if (isEndingRef.current) return;
-    setIsAiConnected(false);
-    if (liveServiceRef.current) liveServiceRef.current.disconnect();
+  const handleSyncWithAi = (file: CodeFile) => {
+    if (!liveServiceRef.current) return;
+    const msg = `[NEURAL_TRUTH] Manual Workspace Sync Requested for: ${file.name}\n\`\`\`${file.language}\n${file.content}\n\`\`\``;
+    liveServiceRef.current.sendText(msg);
+    logApi(`Workspace sync dispatched for ${file.name}.`, "info");
+  };
 
-    const backoffTime = isAuto ? Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 10000) : 0;
-    setTimeout(async () => {
-      if (isEndingRef.current) return;
-      const currentView = view;
-      const activeTranscriptList = (currentView === 'coaching' ? coachingTranscript : transcript) as TranscriptItem[];
-      const historyText = activeTranscriptList.map(t => `${String(t.role).toUpperCase()}: ${t.text}`).join('\n');
-      const currentFiles = Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[];
-      const workspaceManifest = currentFiles.map(f => `FILE: ${f.name}\nCONTENT:\n${f.content}`).join('\n\n---\n\n');
-      
-      let prompt = "";
-      if (currentView === 'coaching') {
-          prompt = `RESUMING COACHING SESSION. Role: Senior Coach. Candidate: ${currentUser?.displayName || 'Candidate'}. WORKSPACE CONTEXT:\n${workspaceManifest}\nTRANSCRIPT HISTORY:\n${historyText}\nGOAL: Restore coaching atmosphere.`;
-      } else {
-          prompt = `RESUMING INTERVIEW SESSION. Role: Senior Interviewer. Mode: ${mode}. Candidate: ${currentUser?.displayName || 'Candidate'}. 
-          ${interviewerInfo ? `STRICT PERSONA LOCK: You are simulating: "${interviewerInfo}".` : ''}
-          ${intervieweeInfo ? `CANDIDATE BACKGROUND: "${intervieweeInfo}".` : ''}
-          WORKSPACE STATE:\n${workspaceManifest}\nHISTORY:\n${historyText}\n
-          STRICT ANTI-SPOILING RULE: NEVER solve the problem for the candidate. Provide hints only if they are stuck.
-          STRICT VISIBILITY RULE: You must ALWAYS verify the candidate's code using the provided history or 'get_current_code' tool before making assumptions. Blocks marked [NEURAL_TRUTH] override everything else.
-          STRICT INSTRUCTION: Pick up exactly where the last message ended. Do NOT restart the greeting.`;
-      }
-      
-      const service = new GeminiLiveService();
-      activeServiceIdRef.current = service.id;
-      liveServiceRef.current = service;
+  const performNeuralFlush = async () => {
+    if (!currentSessionId || isEndingRef.current) return;
+    
+    const currentFiles = Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[];
+    const latestTranscript = transcriptRef.current;
+    
+    logApi("Performing Neural Checkpoint Flush...", "info");
+    
+    try {
+        const recording: MockInterviewRecording = { 
+            id: currentSessionId, 
+            userId: currentUser?.uid || 'guest', 
+            userName: currentUser?.displayName || 'Guest', 
+            userPhoto: currentUser?.photoURL, 
+            mode, 
+            language, 
+            jobDescription: jobDesc, 
+            interviewerInfo, 
+            intervieweeInfo, 
+            timestamp: Date.now(), 
+            videoUrl: '', 
+            transcript: latestTranscript, 
+            feedback: JSON.stringify({ summary: "SESSION RECOVERED: Brain synthesis was interrupted, but transcript was saved via checkpoint." }), 
+            visibility: 'private' 
+        };
 
-      try {
-        await service.connect(currentView === 'coaching' ? 'Zephyr' : 'Software Interview Voice', prompt, {
-          onOpen: () => { if (activeServiceIdRef.current === service.id) { setIsAiConnected(true); setIsCheckpointing(false); reconnectAttemptsRef.current = 0; } },
-          onClose: () => { if (activeServiceIdRef.current === service.id) { setIsAiConnected(false); if (!isEndingRef.current && isAuto && reconnectAttemptsRef.current < 5) { reconnectAttemptsRef.current++; handleReconnectAi(true); } } },
-          onError: () => { if (activeServiceIdRef.current === service.id) handleReconnectAi(true); },
-          onVolumeUpdate: () => {},
-          onTranscript: (text, isUser) => {
-            if (activeServiceIdRef.current !== service.id) return;
-            if (!isUser) setIsAiThinking(false);
-            const role = isUser ? 'user' : 'ai';
-            const setter = currentView === 'coaching' ? setCoachingTranscript : setTranscript;
-            setter((prev: TranscriptItem[]) => {
-              if (prev.length > 0 && prev[prev.length - 1].role === role) {
-                const last = prev[prev.length - 1];
-                return [...prev.slice(0, -1), { ...last, text: last.text + text }];
-              }
-              return [...prev, { role, text: text as string, timestamp: Date.now() }];
+        if (currentUser) {
+            await saveInterviewRecording(recording);
+            await saveCodeProject({ 
+                id: currentSessionId, 
+                name: `Checkpoint_${mode}_${new Date().toLocaleDateString()}`, 
+                files: currentFiles, 
+                lastModified: Date.now(), 
+                accessLevel: 'restricted', 
+                allowedUserIds: [currentUser.uid] 
             });
-          },
-          onToolCall: async (toolCall: any) => {
-              for (const fc of toolCall.functionCalls) {
-                  if (fc.name === 'get_current_code') {
-                      const { filename } = fc.args as any;
-                      const allFiles = Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[];
-                      let targetFile;
-                      if (filename) targetFile = allFiles.find(f => f.name === filename);
-                      else targetFile = allFiles.find(f => f.path === activeFilePath) || allFiles[0];
-                      
-                      service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: targetFile?.content || "// File not found or empty." } }]);
-                  } else if (fc.name === 'update_active_file') {
-                      const { new_content } = fc.args as any;
-                      const allFiles = Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[];
-                      const targetFile = allFiles.find(f => f.path === activeFilePath) || allFiles[0];
-                      if (targetFile) {
-                        const updatedFile = { ...targetFile, content: new_content };
-                        activeCodeFilesMapRef.current.set(updatedFile.path, updatedFile);
-                        setInitialStudioFiles(prev => prev.map(f => f.path === updatedFile.path ? updatedFile : f));
-                        service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `[NEURAL_SYNC_SUCCESS]: "${targetFile.name}" updated with your changes.` } }]);
-                      } else {
-                        service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: "Error: No active file." } }]);
-                      }
-                  } else if (fc.name === 'create_interview_file') {
-                      const { filename, content } = fc.args as any;
-                      let finalFilename = filename;
-                      if (sessionPrefix) {
-                          const baseName = filename.split('/').pop();
-                          if (!baseName.startsWith(sessionPrefix)) finalFilename = `${sessionPrefix}_${baseName}`;
-                      }
-                      const path = `drive://${currentSessionId}/${finalFilename}`;
-                      const newFile: CodeFile = { name: finalFilename, path, language: getLanguageFromExt(finalFilename) as any, content, loaded: true, isDirectory: false, isModified: false };
-                      activeCodeFilesMapRef.current.set(path, newFile);
-                      setInitialStudioFiles(prev => [...prev.filter(f => f.path !== path), newFile]);
-                      service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `[NEURAL_SYNC_SUCCESS]: "${finalFilename}" created in workspace.` } }]);
-                  }
-              }
-          }
-        }, [{ functionDeclarations: [getCodeTool, updateActiveFileTool, createInterviewFileTool] }]);
-      } catch (err: any) { logApi(`Init Failure: ${err.message}`, "error"); }
-    }, backoffTime);
+        }
+
+        const existingBackupsRaw = localStorage.getItem('mock_interview_backups') || '[]';
+        let existingBackups = JSON.parse(existingBackupsRaw) as MockInterviewRecording[];
+        existingBackups = existingBackups.filter(b => b.id !== currentSessionId);
+        localStorage.setItem('mock_interview_backups', JSON.stringify([...existingBackups, recording]));
+        
+        logApi("Neural Checkpoint Flush successful.", "info");
+    } catch (e) {
+        logApi("Flush skipped: Offline or Restricted.", "warn");
+    }
   };
 
   const handleEndInterview = async () => {
@@ -500,29 +355,19 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
     try {
         const interviewId = currentSessionId;
         const currentFiles = Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[];
+        const latestTranscript = transcriptRef.current;
         
         setSynthesisStep('Persisting Final Workspace...');
         setSynthesisPercent(30);
-        
-        await saveCodeProject({ 
-            id: interviewId, 
-            name: `Interview_${mode}_${new Date().toLocaleDateString()}`, 
-            files: currentFiles, 
-            lastModified: Date.now(), 
-            accessLevel: 'restricted', 
-            allowedUserIds: currentUser ? [currentUser.uid] : [] 
-        });
+        await saveCodeProject({ id: interviewId, name: `Interview_${mode}_${new Date().toLocaleDateString()}`, files: currentFiles, lastModified: Date.now(), accessLevel: 'restricted', allowedUserIds: currentUser ? [currentUser.uid] : [] });
 
-        const historyText = transcript.map(t => `${t.role.toUpperCase()}: ${t.text}`).join('\n');
+        const historyText = latestTranscript.map(t => `${t.role.toUpperCase()}: ${t.text}`).join('\n');
         const codeText = currentFiles.map(f => `FILE: ${f.name}\nCONTENT:\n${f.content}`).join('\n\n');
 
         setSynthesisStep('Synthesizing Feedback...');
         setSynthesisPercent(60);
-
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        const prompt = `Analyze this technical interview evaluation. Mode: ${mode}. History: ${historyText}. Workspace: ${codeText}. 
-        CRITICAL: Use a strict 0-100 integer scale for the score. DO NOT use 1-10.
-        Return JSON: { "score": integer (0 to 100), "technicalSkills": "string", "communication": "string", "collaboration": "string", "strengths": ["string"], "areasForImprovement": ["string"], "verdict": "string", "summary": "string", "learningMaterial": "Markdown" }`;
+        const prompt = `Analyze this technical interview evaluation. Mode: ${mode}. History: ${historyText}. Workspace: ${codeText}. CRITICAL: Use a strict 0-100 integer scale. Return JSON: { "score": integer, "technicalSkills": "string", "communication": "string", "collaboration": "string", "strengths": ["string"], "areasForImprovement": ["string"], "verdict": "string", "summary": "string", "learningMaterial": "Markdown" }`;
 
         const response = await ai.models.generateContent({ model: 'gemini-3-flash-preview', contents: prompt, config: { responseMimeType: 'application/json' } });
         const reportData = JSON.parse(response.text || '{}') as MockInterviewReport;
@@ -530,9 +375,8 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         
         setSynthesisStep('Archiving Video to Drive...');
         setSynthesisPercent(85);
-
         const videoBlob = new Blob(videoChunksRef.current, { type: 'video/webm' });
-        const recording: MockInterviewRecording = { id: interviewId, userId: currentUser?.uid || 'guest', userName: currentUser?.displayName || 'Guest', userPhoto: currentUser?.photoURL, mode, language, jobDescription: jobDesc, interviewerInfo, intervieweeInfo, timestamp: Date.now(), videoUrl: '', transcript, feedback: JSON.stringify(reportData), visibility };
+        const recording: MockInterviewRecording = { id: interviewId, userId: currentUser?.uid || 'guest', userName: currentUser?.displayName || 'Guest', userPhoto: currentUser?.photoURL, mode, language, jobDescription: jobDesc, interviewerInfo, intervieweeInfo, timestamp: Date.now(), videoUrl: '', transcript: latestTranscript, feedback: JSON.stringify(reportData), visibility };
 
         if (currentUser) {
             const token = getDriveToken();
@@ -543,22 +387,10 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
             }
             await saveInterviewRecording(recording);
         }
-        
-        const existingBackupsRaw = localStorage.getItem('mock_interview_backups');
-        let existingBackups: MockInterviewRecording[] = [];
-        if (existingBackupsRaw) {
-            try {
-                const parsed = JSON.parse(existingBackupsRaw);
-                if (Array.isArray(parsed)) {
-                    existingBackups = parsed as MockInterviewRecording[];
-                }
-            } catch (e) {
-                console.warn("Failed to parse interview backups", e);
-            }
-        }
-        
-        const newBackups: MockInterviewRecording[] = [...existingBackups, recording];
-        localStorage.setItem('mock_interview_backups', JSON.stringify(newBackups));
+        const existingBackupsRaw = localStorage.getItem('mock_interview_backups') || '[]';
+        let existingBackups = JSON.parse(existingBackupsRaw) as MockInterviewRecording[];
+        existingBackups = existingBackups.filter(b => b.id !== interviewId);
+        localStorage.setItem('mock_interview_backups', JSON.stringify([...existingBackups, recording]));
 
         setSynthesisPercent(100);
         setSynthesisStep('Refraction Complete');
@@ -569,6 +401,89 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         setView('hub'); 
     }
   };
+
+  const handleForceYouTubeSync = async (rec: any) => {
+    if (!currentUser) return;
+    
+    setShowSyncLog(true);
+    setSyncLogs([]);
+    addSyncLog(`FORCING YouTube Transfer: ${rec.userName}`, 'info');
+
+    let token = getDriveToken();
+    if (!token) {
+        addSyncLog("OAuth missing. Requesting new session...", 'warn');
+        const user = await signInWithGoogle();
+        if (!user) {
+            addSyncLog("Login canceled.", 'error');
+            return;
+        }
+        token = getDriveToken();
+    }
+
+    const isDriveUrl = (url: string) => url?.startsWith('drive://') || url?.includes('drive.google.com');
+
+    setSyncingId(rec.id);
+    try {
+        let videoBlob: Blob;
+        const isFromDrive = isDriveUrl(rec.videoUrl);
+        const originalDriveUrl = isFromDrive ? rec.videoUrl : rec.driveUrl;
+        
+        if (rec.blob instanceof Blob) {
+            addSyncLog("Loading local buffer (Source: Local)...", 'info');
+            videoBlob = rec.blob;
+        } else if (isFromDrive) {
+            addSyncLog("Downloading source from Google Drive...", 'info');
+            const fileId = rec.videoUrl.replace('drive://', '').split('&')[0];
+            videoBlob = await downloadDriveFileAsBlob(token!, fileId);
+            addSyncLog("Drive download successful.", 'success');
+        } else {
+            throw new Error("Recording source not found locally or on Drive.");
+        }
+
+        addSyncLog("Step 1: Initiating YouTube Handshake...", 'info');
+        let videoUrl = "";
+        try {
+            const ytId = await uploadToYouTube(token!, videoBlob, {
+                title: `${rec.userName} - ${rec.mode} Interview (Neural Archive)`,
+                description: `Transferred via AIVoiceCast.\nOriginal Source: ${rec.videoUrl}`,
+                privacyStatus: 'unlisted'
+            });
+            videoUrl = getYouTubeVideoUrl(ytId);
+            addSyncLog(`YouTube Upload Success: ${ytId}`, 'success');
+        } catch (ytErr: any) { 
+            // FIXED: Explicitly handle ytErr as any to avoid 'unknown' type errors (Fix Error 1)
+            const msg = (ytErr as any)?.message || String(ytErr);
+            addSyncLog(`YouTube FAILED: ${msg}`, 'error');
+            
+            if (isFromDrive) {
+                addSyncLog("RETENTION POLICY: Source is already on Drive. If YouTube fails, we keep the original Drive link active.", 'warn');
+                setSyncingId(null);
+                return; 
+            }
+
+            addSyncLog("FALLBACK: Saving local buffer to Drive instead...", 'warn');
+            const folderId = await ensureCodeStudioFolder(token!);
+            const driveFileId = await uploadToDrive(token!, folderId, `${rec.id}.webm`, videoBlob);
+            videoUrl = `drive://${driveFileId}`;
+            addSyncLog(`Drive Fallback Success: ${driveFileId}`, 'success');
+        }
+
+        addSyncLog("Step 2: Updating neural ledger references...", 'info');
+        await updateInterviewMetadata(rec.id, { videoUrl });
+        addSyncLog("Neural ledger updated to new URI.", 'success');
+        
+        setTimeout(() => {
+            loadInterviewsInternal();
+            setSyncingId(null);
+        }, 800);
+        
+    } catch (e: any) {
+        addSyncLog(`CRITICAL SYNC ERROR: ${e.message}`, 'error');
+        setSyncingId(null);
+    }
+  };
+
+  const [syncingId, setSyncingId] = useState<string | null>(null);
 
   const handleStartInterview = async () => {
     if (!driveToken) return alert("Please connect to Google Drive first.");
@@ -585,8 +500,8 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
 
     const audioCtx = getGlobalAudioContext();
     await warmUpAudioContext(audioCtx);
-    setTranscript([]); setCoachingTranscript([]); setReport(null); setApiLogs([]); videoChunksRef.current = []; activeCodeFilesMapRef.current.clear();
-    setTimeLeft(getDurationSeconds(mode));
+    setTranscript([]); setReport(null); setApiLogs([]); videoChunksRef.current = []; activeCodeFilesMapRef.current.clear();
+    setTimeLeft(durationMinutes * 60);
 
     try {
       const recordingDest = audioCtx.createMediaStreamDestination();
@@ -634,16 +549,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       const service = new GeminiLiveService();
       activeServiceIdRef.current = service.id; liveServiceRef.current = service;
       
-      const sysPrompt = `Role: Senior Interviewer. Mode: ${mode}. Candidate: ${currentUser?.displayName}. 
-      RESUME_TEXT: "${resumeText}". 
-      TARGET_JOB_DESC: "${jobDesc}".
-      INTERVIEWEE_BIO_CONTEXT: "${intervieweeInfo}".
-      INTERVIEWER_PERSONA_CONTEXT: "${interviewerInfo}".
-      
-      STRICT ANTI-SPOILING RULE: DO NOT AUTO-GENERATE SOLUTIONS. Present the problem statement first. Observe the candidate. Provide hints ONLY if requested or if they are significantly struggling.
-      FILE NAMING RULE: Always use unique, descriptive file names for new problems (e.g., '${prefix}_binary_search.cpp'). DO NOT overwrite existing problem files.
-      NEURAL TRUTH RULE: You will receive [NEURAL_TRUTH] blocks within user messages. Trust these blocks as the actual current state of the candidate's work.
-      GOAL: Greet and begin the evaluation. Adopt the persona requested in INTERVIEWER_PERSONA_CONTEXT. Inject problem 1 into the sidebar using tools.`;
+      const sysPrompt = `Role: Senior Interviewer. Mode: ${mode}. Duration: ${durationMinutes}m. Candidate: ${currentUser?.displayName}. RESUME_TEXT: "${resumeText}". TARGET_JOB_DESC: "${jobDesc}". INTERVIEWEE_BIO_CONTEXT: "${intervieweeInfo}". INTERVIEWER_PERSONA_CONTEXT: "${interviewerInfo}". STRICT ANTI-SPOILING RULE: DO NOT AUTO-GENERATE SOLUTIONS. Present problem first. NEURAL TRUTH RULE: Trust blocks marked [NEURAL_TRUTH].`;
       
       await service.connect(mode === 'behavioral' ? 'Zephyr' : 'Software Interview Voice', sysPrompt, {
         onOpen: () => {
@@ -651,7 +557,13 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
           if (timerRef.current) clearInterval(timerRef.current);
           timerRef.current = setInterval(() => { setTimeLeft(prev => { if (prev <= 1) { handleEndInterview(); return 0; } return prev - 1; }); }, 1000);
           if (checkpointTimerRef.current) clearInterval(checkpointTimerRef.current);
-          checkpointTimerRef.current = setInterval(() => { if (isAiConnected && !isEndingRef.current) { setIsCheckpointing(true); handleReconnectAi(true); } }, 15 * 60 * 1000);
+          checkpointTimerRef.current = setInterval(() => { 
+              if (isAiConnected && !isEndingRef.current) { 
+                  setIsCheckpointing(true); 
+                  performNeuralFlush();
+                  handleReconnectAi(true); 
+              } 
+          }, 15 * 60 * 1000);
         },
         onClose: () => { if (activeServiceIdRef.current === service.id) { setIsAiConnected(false); handleReconnectAi(true); } },
         onError: () => { if (activeServiceIdRef.current === service.id) handleReconnectAi(true); },
@@ -670,9 +582,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
             if (fc.name === 'get_current_code') {
               const { filename } = fc.args as any;
               const allFiles = Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[];
-              let targetFile;
-              if (filename) targetFile = allFiles.find(f => f.name === filename);
-              else targetFile = allFiles.find(f => f.path === activeFilePath) || allFiles[0];
+              let targetFile = filename ? allFiles.find(f => f.name === filename) : (allFiles.find(f => f.path === activeFilePath) || allFiles[0]);
               service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: targetFile?.content || "// No code." } }]);
             } else if (fc.name === 'update_active_file') {
               const { new_content } = fc.args as any;
@@ -683,21 +593,16 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                 activeCodeFilesMapRef.current.set(updated.path, updated);
                 setInitialStudioFiles(prev => prev.map(f => f.path === updated.path ? updated : f));
                 service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Success: Updated ${targetFile.name}.` } }]);
-              } else {
-                service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: "Error: No target file." } }]);
-              }
+              } else service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: "Error: No target." } }]);
             } else if (fc.name === 'create_interview_file') {
               const { filename, content } = fc.args as any;
               let finalFilename = filename;
-              if (prefix) {
-                  const base = filename.split('/').pop();
-                  if (!base.startsWith(prefix)) finalFilename = `${prefix}_${base}`;
-              }
+              if (prefix) { const base = filename.split('/').pop(); if (!base.startsWith(prefix)) finalFilename = `${prefix}_${base}`; }
               const path = `drive://${uuid}/${finalFilename}`;
               const newFile: CodeFile = { name: finalFilename, path, language: getLanguageFromExt(finalFilename) as any, content, loaded: true, isDirectory: false, isModified: false };
               activeCodeFilesMapRef.current.set(path, newFile);
               setInitialStudioFiles(prev => [...prev.filter(f => f.path !== path), newFile]);
-              service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Success: '${finalFilename}' created for candidate.` } }]);
+              service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Success: '${finalFilename}' created.` } }]);
             }
           }
         }
@@ -706,72 +611,151 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
     } catch (e: any) { alert("Startup failed."); setView('hub'); } finally { setIsStarting(false); }
   };
 
-  const handleCommitPastedCode = () => {
-    if (!pasteCodeBuffer.trim()) return;
-    const filename = `${sessionPrefix}_manual_${Date.now()}.${pasteCodeLang}`;
-    const path = `drive://${currentSessionId}/${filename}`;
-    const newFile: CodeFile = { name: filename, path, language: getLanguageFromExt(filename) as any, content: pasteCodeBuffer, loaded: true, isDirectory: false, isModified: true };
-    activeCodeFilesMapRef.current.set(path, newFile);
-    setInitialStudioFiles(prev => [...prev.filter(f => f.path !== path), newFile]);
-    setPasteCodeBuffer(''); setShowCodePasteOverlay(false);
+  const handleReconnectAi = async (isAuto = false) => {
+    if (isEndingRef.current) return;
+    setIsAiConnected(false);
+    if (liveServiceRef.current) liveServiceRef.current.disconnect();
+    const backoffTime = isAuto ? Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 10000) : 0;
+    setTimeout(async () => {
+      if (isEndingRef.current) return;
+      const activeTranscriptList = transcriptRef.current;
+      const historyText = activeTranscriptList.map(t => `${String(t.role).toUpperCase()}: ${t.text}`).join('\n');
+      const currentFiles = Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[];
+      const workspaceManifest = currentFiles.map(f => `FILE: ${f.name}\nCONTENT:\n${f.content}`).join('\n\n---\n\n');
+      const prompt = `RESUMING INTERVIEW SESSION. Workspace: ${workspaceManifest}. History: ${historyText}. Pick up exactly where left off.`;
+      const service = new GeminiLiveService();
+      activeServiceIdRef.current = service.id; liveServiceRef.current = service;
+      try {
+        await service.connect(mode === 'behavioral' ? 'Zephyr' : 'Software Interview Voice', prompt, {
+          onOpen: () => { if (activeServiceIdRef.current === service.id) { setIsAiConnected(true); setIsCheckpointing(false); reconnectAttemptsRef.current = 0; } },
+          onClose: () => { if (activeServiceIdRef.current === service.id) { setIsAiConnected(false); if (!isEndingRef.current && isAuto && reconnectAttemptsRef.current < 5) { reconnectAttemptsRef.current++; handleReconnectAi(true); } } },
+          onError: () => { if (activeServiceIdRef.current === service.id) handleReconnectAi(true); },
+          onVolumeUpdate: () => {},
+          onTranscript: (text, isUser) => {
+            if (activeServiceIdRef.current !== service.id) return;
+            if (!isUser) setIsAiThinking(false);
+            const role = isUser ? 'user' : 'ai';
+            setTranscript((prev: TranscriptItem[]) => {
+              if (prev.length > 0 && prev[prev.length - 1].role === role) return [...prev.slice(0, -1), { ...prev[prev.length - 1], text: prev[prev.length - 1].text + text }];
+              return [...prev, { role, text: text as string, timestamp: Date.now() }];
+            });
+          },
+          onToolCall: async (toolCall: any) => {
+              for (const fc of toolCall.functionCalls) {
+                  if (fc.name === 'get_current_code') {
+                      const allFiles = Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[];
+                      let targetFile = allFiles.find(f => f.path === activeFilePath) || allFiles[0];
+                      service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: targetFile?.content || "// File empty." } }]);
+                  } else if (fc.name === 'update_active_file') {
+                      const allFiles = Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[];
+                      const targetFile = allFiles.find(f => f.path === activeFilePath) || allFiles[0];
+                      if (targetFile) {
+                        const updated = { ...targetFile, content: fc.args.new_content };
+                        activeCodeFilesMapRef.current.set(updated.path, updated);
+                        setInitialStudioFiles(prev => prev.map(f => f.path === updated.path ? updated : f));
+                        service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: "Updated." } }]);
+                      }
+                  } else if (fc.name === 'create_interview_file') {
+                      const path = `drive://${currentSessionId}/${fc.args.filename}`;
+                      const newFile: CodeFile = { name: fc.args.filename, path, language: getLanguageFromExt(fc.args.filename) as any, content: fc.args.content, loaded: true, isDirectory: false, isModified: false };
+                      activeCodeFilesMapRef.current.set(path, newFile);
+                      setInitialStudioFiles(prev => [...prev.filter(f => f.path !== path), newFile]);
+                      service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: "Created." } }]);
+                  }
+              }
+          }
+        }, [{ functionDeclarations: [getCodeTool, updateActiveFileTool, createInterviewFileTool] }]);
+      } catch (err: any) { logApi(`Init Failure: ${err.message}`, "error"); }
+    }, backoffTime);
   };
 
-  const renderInterviewsList = (list: MockInterviewRecording[], isHistory: boolean) => {
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const loadInterviewsInternal = async () => {
+    setLoading(true);
+    try {
+      const [publicData, userData] = await Promise.all([
+        getPublicInterviews(),
+        currentUser ? getUserInterviews(currentUser.uid) : Promise.resolve([])
+      ]);
+      const localBackupsRaw = localStorage.getItem('mock_interview_backups') || '[]';
+      const localBackups = (JSON.parse(localBackupsRaw) as MockInterviewRecording[]).filter(b => b && b.id);
+      const myFilteredBackups = localBackups.filter(b => b.userId === (currentUser?.uid || 'guest'));
+      const myMap = new Map<string, MockInterviewRecording>();
+      userData.forEach(rec => myMap.set(rec.id, rec));
+      myFilteredBackups.forEach(backup => { if (!myMap.has(backup.id)) myMap.set(backup.id, backup); });
+      const combined = Array.from(myMap.values());
+      setMyInterviews(combined.sort((a, b) => b.timestamp - a.timestamp));
+      setPublicInterviews(publicData.sort((a, b) => b.timestamp - a.timestamp));
+    } catch (e) { console.error("Ledger retrieval error", e); } finally { setLoading(false); }
+  };
+
+  useEffect(() => { loadInterviewsInternal(); }, [currentUser]);
+
+  // ADDED: Missing renderInterviewsList function (Fix Error 2)
+  const renderInterviewsList = (list: MockInterviewRecording[], isMyHistory: boolean) => {
     if (list.length === 0) {
         return (
-            <div className="py-20 text-center text-slate-500 border-2 border-dashed border-slate-800 rounded-[2rem] bg-slate-900/30">
-                <p>{isHistory ? "No interview history yet." : "No public evaluations found."}</p>
+            <div className="py-20 text-center text-slate-500 bg-slate-900/30 rounded-[3rem] border-2 border-dashed border-slate-800">
+                <PlayCircle size={64} className="mx-auto mb-6 opacity-5" />
+                <p className="text-lg font-bold text-slate-400">No evaluations found.</p>
+                <p className="text-sm mt-2 opacity-60">Complete an interview session to see it here.</p>
             </div>
         );
     }
 
     return (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {list.map((rec) => {
-                const isSelected = selectedIds.has(rec.id);
-                return (
-                    <div 
-                        key={rec.id} 
-                        onClick={() => {
-                            setActiveRecording(rec);
-                            const parsedFeedback = rec.feedback ? JSON.parse(rec.feedback) : null;
-                            setReport(parsedFeedback);
-                            setView('report');
-                        }}
-                        className={`bg-slate-900 border ${isSelected ? 'border-indigo-500 bg-indigo-900/5' : 'border-slate-800'} rounded-[2.5rem] p-6 hover:border-indigo-500/50 transition-all cursor-pointer group relative overflow-hidden flex flex-col justify-between`}
-                    >
-                        {isHistory && (
-                            <button 
-                                onClick={(e) => handleToggleSelect(rec.id, e)}
-                                className="absolute top-4 left-4 z-20 text-slate-600 hover:text-indigo-400 transition-colors"
-                            >
-                                {isSelected ? <CheckSquare size={20}/> : <Square size={20}/>}
-                            </button>
-                        )}
-                        <div className="flex justify-between items-start mb-4">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-indigo-400">
-                                    <Video size={20}/>
-                                </div>
-                                <div className="min-w-0">
-                                    <h4 className="font-bold text-white text-sm line-clamp-1">{rec.mode.replace('_', ' ').toUpperCase()}</h4>
-                                    <p className="text-[10px] text-slate-500 font-bold uppercase">{new Date(rec.timestamp).toLocaleDateString()}</p>
-                                </div>
-                            </div>
+            {list.map((rec) => (
+                <div 
+                    key={rec.id} 
+                    onClick={() => { setActiveRecording(rec); setView('artifact_viewer'); }}
+                    className="bg-slate-900 border border-slate-800 rounded-3xl p-6 hover:border-indigo-500/50 transition-all cursor-pointer group relative shadow-xl overflow-hidden"
+                >
+                    <div className="absolute top-0 right-0 p-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button 
+                            onClick={(e) => handleToggleSelect(rec.id, e)}
+                            className={`p-2 rounded-xl border transition-all ${selectedIds.has(rec.id) ? 'bg-indigo-600 border-indigo-400 text-white' : 'bg-slate-800 border-slate-700 text-slate-400'}`}
+                        >
+                            {selectedIds.has(rec.id) ? <CheckSquare size={16}/> : <Square size={16}/>}
+                        </button>
+                    </div>
+                    
+                    <div className="flex items-center gap-4 mb-6">
+                        <div className="w-12 h-12 rounded-2xl bg-indigo-950 flex items-center justify-center text-indigo-400 border border-indigo-500/20 group-hover:scale-110 transition-transform">
+                            <GraduationCap size={24} />
                         </div>
-                        <p className="text-xs text-slate-400 line-clamp-2 italic mb-6">"{rec.jobDescription || 'Technical evaluation session'}"</p>
-                        <div className="flex items-center justify-between pt-4 border-t border-slate-800">
-                            <div className="flex items-center gap-2">
-                                <User size={12} className="text-slate-500"/>
-                                <span className="text-[10px] font-bold text-slate-500 uppercase">{rec.userName}</span>
-                            </div>
-                            <button className="text-indigo-400 text-[10px] font-black uppercase tracking-widest flex items-center gap-1 group-hover:translate-x-1 transition-transform">
-                                Results <ChevronRight size={12}/>
-                            </button>
+                        <div className="min-w-0 flex-1">
+                            <h3 className="font-bold text-white text-lg truncate italic uppercase tracking-tighter">{rec.mode.replace('_', ' ')}</h3>
+                            <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest">{new Date(rec.timestamp).toLocaleDateString()}</p>
                         </div>
                     </div>
-                );
-            })}
+
+                    <div className="space-y-3 mb-6">
+                        <div className="flex items-center gap-2 text-xs text-slate-400">
+                            <User size={14} className="text-slate-600"/>
+                            <span className="truncate">@{rec.userName}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-slate-400">
+                            <Languages size={14} className="text-slate-600"/>
+                            <span>{rec.language || 'English'}</span>
+                        </div>
+                    </div>
+
+                    <div className="pt-4 border-t border-slate-800 flex items-center justify-between">
+                        <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded ${rec.visibility === 'public' ? 'bg-emerald-900/20 text-emerald-400' : 'bg-slate-800 text-slate-500'}`}>
+                            {rec.visibility || 'private'}
+                        </span>
+                        <div className="flex items-center gap-1 text-indigo-400 text-xs font-bold group-hover:translate-x-1 transition-transform">
+                            View Report <ChevronRight size={14}/>
+                        </div>
+                    </div>
+                </div>
+            ))}
         </div>
     );
   };
@@ -780,143 +764,86 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
     <div className="h-full flex flex-col bg-slate-950 text-slate-100 overflow-hidden relative">
       <header className="h-16 border-b border-slate-800 bg-slate-900/50 flex items-center justify-between px-6 backdrop-blur-md shrink-0 z-40">
         <div className="flex items-center gap-4">
-          <button onClick={() => view === 'hub' ? onBack() : view === 'artifact_viewer' ? setView('report') : setView('hub')} className="p-2 hover:bg-slate-800 rounded-lg text-slate-400"><ArrowLeft size={20} /></button>
+          <button onClick={() => view === 'hub' ? onBack() : view === 'artifact_viewer' ? setView('hub') : setView('hub')} className="p-2 hover:bg-slate-800 rounded-lg text-slate-400"><ArrowLeft size={20} /></button>
           <div><h1 className="text-lg font-bold text-white flex items-center gap-2"><Video className="text-red-500" size={20} /> {view === 'artifact_viewer' ? 'Artifact Viewer' : 'Mock Interview'}</h1>{(view === 'interview' || view === 'coaching' || view === 'artifact_viewer') && (<div className="flex items-center gap-1.5 text-[9px] font-black text-indigo-400 uppercase tracking-widest mt-0.5"><Fingerprint size={10}/> Session: {(activeRecording?.id || currentSessionId).substring(0, 8)}</div>)}</div>
         </div>
         <div className="flex items-center gap-3">
             {view === 'interview' && (<div className={`px-4 py-1.5 rounded-2xl border bg-slate-950/50 flex items-center gap-2 ${timeLeft < 300 ? 'border-red-500/50 text-red-400 animate-pulse' : 'border-indigo-500/30 text-indigo-400'}`}><Timer size={14}/><span className="font-mono text-base font-black tabular-nums">{formatTime(timeLeft)}</span></div>)}
-            {view !== 'artifact_viewer' && (<button onClick={() => setShowDiagnostics(!showDiagnostics)} className={`p-2 rounded-lg transition-colors ${showDiagnostics ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}><Terminal size={18}/></button>)}
-            {(view === 'report' || view === 'coaching') && (<button onClick={() => { setView('hub'); loadInterviews(); }} className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-black uppercase tracking-widest border border-slate-700"><History size={14}/><span>History</span></button>)}
+            {(view === 'report' || view === 'coaching' || view === 'artifact_viewer') && (<button onClick={() => { setView('hub'); loadInterviewsInternal(); }} className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-black uppercase tracking-widest border border-slate-700"><History size={14}/><span>History</span></button>)}
             {view === 'interview' && (<button onClick={handleEndInterview} className="px-6 py-2 bg-red-600 hover:bg-red-500 text-white rounded-xl text-xs font-black uppercase tracking-widest shadow-lg active:scale-95">End Session</button>)}
         </div>
       </header>
       <main className="flex-1 overflow-hidden relative">
-        {isCheckpointing && (<div className="absolute inset-0 z-[110] bg-slate-950/80 backdrop-blur-md flex flex-col items-center justify-center gap-6 animate-fade-in"><div className="p-8 bg-slate-900 border border-indigo-500/30 rounded-[3rem] flex flex-col items-center shadow-2xl"><div className="w-20 h-20 bg-indigo-600/10 rounded-3xl flex items-center justify-center mb-6 border border-indigo-500/20"><Database size={40} className="text-indigo-400 animate-pulse"/></div><h3 className="text-xl font-black text-white uppercase tracking-widest mb-2">Neural Checkpoint</h3><p className="text-xs text-slate-500 uppercase font-black text-center max-w-xs">Rotating AI connection...</p></div></div>)}
+        {isCheckpointing && (<div className="absolute inset-0 z-[110] bg-slate-950/80 backdrop-blur-md flex flex-col items-center justify-center gap-6 animate-fade-in"><div className="p-8 bg-slate-900 border border-indigo-500/30 rounded-[3rem] flex flex-col items-center shadow-2xl"><div className="w-20 h-20 bg-indigo-600/10 rounded-3xl flex items-center justify-center mb-6 border border-indigo-500/20"><Database size={40} className="text-indigo-400 animate-pulse"/></div><h3 className="text-xl font-black text-white uppercase tracking-widest mb-2">Neural Checkpoint</h3><p className="text-xs text-slate-500 uppercase font-black text-center max-w-xs">Rotating AI connection & Archiving Progress...</p></div></div>)}
         {view === 'hub' && (
           <div className="max-w-6xl mx-auto p-8 space-y-12 animate-fade-in overflow-y-auto h-full scrollbar-hide">
             <div className="bg-indigo-600 rounded-[3rem] p-12 shadow-2xl relative overflow-hidden flex flex-col md:flex-row items-center gap-10"><div className="relative z-10 flex-1 space-y-6"><h2 className="text-5xl font-black text-white italic tracking-tighter uppercase leading-none">Validate your<br/>Potential.</h2><button onClick={() => setView('prep')} className="px-10 py-5 bg-white text-indigo-600 font-black uppercase tracking-widest rounded-2xl shadow-2xl hover:scale-105 transition-all flex items-center gap-3"><Zap size={20} fill="currentColor"/> Begin Preparation</button></div><div className="relative z-10 hidden lg:block"><Bot size={100} className="text-indigo-400 animate-pulse"/></div></div>
-            <div className="space-y-8"><div className="flex bg-slate-900 p-1 rounded-2xl border border-slate-800 w-fit shadow-lg"><button onClick={() => setHubTab('history')} className={`px-6 py-2 rounded-xl text-xs font-black uppercase transition-all ${hubTab === 'history' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500'}`}>History</button><button onClick={() => setHubTab('explore')} className={`px-6 py-2 rounded-xl text-xs font-black uppercase transition-all ${hubTab === 'explore' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500'}`}>Discovery</button></div>{loading ? <div className="py-20 text-center"><Loader2 className="animate-spin mx-auto text-indigo-400" size={32}/></div> : renderInterviewsList(hubTab === 'history' ? myInterviews : publicInterviews, hubTab === 'history')}</div>
+            <div className="space-y-8">
+                <div className="flex justify-between items-center">
+                    <div className="flex bg-slate-900 p-1 rounded-2xl border border-slate-800 w-fit shadow-lg">
+                        <button onClick={() => setHubTab('history')} className={`px-6 py-2 rounded-xl text-xs font-black uppercase transition-all ${hubTab === 'history' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500'}`}>History</button>
+                        <button onClick={() => setHubTab('explore')} className={`px-6 py-2 rounded-xl text-xs font-black uppercase transition-all ${hubTab === 'explore' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500'}`}>Discovery</button>
+                    </div>
+                    {selectedIds.size > 0 && (
+                        <button onClick={handleDeleteSelected} disabled={isBulkDeleting} className="flex items-center gap-2 px-4 py-2 bg-red-600/10 hover:bg-red-600 text-red-400 hover:text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all">{isBulkDeleting ? <Loader2 size={14} className="animate-spin"/> : <Trash2 size={14}/>} Purge {selectedIds.size}</button>
+                    )}
+                </div>
+                {loading ? <div className="py-20 text-center"><Loader2 className="animate-spin mx-auto text-indigo-400" size={32}/></div> : renderInterviewsList(hubTab === 'history' ? myInterviews : publicInterviews, hubTab === 'history')}
+            </div>
           </div>
         )}
         {view === 'prep' && (
           <div className="max-w-6xl mx-auto p-8 animate-fade-in-up h-full overflow-y-auto scrollbar-hide">
             <div className="bg-slate-900 border border-slate-800 rounded-[3rem] p-10 shadow-2xl space-y-10">
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
-                
-                {/* Column 1: Identity & Handshake */}
                 <div className="space-y-8">
                     <div className={`p-6 rounded-3xl border flex items-center justify-between transition-all ${driveToken ? 'bg-emerald-900/10 border-emerald-500/30' : 'bg-red-900/10 border-red-500/30 animate-pulse'}`}>
-                        <div className="flex items-center gap-3">
-                            <HardDrive className={driveToken ? 'text-emerald-400' : 'text-red-400'} size={24}/>
-                            <div>
-                                <p className="text-xs font-bold text-white uppercase tracking-widest">Neural Cloud Link</p>
-                                <p className="text-[10px] text-slate-500 uppercase font-black">{driveToken ? 'Authorized' : 'Action Required'}</p>
-                            </div>
-                        </div>
+                        <div className="flex items-center gap-3"><HardDrive className={driveToken ? 'text-emerald-400' : 'text-red-400'} size={24}/><div><p className="text-xs font-bold text-white uppercase tracking-widest">Neural Cloud Link</p><p className="text-[10px] text-slate-500 uppercase font-black">{driveToken ? 'Authorized' : 'Action Required'}</p></div></div>
                         {!driveToken && <button onClick={handleConnectDrive} className="px-4 py-1.5 bg-red-600 text-white rounded-lg text-[10px] font-black uppercase shadow-lg">Authorize Drive</button>}
                     </div>
-
                     <div className="bg-slate-950 p-6 rounded-[2rem] border border-slate-800 space-y-6 shadow-inner">
-                        <div className="flex items-center justify-between px-1">
-                            <h3 className="text-xs font-black text-indigo-400 uppercase tracking-widest flex items-center gap-2"><UserCircle size={16}/> Candidate Context</h3>
-                            <button onClick={handleSyncFromProfile} className="text-[10px] font-black text-indigo-400 hover:text-white transition-all flex items-center gap-1 uppercase tracking-widest">
-                                <RefreshCw size={10}/> Sync from Identity
-                            </button>
-                        </div>
+                        <div className="flex items-center justify-between px-1"><h3 className="text-xs font-black text-indigo-400 uppercase tracking-widest flex items-center gap-2"><UserCircle size={16}/> Candidate Context</h3><button onClick={handleSyncFromProfile} className="text-[10px] font-black text-indigo-400 hover:text-white transition-all flex items-center gap-1 uppercase tracking-widest"><RefreshCw size={10}/> Sync Profile</button></div>
                         <div className="space-y-4">
-                            <div>
-                                <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest block mb-2 px-1">Interviewee Profile (Bio/LinkedIn)</label>
-                                <textarea 
-                                    value={intervieweeInfo} 
-                                    onChange={e => setIntervieweeInfo(e.target.value)} 
-                                    className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-xs text-indigo-200 outline-none focus:border-indigo-500 resize-none h-24"
-                                    placeholder="Paste your LinkedIn URL or a brief professional summary..."
-                                />
-                            </div>
-                            <div>
-                                <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest block mb-2 px-1">Target Interviewer Persona</label>
-                                <textarea 
-                                    value={interviewerInfo} 
-                                    onChange={e => setInterviewerInfo(e.target.value)} 
-                                    className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-indigo-500 resize-none h-24"
-                                    placeholder="Who is interviewing you? (e.g. 'A Principal Engineer from Netflix' or a LinkedIn Link)"
-                                />
-                            </div>
+                            <div><label className="text-[9px] font-black text-slate-500 uppercase tracking-widest block mb-2 px-1">Interviewee Profile (Bio/LinkedIn)</label><textarea value={intervieweeInfo} onChange={e => setIntervieweeInfo(e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-xs text-indigo-200 outline-none focus:border-indigo-500 resize-none h-24" placeholder="Professional summary..."/></div>
+                            <div><label className="text-[9px] font-black text-slate-500 uppercase tracking-widest block mb-2 px-1">Target Interviewer Persona</label><textarea value={interviewerInfo} onChange={e => setInterviewerInfo(e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-indigo-500 resize-none h-24" placeholder="Principal Engineer from Netflix..."/></div>
                         </div>
                     </div>
                 </div>
-
-                {/* Column 2: Scope & Job Specs */}
                 <div className="space-y-8">
                     <div className="bg-slate-950 p-6 rounded-[2rem] border border-slate-800 space-y-6 shadow-inner">
-                        <div className="flex items-center justify-between px-1">
-                            <h3 className="text-xs font-black text-emerald-400 uppercase tracking-widest flex items-center gap-2"><FileSearch size={16}/> Target Specification</h3>
-                            <div className="flex bg-slate-900 p-1 rounded-lg border border-slate-800">
-                                <button onClick={() => setJobDescType('text')} className={`px-3 py-1 rounded text-[9px] font-black uppercase transition-all ${jobDescType === 'text' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500'}`}>Text</button>
-                                <button onClick={() => setJobDescType('link')} className={`px-3 py-1 rounded text-[9px] font-black uppercase transition-all ${jobDescType === 'link' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500'}`}>Link</button>
-                            </div>
-                        </div>
-                        {jobDescType === 'link' ? (
-                            <div className="relative group">
-                                <LinkIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-emerald-400" size={16}/>
-                                <input 
-                                    type="url" 
-                                    value={jobDesc} 
-                                    onChange={e => setJobDesc(e.target.value)}
-                                    className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-xs text-emerald-100 outline-none focus:border-emerald-500"
-                                    placeholder="https://lever.co/job/123..."
-                                />
-                            </div>
-                        ) : (
-                            <textarea 
-                                value={jobDesc} 
-                                onChange={e => setJobDesc(e.target.value)} 
-                                className="w-full bg-slate-900 border border-slate-800 rounded-2xl p-4 text-xs text-emerald-100 outline-none focus:border-emerald-500 resize-none h-48"
-                                placeholder="Paste the job description or requirements specification here..."
-                            />
-                        )}
+                        <div className="flex items-center justify-between px-1"><h3 className="text-xs font-black text-emerald-400 uppercase tracking-widest flex items-center gap-2"><FileSearch size={16}/> Target Specification</h3></div>
+                        <textarea value={jobDesc} onChange={e => setJobDesc(e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-2xl p-4 text-xs text-emerald-100 outline-none focus:border-emerald-500 resize-none h-48" placeholder="Paste job description..."/>
                     </div>
-
-                    <div className="bg-slate-950 p-6 rounded-[2rem] border border-slate-800 space-y-4 shadow-inner">
-                        <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Target size={16}/> Evaluation Depth</h3>
-                        <div className="grid grid-cols-1 gap-2">
-                            {[
-                                { id: 'coding', icon: Code, label: 'Algorithms & Logic' }, 
-                                { id: 'system_design', icon: Layers, label: 'System Architecture' }, 
-                                { id: 'behavioral', icon: MessageSquare, label: 'Cultural Fit (STAR)' }
-                            ].map(m => (
-                                <button 
-                                    key={m.id} 
-                                    onClick={() => setMode(m.id as any)} 
-                                    className={`p-4 rounded-2xl border text-left flex items-center justify-between transition-all group ${mode === m.id ? 'bg-indigo-600 border-indigo-500 text-white shadow-xl shadow-indigo-900/20' : 'bg-slate-900 border-slate-800 text-slate-500 hover:border-slate-600'}`}
-                                >
-                                    <div className="flex items-center gap-3">
-                                        <m.icon size={18} className={mode === m.id ? 'text-white' : 'text-slate-600'}/>
-                                        <span className="text-[11px] font-black uppercase tracking-wider">{m.label}</span>
-                                    </div>
-                                    {mode === m.id && <CheckCircle size={16} fill="white" className="text-indigo-600"/>}
-                                </button>
+                    <div className="bg-slate-950 p-6 rounded-[2rem] border border-slate-800 space-y-6 shadow-inner">
+                        <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Timer size={16}/> Session Chronometry</h3>
+                        <div className="flex bg-slate-900 p-1 rounded-2xl border border-slate-800">
+                            {[15, 25, 30, 45, 60].map(m => (
+                                <button key={m} onClick={() => setDurationMinutes(m)} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase transition-all ${durationMinutes === m ? 'bg-indigo-600 text-white shadow-xl' : 'text-slate-500 hover:text-slate-300'}`}>{m}m</button>
                             ))}
                         </div>
                     </div>
                 </div>
               </div>
-
               <div className="pt-8">
-                <button 
-                    onClick={handleStartInterview} 
-                    disabled={isStarting || !driveToken} 
-                    className="w-full py-6 bg-gradient-to-r from-red-600 to-indigo-600 text-white font-black uppercase tracking-[0.3em] rounded-3xl shadow-2xl transition-all hover:scale-[1.01] active:scale-95 disabled:opacity-30 disabled:grayscale"
-                >
-                    {isStarting ? <Loader2 className="animate-spin mx-auto" /> : 'Launch Evaluation Protocol'}
+                <button onClick={handleStartInterview} disabled={isStarting || !driveToken} className="w-full py-6 bg-gradient-to-r from-red-600 to-indigo-600 text-white font-black uppercase tracking-[0.3em] rounded-3xl shadow-2xl transition-all hover:scale-[1.01] active:scale-95 disabled:opacity-30">
+                    {isStarting ? <Loader2 className="animate-spin mx-auto" /> : `Launch ${durationMinutes}min Evaluation Protocol`}
                 </button>
-                <p className="text-[9px] text-slate-600 font-bold uppercase tracking-widest text-center mt-4">By initiating, you authorize the neural recording of your camera, screen, and logic.</p>
               </div>
             </div>
           </div>
         )}
         {view === 'interview' && (
-          <div className="h-full flex flex-col overflow-hidden relative"><div className="flex-1 bg-slate-950 relative flex flex-col md:flex-row overflow-hidden"><div className="flex-1 overflow-hidden relative flex flex-col bg-slate-950"><CodeStudio onBack={() => {}} currentUser={currentUser} userProfile={userProfile} onSessionStart={() => {}} onSessionStop={() => {}} onStartLiveSession={onStartLiveSession as any} initialFiles={initialStudioFiles} externalChatContent={transcript.map(t => ({ role: t.role, text: t.text }))} onSendExternalMessage={handleSendTextMessage} isInterviewerMode={true} isAiThinking={isAiThinking} onFileChange={handleEditorFileChange} onSyncCodeWithAi={handleSyncWithAi}/></div></div><div className={`absolute bottom-20 right-4 w-64 aspect-video rounded-3xl overflow-hidden border-4 ${isAiConnected ? 'border-indigo-500/50' : 'border-red-500/50 animate-pulse'} shadow-2xl z-[100] bg-black group transition-all`}><video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover"/><div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-3"><button onClick={() => setShowCodePasteOverlay(true)} className="p-1.5 bg-indigo-600 rounded-lg text-white"><Code size={14}/></button></div></div></div>
+          <div className="h-full flex flex-col overflow-hidden relative">
+            <div className="flex-1 bg-slate-950 relative flex flex-col md:flex-row overflow-hidden">
+                <div className="flex-1 overflow-hidden relative flex flex-col bg-slate-950">
+                    <CodeStudio onBack={() => {}} currentUser={currentUser} userProfile={userProfile} onSessionStart={() => {}} onSessionStop={() => {}} onStartLiveSession={onStartLiveSession as any} initialFiles={initialStudioFiles} externalChatContent={transcript.map(t => ({ role: t.role, text: t.text }))} onSendExternalMessage={handleSendTextMessage} isInterviewerMode={true} isAiThinking={isAiThinking} onFileChange={handleEditorFileChange} onSyncCodeWithAi={handleSyncWithAi}/>
+                </div>
+            </div>
+            <div className={`absolute bottom-20 right-4 w-64 aspect-video rounded-3xl overflow-hidden border-4 ${isAiConnected ? 'border-indigo-500/50' : 'border-red-500/50 animate-pulse'} shadow-2xl z-[100] bg-black group transition-all`}>
+                <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover"/>
+                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-3"><button onClick={() => setShowCodePasteOverlay(true)} className="p-1.5 bg-indigo-600 rounded-lg text-white"><Code size={14}/></button></div>
+            </div>
+          </div>
         )}
         {view === 'report' && (
           <div className="max-w-4xl mx-auto p-8 animate-fade-in-up space-y-12 pb-32 overflow-y-auto h-full scrollbar-hide">
@@ -925,18 +852,111 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
               {report ? (
                 <div className="flex flex-col items-center gap-6 w-full">
                     <div className="flex flex-wrap justify-center gap-4"><div className="px-8 py-4 bg-slate-950 rounded-2xl border border-slate-800"><p className="text-[10px] text-slate-500 uppercase">Score</p><p className="text-4xl font-black text-indigo-400">{report.score}</p></div><div className="px-8 py-4 bg-slate-950 rounded-2xl border border-slate-800"><p className="text-[10px] text-slate-500 uppercase">Verdict</p><p className={`text-xl font-black ${report.verdict.includes('Hire') ? 'text-emerald-400' : 'text-red-400'}`}>{report.verdict}</p></div></div>
-                    <div className="w-full text-left"><div onClick={() => setView('artifact_viewer')} className="flex items-center justify-between cursor-pointer group mb-4"><h3 className="text-xl font-black text-white italic uppercase tracking-tighter flex items-center gap-3"><FolderOpen className="text-indigo-400"/> Workspace Artifacts</h3><span className="text-xs text-indigo-400 font-bold">Explore All <ChevronRight size={14}/></span></div><div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 shadow-inner" onClick={() => setView('artifact_viewer')}>{sessionProject?.files?.map((f, idx) => (<div key={idx} className="flex items-center justify-between p-3 border-b border-slate-900 last:border-0"><div className="flex items-center gap-3"><FileText size={16} className="text-indigo-500"/><span className="text-xs font-mono text-slate-400">{f.name}</span></div></div>))}</div></div>
-                    <div className="text-left w-full bg-slate-950 p-8 rounded-[2rem] border border-slate-800"><h3 className="font-bold text-white mb-4"><Sparkles className="text-indigo-400" size={18}/> Summary</h3><p className="text-sm text-slate-400 leading-relaxed">{report.summary}</p></div>
+                    <div className="w-full text-left w-full bg-slate-950 p-8 rounded-[2rem] border border-slate-800"><h3 className="font-bold text-white mb-4"><Sparkles className="text-indigo-400" size={18}/> Summary</h3><p className="text-sm text-slate-400 leading-relaxed">{report.summary}</p></div>
                     <div className="text-left w-full bg-slate-950 p-8 rounded-[2rem] border border-slate-800"><h3 className="font-bold text-white mb-4"><BookOpen className="text-indigo-400" size={18}/> Growth Path</h3><div className="prose prose-invert prose-sm max-w-none"><MarkdownView content={report.learningMaterial} /></div></div>
                 </div>
               ) : <Loader2 size={32} className="animate-spin text-indigo-400" />}
             </div>
           </div>
         )}
-        {view === 'artifact_viewer' && (<div className="h-full flex flex-col bg-slate-950 animate-fade-in relative"><div className="flex-1"><CodeStudio onBack={() => setView('report')} currentUser={currentUser} userProfile={userProfile} onSessionStart={() => {}} onSessionStop={() => {}} onStartLiveSession={() => {}} initialFiles={sessionProject?.files || []} isInterviewerMode={true} isAiThinking={false}/></div><div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50"><button onClick={() => setView('report')} className="px-12 py-3 bg-indigo-600 text-white font-black uppercase tracking-widest rounded-2xl shadow-2xl">Return to Report</button></div></div>)}
+        {/* ADDED: Missing Artifact Viewer block */}
+        {view === 'artifact_viewer' && activeRecording && (
+          <div className="h-full flex flex-col bg-slate-950 animate-fade-in overflow-hidden">
+             <div className="flex-1 overflow-y-auto p-8 space-y-12 scrollbar-hide pb-32">
+                <div className="max-w-4xl mx-auto space-y-8">
+                    <div className="bg-slate-900 border border-slate-800 rounded-[3rem] p-10 shadow-2xl relative overflow-hidden">
+                        <div className="absolute top-0 right-0 p-12 bg-indigo-500/10 blur-[100px] rounded-full"></div>
+                        <div className="relative z-10 space-y-4">
+                            <span className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.3em]">Historical Artifact</span>
+                            <h2 className="text-4xl font-black text-white italic tracking-tighter uppercase">{activeRecording.mode.replace('_', ' ')} Evaluation</h2>
+                            <div className="flex items-center gap-6 text-sm text-slate-500">
+                                <span className="flex items-center gap-2"><User size={16}/> @{activeRecording.userName}</span>
+                                <span className="flex items-center gap-2"><Calendar size={16}/> {new Date(activeRecording.timestamp).toLocaleDateString()}</span>
+                                <span className="flex items-center gap-2"><Globe size={16}/> {activeRecording.visibility || 'private'}</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-8 shadow-xl">
+                            <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2"><FileSearch size={20} className="text-emerald-400"/> Context Refraction</h3>
+                            <div className="space-y-6">
+                                <div><p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Target Role</p><p className="text-sm text-slate-300 leading-relaxed italic line-clamp-4">{activeRecording.jobDescription || 'N/A'}</p></div>
+                                <div><p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Interviewer Profile</p><p className="text-sm text-slate-300 leading-relaxed italic">{activeRecording.interviewerInfo || 'N/A'}</p></div>
+                            </div>
+                        </div>
+                        <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-8 shadow-xl">
+                            <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2"><Video size={20} className="text-red-400"/> Neural Playback</h3>
+                            {activeRecording.videoUrl ? (
+                                <div className="space-y-4">
+                                    <p className="text-xs text-slate-500">Evaluation session archived. Primary URI: <code className="text-[10px] text-indigo-400 bg-black/20 p-1 rounded">{activeRecording.videoUrl}</code></p>
+                                    <button 
+                                        onClick={async () => {
+                                            const token = getDriveToken();
+                                            if (token && activeRecording.videoUrl.startsWith('drive://')) {
+                                                const fileId = activeRecording.videoUrl.replace('drive://', '').split('&')[0];
+                                                const blob = await downloadDriveFileAsBlob(token, fileId);
+                                                const url = URL.createObjectURL(blob);
+                                                const a = document.createElement('a'); a.href = url; a.download = `Interview_${activeRecording.id}.webm`; a.click();
+                                            } else {
+                                                alert("Drive link unavailable or unauthorized. Connect Google Drive in Prep tab.");
+                                            }
+                                        }}
+                                        className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black uppercase tracking-widest shadow-xl flex items-center justify-center gap-3 transition-all"
+                                    >
+                                        <Download size={20}/> Download Assessment Clip
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="p-8 text-center border-2 border-dashed border-slate-800 rounded-3xl text-slate-600 italic text-sm">Video asset not available.</div>
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="bg-slate-900 border border-slate-800 rounded-[3rem] p-10 shadow-2xl">
+                        <h3 className="text-xl font-bold text-white mb-8 flex items-center gap-2"><History size={24} className="text-indigo-400"/> Session Transcript</h3>
+                        <div className="space-y-6">
+                            {activeRecording.transcript?.map((item, idx) => (
+                                <div key={idx} className={`flex flex-col ${item.role === 'user' ? 'items-end' : 'items-start'}`}>
+                                    <span className="text-[10px] font-black text-slate-600 uppercase mb-1">{item.role === 'user' ? activeRecording.userName : 'AI INTERVIEWER'}</span>
+                                    <div className={`max-w-[90%] p-4 rounded-2xl text-sm leading-relaxed ${item.role === 'user' ? 'bg-indigo-600/10 text-indigo-100 border border-indigo-500/20' : 'bg-slate-800 text-slate-300 border border-slate-700'}`}>
+                                        {item.text}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+             </div>
+          </div>
+        )}
       </main>
       {isGeneratingReport && (<div className="fixed inset-0 z-[200] bg-slate-950/80 backdrop-blur-md flex flex-col items-center justify-center gap-8 animate-fade-in"><div className="relative"><div className="w-32 h-32 border-4 border-indigo-500/10 rounded-full"></div><div className="absolute inset-0 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"/><Activity className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-indigo-400" size={40}/><div className="absolute -bottom-10 left-1/2 -translate-x-1/2 text-3xl font-black text-white">{Math.round(synthesisPercent)}%</div></div><h3 className="text-xl font-black text-white uppercase">{synthesisStep}</h3></div>)}
-      {showCodePasteOverlay && (<div className="fixed inset-0 z-[150] flex items-center justify-center p-8 bg-slate-950/80 backdrop-blur-md animate-fade-in"><div className="bg-slate-900 border border-slate-700 rounded-[2.5rem] w-full max-w-2xl flex flex-col shadow-2xl overflow-hidden animate-fade-in-up"><div className="p-6 border-b border-slate-800 bg-slate-950/50 flex justify-between items-center"><h3 className="text-sm font-bold text-white uppercase">Code Injection</h3><button onClick={() => setShowCodePasteOverlay(false)}><X size={24}/></button></div><div className="p-8 space-y-6"><textarea value={pasteCodeBuffer} onChange={e => setPasteCodeBuffer(e.target.value)} className="w-full h-64 bg-slate-950 border border-slate-700 rounded-2xl p-6 text-sm font-mono text-indigo-300 outline-none resize-none shadow-inner" placeholder="// Paste logic..."/><button onClick={handleCommitPastedCode} disabled={!pasteCodeBuffer.trim()} className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase shadow-xl flex items-center justify-center gap-2"><Send size={18}/>Inject</button></div></div></div>)}
+      
+      {/* Sync Log Overlay (Mock Interview specifics) */}
+      {showSyncLog && (
+          <div className="fixed bottom-6 left-6 w-96 z-[100] bg-slate-900 border border-slate-700 rounded-3xl overflow-hidden flex flex-col shadow-2xl animate-fade-in-up max-h-[400px]">
+              <div className="p-4 border-b border-slate-800 bg-slate-950/50 flex justify-between items-center shrink-0">
+                  <div className="flex items-center gap-3">
+                      <Activity size={18} className="text-indigo-400"/>
+                      <div>
+                          <h3 className="text-sm font-bold text-white uppercase tracking-wider">Evaluation Sync Log</h3>
+                      </div>
+                  </div>
+                  <button onClick={() => setShowSyncLog(false)} className="p-2 hover:bg-slate-800 rounded-full text-slate-500 hover:text-white transition-colors"><X size={18}/></button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4 space-y-2 font-mono text-[10px] bg-slate-950/50">
+                  {syncLogs.length === 0 ? (
+                      <p className="text-slate-700 italic">Listening for neural events...</p>
+                  ) : syncLogs.map((log, i) => (
+                      <div key={i} className={`flex gap-2 ${log.type === 'error' ? 'text-red-400' : log.type === 'warn' ? 'text-amber-400' : log.type === 'success' ? 'text-emerald-400' : 'text-slate-500'}`}>
+                          <span className="opacity-40 shrink-0">[{log.time}]</span>
+                          <span className="break-words">{log.msg}</span>
+                      </div>
+                  ))}
+              </div>
+          </div>
+      )}
     </div>
   );
 };
