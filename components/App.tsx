@@ -55,7 +55,6 @@ import { ensureCodeStudioFolder, loadAppStateFromDrive, saveAppStateToDrive } fr
 import { getUserChannels, saveUserChannel } from '../utils/db';
 import { HANDCRAFTED_CHANNELS } from '../utils/initialData';
 import { stopAllPlatformAudio } from '../utils/audioUtils';
-// Fixed: Removed duplicate publishChannelToFirestore from imports
 import { subscribeToPublicChannels, voteChannel, addCommentToChannel, deleteCommentFromChannel, updateCommentInChannel, getUserProfile, claimCoinCheck, syncUserProfile, publishChannelToFirestore } from '../services/firestoreService';
 
 interface ErrorBoundaryProps {
@@ -277,7 +276,6 @@ const App: React.FC = () => {
     window.history.replaceState({}, '', url.toString());
   };
 
-  // Corrected parameter order to match sub-components
   const handleStartLiveSession = (channel: Channel, context?: string, recordingEnabled?: boolean, bookingId?: string, videoEnabled?: boolean, cameraEnabled?: boolean, activeSegment?: { index: number, lectureId: string }, initialTranscript?: TranscriptItem[], existingDiscussionId?: string) => {
     setLiveSessionParams({ channel, context, recordingEnabled, videoEnabled, cameraEnabled, bookingId, activeSegment, initialTranscript, existingDiscussionId, returnTo: viewState });
     handleSetViewState('live_session');
