@@ -1106,9 +1106,10 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                   }
               } else if (activeTab === 'cloud' && node.data?.url) {
                   const ext = node.name.split('.').pop()?.toLowerCase();
+                  const isWhiteboard = ext === 'draw' || ext === 'wb';
                   if (ext === 'pdf' || ['mp4', 'mov', 'm4v', 'webm', 'mp3', 'wav', 'm4a', 'ogg'].includes(ext || '')) {
                       fileData = { name: node.name, path: node.data.url, content: '[MEDIA DATA]', language: getLanguageFromExt(node.name), size: node.size, loaded: true, isDirectory: false, isModified: false };
-                  } else if (ext === 'draw' || ext === 'wb') {
+                  } else if (isWhiteboard) {
                       const res = await fetch(node.data.url);
                       const text = await res.text();
                       fileData = { name: node.name, path: node.id, content: text, language: 'whiteboard', loaded: true, isDirectory: false, isModified: false };

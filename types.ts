@@ -243,7 +243,7 @@ export interface CloudItem {
   url?: string;
 }
 
-export type ToolType = 'pen' | 'eraser' | 'rect' | 'circle' | 'line' | 'arrow' | 'triangle' | 'star' | 'type' | 'move' | 'hand';
+export type ToolType = 'pen' | 'eraser' | 'rect' | 'circle' | 'line' | 'arrow' | 'triangle' | 'star' | 'type' | 'move' | 'hand' | 'curve';
 export type LineStyle = 'solid' | 'dashed' | 'dotted' | 'dash-dot' | 'long-dash';
 export type BrushType = 'standard' | 'pencil' | 'marker' | 'airbrush' | 'calligraphy-pen' | 'writing-brush';
 export type CapStyle = 'none' | 'arrow' | 'circle';
