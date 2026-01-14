@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { CodeProject, CodeFile, UserProfile, Channel, CursorPosition, CloudItem } from '../types';
 import { ArrowLeft, Save, Plus, Github, Cloud, HardDrive, Code, X, ChevronRight, ChevronDown, File, Folder, DownloadCloud, Loader2, CheckCircle, AlertTriangle, Info, FolderPlus, FileCode, RefreshCw, LogIn, CloudUpload, Trash2, ArrowUp, Edit2, FolderOpen, MoreVertical, Send, MessageSquare, Bot, Mic, Sparkles, SidebarClose, SidebarOpen, Users, Eye, FileText as FileTextIcon, Image as ImageIcon, StopCircle, Minus, Maximize2, Minimize2, Lock, Unlock, Share2, Terminal as TerminalIcon, Copy, WifiOff, PanelRightClose, PanelRightOpen, PanelLeftClose, PanelLeftOpen, Monitor, Laptop, PenTool, Edit3, ShieldAlert, ZoomIn, ZoomOut, Columns, Rows, Grid2X2, Square as SquareIcon, GripVertical, GripHorizontal, FileSearch, Indent, Wand2, Check, Link, MousePointer2, Activity, Key, Search, FilePlus, FileUp, Play, Trash, ExternalLink, GraduationCap, ShieldCheck } from 'lucide-react';
@@ -296,7 +297,7 @@ const AIChatPanel = ({ isOpen, onClose, messages, onSendMessage, isThinking, cur
                     <button 
                         type="submit" 
                         disabled={!currentInput.trim() || isThinking}
-                        className="p-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:grayscale text-white rounded-xl transition-all shadow-lg active:scale-95"
+                        className="p-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl transition-all shadow-lg active:scale-95 disabled:opacity-50"
                     >
                         <Send size={18}/>
                     </button>
@@ -349,21 +350,41 @@ const Slot: React.FC<SlotProps> = ({
     const output = terminalOutputs[idx] || [];
     const running = isRunning[idx];
     
-    const isVisible = layoutMode === 'single' ? idx === 0 : (layoutMode === 'quad' ? true : idx < 2);
+    // Strict visibility logic based on layoutMode
+    const isVisible = useMemo(() => {
+        if (layoutMode === 'single') return idx === 0;
+        if (layoutMode === 'quad') return true;
+        return idx < 2; // split-v and split-h
+    }, [layoutMode, idx]);
+
     if (!isVisible) return null;
     
     const slotStyle: any = {};
     if (layoutMode === 'split-v' || layoutMode === 'split-h') {
         const size = idx === 0 ? `${innerSplitRatio}%` : `${100 - innerSplitRatio}%`;
-        if (layoutMode === 'split-v') slotStyle.width = size; else slotStyle.height = size;
-        slotStyle.flex = 'none';
+        if (layoutMode === 'split-v') {
+            slotStyle.width = size;
+            slotStyle.flex = 'none';
+        } else {
+            slotStyle.height = size;
+            slotStyle.flex = 'none';
+        }
+    } else if (layoutMode === 'single') {
+        slotStyle.flex = '1';
+        slotStyle.width = '100%';
+    } else { // quad
+        slotStyle.flex = '1';
     }
 
     const lang = file ? getLanguageFromExt(file.name) : 'text';
     const canRun = ['c++', 'c', 'python', 'javascript', 'typescript'].includes(lang);
 
     return (
-        <div onClick={() => setFocusedSlot(idx)} style={slotStyle} className={`flex flex-col min-w-0 border ${isFocused ? 'border-indigo-500 z-10' : 'border-slate-800'} relative bg-slate-950 flex-1 overflow-hidden`}>
+        <div 
+            onClick={() => setFocusedSlot(idx)} 
+            style={slotStyle} 
+            className={`flex flex-col min-w-0 border ${isFocused ? 'border-indigo-500 z-10' : 'border-slate-800'} relative bg-slate-950 overflow-hidden h-full`}
+        >
             {file ? (
                 <>
                   <div className={`px-4 py-2 flex items-center justify-between shrink-0 border-b ${isFocused ? 'bg-indigo-900/20 border-indigo-500/30' : 'bg-slate-900 border-slate-800'}`}>
@@ -468,6 +489,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
   const clientId = useMemo(() => generateSecureId().substring(0, 8), []);
   const myColor = useMemo(() => CURSOR_COLORS[Math.floor(Math.random() * CURSOR_COLORS.length)], []);
 
+  // UI Requirement: Default to 1 coding frame
   const [layoutMode, setLayoutMode] = useState<LayoutMode>('single');
   const [activeSlots, setActiveSlots] = useState<(CodeFile | null)[]>([null, null, null, null]);
   const [focusedSlot, setFocusedSlot] = useState<number>(0);
@@ -486,16 +508,19 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
   }, [initialFiles]);
 
   /**
-   * Helper to update active slots using dynamic LRU logic.
-   * New or newly focused files are pushed to Slot 0.
-   * Eviction strictly follows current visible capacity (maxVisible).
+   * LRU Rotation Logic:
+   * Newly opened file moves to Slot 0.
+   * If capacity (based on layoutMode) is exceeded, oldest is dropped.
    */
   const updateSlotsLRU = useCallback((file: CodeFile) => {
     const maxVisible = layoutMode === 'single' ? 1 : (layoutMode === 'quad' ? 4 : 2);
     
     setActiveSlots(prev => {
+        // Remove existing copy of the file if present
         const filtered = prev.filter(s => s !== null && s.path !== file.path);
+        // Add new file to position 0 (Primary Slot)
         const next = [file, ...filtered].slice(0, maxVisible);
+        // Fill remaining slots with null to maintain array size 4
         while (next.length < 4) next.push(null);
         return next;
     });
@@ -520,11 +545,9 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
             lastSessionIdRef.current = sid;
         }
 
-        // NEURAL SYNC FIX: Explicitly check for files not in the current active slots
-        const activePaths = new Set(activeSlots.filter(s => s !== null).map(s => s!.path));
         let highestPriorityFile: CodeFile | null = null;
         
-        // 1. Detect BRAND NEW files (created by AI tool)
+        // Detect NEW files created by AI (not seen in previous sync)
         for (const file of initialFiles) {
             if (!lastFilePathsRef.current.has(file.path)) {
                 highestPriorityFile = file;
@@ -532,8 +555,11 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
             }
         }
         
-        // 2. If no new file detected, check if we should update content of active slots
-        if (!highestPriorityFile) {
+        if (highestPriorityFile) {
+            // Logic for "Newly opened file is in cell0 (left). cell1 is right. LRU to rotate them."
+            updateSlotsLRU(highestPriorityFile);
+        } else {
+            // Update contents of already active slots if they changed remotely
             setActiveSlots(prev => prev.map((s) => {
                 if (!s) return null;
                 const match = initialFiles.find(f => f.path === s.path);
@@ -543,12 +569,9 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                 }
                 return s;
             }));
-        } else {
-            // Found a brand new file (AI problem injected) -> Focus it immediately
-            updateSlotsLRU(highestPriorityFile);
         }
 
-        // Update tracking refs
+        // Keep local tracking references in sync
         lastFilePathsRef.current = new Set(initialFiles.map(f => f.path));
         initialFiles.forEach(f => {
             if (!internalFileContentRef.current.has(f.path) || internalFileContentRef.current.get(f.path) !== f.content) {
@@ -1085,10 +1108,10 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
          </div>
          <div className="flex items-center space-x-2">
             <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800 mr-4">
-                <button onClick={() => handleSetLayout('single')} className={`p-1.5 rounded ${layoutMode === 'single' ? 'bg-indigo-600 text-white' : 'text-slate-500'}`}><SquareIcon size={16}/></button>
-                <button onClick={() => handleSetLayout('split-v')} className={`p-1.5 rounded ${layoutMode === 'split-v' ? 'bg-indigo-600 text-white' : 'text-slate-50'}`}><Columns size={16}/></button>
-                <button onClick={() => handleSetLayout('split-h')} className={`p-1.5 rounded ${layoutMode === 'split-h' ? 'bg-indigo-600 text-white' : 'text-slate-50'}`}><Rows size={16}/></button>
-                <button onClick={() => handleSetLayout('quad')} className={`p-1.5 rounded ${layoutMode === 'quad' ? 'bg-indigo-600 text-white' : 'text-slate-50'}`}><Grid2X2 size={16}/></button>
+                <button onClick={() => handleSetLayout('single')} className={`p-1.5 rounded ${layoutMode === 'single' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500'}`}><SquareIcon size={16}/></button>
+                <button onClick={() => handleSetLayout('split-v')} className={`p-1.5 rounded ${layoutMode === 'split-v' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500'}`}><Columns size={16}/></button>
+                <button onClick={() => handleSetLayout('split-h')} className={`p-1.5 rounded ${layoutMode === 'split-h' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500'}`}><Rows size={16}/></button>
+                <button onClick={() => handleSetLayout('quad')} className={`p-1.5 rounded ${layoutMode === 'quad' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500'}`}><Grid2X2 size={16}/></button>
             </div>
             {!isSharedViewOnly && (
                 <>
@@ -1154,13 +1177,13 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
               </div>
           </div>
           <div onMouseDown={() => setIsDraggingLeft(true)} className="w-1 cursor-col-resize hover:bg-indigo-500/50 z-30 shrink-0 bg-slate-800/20"></div>
-          <div ref={centerContainerRef} className={`flex-1 bg-slate-950 flex min-w-0 relative ${layoutMode === 'quad' ? 'grid grid-cols-2 grid-rows-2' : layoutMode === 'split-v' ? 'flex-row' : layoutMode === 'split-h' ? 'flex-col' : 'flex-col'}`}>
+          <div ref={centerContainerRef} className={`flex-1 bg-slate-950 flex min-w-0 relative ${layoutMode === 'quad' ? 'grid grid-cols-2 grid-rows-2' : layoutMode === 'split-v' ? 'flex-row' : (layoutMode === 'split-h' ? 'flex-col' : 'flex-col')}`}>
               {[0, 1, 2, 3].map(i => (
                   <Slot key={i} idx={i} activeSlots={activeSlots} focusedSlot={focusedSlot} setFocusedSlot={setFocusedSlot} slotViewModes={slotViewModes} toggleSlotViewMode={toggleSlotViewMode} isFormattingSlots={isFormattingSlots} terminalOutputs={terminalOutputs} setTerminalOutputs={setTerminalOutputs} isTerminalOpen={isTerminalOpen} setIsTerminalOpen={setIsTerminalOpen} isRunning={isRunning} layoutMode={layoutMode} innerSplitRatio={innerSplitRatio} handleRunCode={handleRunCode} handleFormatCode={handleFormatCode} handleCodeChangeInSlot={handleCodeChangeInSlot} updateSlotFile={updateSlotFile} onSyncCodeWithAi={onSyncCodeWithAi} fontSize={fontSize} indentMode={indentMode} isLive={isLive} lockStatus={lockStatus} broadcastCursor={broadcastCursor} isReadOnly={isSharedViewOnly} isInterviewerMode={isInterviewerMode} />
               ))}
           </div>
           <div onMouseDown={() => setIsDraggingRight(true)} className="w-1 cursor-col-resize hover:bg-indigo-500/50 z-30 shrink-0 bg-slate-800/20"></div>
-          <div className={`${isRightOpen ? '' : 'hidden'} bg-slate-950 flex flex-col shrink-0 overflow-hidden`} style={{ width: `${rightWidth}px` }}>
+          <div className={`${isRightOpen ? '' : 'hidden'} bg-slate-950 flex flex-col shrink-0 overflow-hidden shadow-2xl relative z-40`} style={{ width: `${rightWidth}px` }}>
               <AIChatPanel 
                 isOpen={true} 
                 onClose={() => setIsRightOpen(false)} 
