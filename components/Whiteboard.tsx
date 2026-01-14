@@ -736,7 +736,19 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({
                     {showStyleMenu && (
                         <>
                             <div className="fixed inset-0 z-40" onClick={() => setShowStyleMenu(false)}></div>
-                            <div className={`absolute top-full left-0 mt-2 w-72 ${isDarkBackground ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200 shadow-2xl'} border rounded-xl z-50 p-4 space-y-4 animate-fade-in-up`}>
+                            <div className={`absolute top-full left-0 mt-2 w-80 ${isDarkBackground ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200 shadow-2xl'} border rounded-xl z-50 p-4 space-y-4 animate-fade-in-up`}>
+                                <div>
+                                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-2">Brush Type</label>
+                                    <div className="grid grid-cols-3 gap-1">
+                                        {BRUSH_TYPES.map(b => (
+                                            <button key={b.value} onClick={() => setBrushType(b.value)} className={`p-2 rounded-lg flex flex-col items-center gap-1 transition-all ${brushType === b.value ? 'bg-indigo-600 text-white shadow-lg' : (isDarkBackground ? 'hover:bg-slate-800 text-slate-400' : 'hover:bg-slate-100 text-slate-600')}`}>
+                                                <b.icon size={16}/>
+                                                <span className="text-[8px] uppercase font-bold truncate w-full text-center">{b.label}</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+
                                 <div>
                                     <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-2">Left End (Start)</label>
                                     <div className="grid grid-cols-3 gap-1">
@@ -789,7 +801,7 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({
             </div>
 
             <div className="flex items-center gap-2">
-                <button onClick={() => setScale(prev => Math.min(prev * 1.2, 5))} className={`p-1.5 rounded ${isDarkBackground ? 'hover:bg-slate-800 text-slate-400' : 'hover:bg-slate-200 text-slate-600'}`} title="Zoom In"><ZoomIn size={16}/></button>
+                <button onClick={() => setScale(prev => Math.min(prev * 1.2, 5))} className={`p-1.5 rounded ${isDarkBackground ? 'hover:bg-slate-800 text-slate-400' : 'hover:bg-slate-200 text-slate-600'} mr-1`} title="Zoom In"><ZoomIn size={16}/></button>
                 <button onClick={() => setScale(prev => Math.max(prev / 1.2, 0.2))} className={`p-1.5 rounded ${isDarkBackground ? 'hover:bg-slate-800 text-slate-400' : 'hover:bg-slate-200 text-slate-600'}`} title="Zoom Out"><ZoomOut size={16}/></button>
                 <button onClick={handleResetView} className={`p-1.5 rounded ${isDarkBackground ? 'text-slate-400 hover:text-white' : 'text-slate-600 hover:text-black'}`} title="Reset View"><RefreshCcw size={16}/></button>
                 <div className={`w-px h-6 ${isDarkBackground ? 'bg-slate-800' : 'bg-slate-200'} mx-1`}></div>

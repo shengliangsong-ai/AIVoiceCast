@@ -685,20 +685,21 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
   const updateSlotsLRU = useCallback((file: CodeFile) => {
     const maxVisible = layoutMode === 'single' ? 1 : (layoutMode === 'quad' ? 4 : 2);
     
+    // Determine the slot where this file should go
+    const slotToUpdate = focusedSlot;
+
     setActiveSlots(prev => {
-        const filtered = prev.filter(s => s !== null && s.path !== file.path);
-        const next = [file, ...filtered].slice(0, maxVisible);
-        while (next.length < 4) next.push(null);
+        const next = [...prev];
+        next[slotToUpdate] = file;
         return next;
     });
-    setFocusedSlot(0);
     
     const lang = getLanguageFromExt(file.name);
     setSlotViewModes(prev => ({
         ...prev,
-        [0]: ['markdown', 'plantuml', 'pdf', 'whiteboard', 'youtube', 'video', 'audio'].includes(lang) ? 'preview' : 'code'
+        [slotToUpdate]: ['markdown', 'plantuml', 'pdf', 'whiteboard', 'youtube', 'video', 'audio'].includes(lang) ? 'preview' : 'code'
     }));
-  }, [layoutMode]);
+  }, [layoutMode, focusedSlot]);
 
   useEffect(() => {
     if (initialFiles && initialFiles.length > 0) {
