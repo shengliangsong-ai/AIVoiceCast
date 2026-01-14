@@ -86,6 +86,13 @@ export interface SubTopic {
   title: string;
 }
 
+// Added missing Chapter interface and exported it
+export interface Chapter {
+  id: string;
+  title: string;
+  subTopics: SubTopic[];
+}
+
 export interface Channel {
   id: string;
   title: string;
@@ -188,8 +195,7 @@ export interface RealTimeMessage {
 export interface CodeFile {
   name: string;
   path: string;
-  /* Add 'shell' to the supported language union to fix type errors in CodeStudio.tsx */
-  language: 'javascript' | 'typescript' | 'javascript (react)' | 'typescript (react)' | 'python' | 'c++' | 'c' | 'java' | 'rust' | 'go' | 'c#' | 'html' | 'css' | 'json' | 'markdown' | 'plantuml' | 'whiteboard' | 'pdf' | 'text' | 'youtube' | 'video' | 'shell';
+  language: 'javascript' | 'typescript' | 'javascript (react)' | 'typescript (react)' | 'python' | 'c++' | 'c' | 'java' | 'rs' | 'go' | 'c#' | 'html' | 'css' | 'json' | 'markdown' | 'plantuml' | 'whiteboard' | 'pdf' | 'text' | 'youtube' | 'video' | 'shell' | 'audio';
   content: string;
   size?: number;
   loaded?: boolean;
@@ -198,6 +204,7 @@ export interface CodeFile {
   sha?: string;
   treeSha?: string;
   childrenFetched?: boolean;
+  driveId?: string; // Cache the drive ID for media operations
 }
 
 export interface CodeProject {

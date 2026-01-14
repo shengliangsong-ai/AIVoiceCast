@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { CodeProject, CodeFile, UserProfile, Channel, CursorPosition, CloudItem } from '../types';
-import { ArrowLeft, Save, Plus, Github, Cloud, HardDrive, Code, X, ChevronRight, ChevronDown, File, Folder, DownloadCloud, Loader2, CheckCircle, AlertTriangle, Info, FolderPlus, FileCode, RefreshCw, LogIn, CloudUpload, Trash2, ArrowUp, Edit2, FolderOpen, MoreVertical, Send, MessageSquare, Bot, Mic, MicOff, Sparkles, SidebarClose, SidebarOpen, Users, Eye, FileText as FileTextIcon, Image as ImageIcon, StopCircle, Minus, Maximize2, Minimize2, Lock, Unlock, Share2, Terminal as TerminalIcon, Copy, WifiOff, PanelRightClose, PanelRightOpen, PanelLeftClose, PanelLeftOpen, Monitor, Laptop, PenTool, Edit3, ShieldAlert, ZoomIn, ZoomOut, Columns, Rows, Grid2X2, Square as SquareIcon, GripVertical, GripHorizontal, FileSearch, Indent, Wand2, Check, Link, MousePointer2, Activity, Key, Search, FilePlus, FileUp, Play, Trash, ExternalLink, GraduationCap, ShieldCheck, Youtube, Video, Zap } from 'lucide-react';
+import { ArrowLeft, Save, Plus, Github, Cloud, HardDrive, Code, X, ChevronRight, ChevronDown, File, Folder, DownloadCloud, Loader2, CheckCircle, AlertTriangle, Info, FolderPlus, FileCode, RefreshCw, LogIn, CloudUpload, Trash2, ArrowUp, Edit2, FolderOpen, MoreVertical, Send, MessageSquare, Bot, Mic, MicOff, Sparkles, SidebarClose, SidebarOpen, Users, Eye, FileText as FileTextIcon, Image as ImageIcon, StopCircle, Minus, Maximize2, Minimize2, Lock, Unlock, Share2, Terminal as TerminalIcon, Copy, WifiOff, PanelRightClose, PanelRightOpen, PanelLeftClose, PanelLeftOpen, Monitor, Laptop, PenTool, Edit3, ShieldAlert, ZoomIn, ZoomOut, Columns, Rows, Grid2X2, Square as SquareIcon, GripVertical, GripHorizontal, FileSearch, Indent, Wand2, Check, Link, MousePointer2, Activity, Key, Search, FilePlus, FileUp, Play, Trash, ExternalLink, GraduationCap, ShieldCheck, Youtube, Video, Zap, Download, Headphones } from 'lucide-react';
 import { listCloudDirectory, saveProjectToCloud, deleteCloudItem, createCloudFolder, subscribeToCodeProject, saveCodeProject, updateCodeFile, updateCursor, claimCodeProjectLock, updateProjectActiveFile, deleteCodeFile, updateProjectAccess, sendShareNotification, deleteCloudFolderRecursive } from '../services/firestoreService';
 import { ensureCodeStudioFolder, listDriveFiles, readDriveFile, saveToDrive, deleteDriveFile, createDriveFolder, DriveFile, moveDriveFile, shareFileWithEmail, getDriveFileSharingLink, downloadDriveFileAsBlob, getDriveFileStreamUrl, getDrivePreviewUrl } from '../services/googleDriveService';
 import { connectGoogleDrive, getDriveToken, signInWithGoogle, signInWithGitHub } from '../services/authService';
@@ -49,7 +49,8 @@ function getLanguageFromExt(filename: string): CodeFile['language'] {
     if (!filename) return 'text';
     const ext = filename.split('.').pop()?.toLowerCase();
     if (ext === 'youtube' || filename.includes('youtube.com') || filename.includes('youtu.be')) return 'youtube';
-    if (['webm', 'mp4', 'mov', 'm4v'].includes(ext || '')) return 'video';
+    if (['mp4', 'mov', 'm4v', 'webm'].includes(ext || '')) return 'video';
+    if (['mp3', 'wav', 'm4a', 'ogg'].includes(ext || '')) return 'audio';
     if (ext === 'jsx') return 'javascript (react)';
     if (ext === 'tsx') return 'typescript (react)';
     if (ext === 'js') return 'javascript';
@@ -59,7 +60,7 @@ function getLanguageFromExt(filename: string): CodeFile['language'] {
     if (['cpp', 'hpp', 'cc', 'cxx'].includes(ext || '')) return 'c++';
     if (ext === 'c' || ext === 'h') return 'c';
     if (ext === 'java') return 'java';
-    if (ext === 'rs') return 'rust';
+    if (ext === 'rs') return 'rs';
     if (ext === 'go') return 'go';
     if (ext === 'cs') return 'c#';
     if (ext === 'html') return 'html';
@@ -92,6 +93,7 @@ const FileIcon = ({ filename }: { filename: string }) => {
     const lang = getLanguageFromExt(filename);
     if (lang === 'youtube') return <Youtube size={16} className="text-red-500" />;
     if (lang === 'video') return <Video size={16} className="text-indigo-400" />;
+    if (lang === 'audio') return <Headphones size={16} className="text-emerald-400" />;
     if (lang === 'javascript' || lang === 'typescript' || lang === 'javascript (react)' || lang === 'typescript (react)') return <FileCode size={16} className="text-yellow-400" />;
     if (lang === 'python') return <FileCode size={16} className="text-blue-400" />;
     if (lang === 'c++' || lang === 'c') return <FileCode size={16} className="text-indigo-400" />;
@@ -395,6 +397,7 @@ interface SlotProps {
     handleCodeChangeInSlot: (c: string, idx: number) => void;
     updateSlotFile: (f: CodeFile | null, idx: number) => void;
     onSyncCodeWithAi?: (file: CodeFile) => void;
+    handleDownloadMedia: (file: CodeFile) => Promise<void>;
     fontSize: number;
     indentMode: IndentMode;
     isLive: boolean;
@@ -408,7 +411,7 @@ const Slot: React.FC<SlotProps> = ({
     idx, activeSlots, focusedSlot, setFocusedSlot, slotViewModes, toggleSlotViewMode,
     isFormattingSlots, terminalOutputs, setTerminalOutputs, isTerminalOpen, setIsTerminalOpen,
     isRunning, layoutMode, innerSplitRatio, handleRunCode, handleFormatCode,
-    handleCodeChangeInSlot, updateSlotFile, onSyncCodeWithAi, fontSize, indentMode, isLive, lockStatus, broadcastCursor, isReadOnly = false, isInterviewerMode = false
+    handleCodeChangeInSlot, updateSlotFile, onSyncCodeWithAi, handleDownloadMedia, fontSize, indentMode, isLive, lockStatus, broadcastCursor, isReadOnly = false, isInterviewerMode = false
 }) => {
     const file = activeSlots[idx];
     const isFocused = focusedSlot === idx;
@@ -417,6 +420,7 @@ const Slot: React.FC<SlotProps> = ({
     const terminalVisible = isTerminalOpen[idx];
     const output = terminalOutputs[idx] || [];
     const running = isRunning[idx];
+    const [isDownloading, setIsDownloading] = useState(false);
     
     const isVisible = useMemo(() => {
         if (layoutMode === 'single') return idx === 0;
@@ -453,6 +457,17 @@ const Slot: React.FC<SlotProps> = ({
 
     const isStreamUrl = file?.path && (file.path.startsWith('http') || file.path.includes('access_token='));
 
+    const onMediaDownloadClick = async (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (!file) return;
+        setIsDownloading(true);
+        try {
+            await handleDownloadMedia(file);
+        } finally {
+            setIsDownloading(false);
+        }
+    };
+
     return (
         <div 
             onClick={() => setFocusedSlot(idx)} 
@@ -484,10 +499,10 @@ const Slot: React.FC<SlotProps> = ({
                                   <span className="hidden md:inline">Run</span>
                               </button>
                           )}
-                          {vMode === 'code' && !['markdown', 'pdf', 'whiteboard', 'youtube', 'video'].includes(lang) && (
+                          {vMode === 'code' && !['markdown', 'pdf', 'whiteboard', 'youtube', 'video', 'audio'].includes(lang) && (
                               <button onClick={(e) => { e.stopPropagation(); handleFormatCode(idx); }} disabled={isFormatting} className={`p-1.5 rounded ${isFormatting ? 'text-indigo-400' : 'text-slate-500 hover:text-indigo-400'}`} title="AI Format"><Wand2 size={14}/></button>
                           )}
-                          {['md', 'puml', 'plantuml', 'pdf', 'draw', 'whiteboard', 'wb', 'youtube', 'webm', 'mp4', 'mov', 'm4v'].includes(file.name.split('.').pop()?.toLowerCase() || '') && <button onClick={(e) => { e.stopPropagation(); toggleSlotViewMode(idx); }} className={`p-1.5 rounded ${vMode === 'preview' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-white'}`}>{vMode === 'preview' ? <Code size={14}/> : <Eye size={14}/>}</button>}
+                          {['md', 'puml', 'plantuml', 'pdf', 'draw', 'whiteboard', 'wb', 'youtube', 'webm', 'mp4', 'mov', 'm4v', 'mp3', 'wav', 'm4a', 'ogg'].includes(file.name.split('.').pop()?.toLowerCase() || '') && <button onClick={(e) => { e.stopPropagation(); toggleSlotViewMode(idx); }} className={`p-1.5 rounded ${vMode === 'preview' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-white'}`}>{vMode === 'preview' ? <Code size={14}/> : <Eye size={14}/>}</button>}
                           <button onClick={(e) => { e.stopPropagation(); updateSlotFile(null, idx); }} className="p-1.5 hover:bg-slate-800 rounded text-slate-500 hover:text-white"><X size={14}/></button>
                       </div>
                   </div>
@@ -495,7 +510,9 @@ const Slot: React.FC<SlotProps> = ({
                       <div className="flex-1 overflow-hidden relative">
                           {vMode === 'preview' ? (
                               lang === 'whiteboard' ? (
-                                  <div className="w-full h-full"><Whiteboard isReadOnly={isReadOnly} /></div>
+                                  <div className="w-full h-full">
+                                      <Whiteboard driveId={file.driveId} isReadOnly={isReadOnly} />
+                                  </div>
                               ) : lang === 'pdf' ? (
                                   <iframe 
                                       src={file.path} 
@@ -503,21 +520,43 @@ const Slot: React.FC<SlotProps> = ({
                                       title="PDF Viewer" 
                                       sandbox="allow-scripts allow-same-origin"
                                   />
-                              ) : lang === 'video' ? (
-                                  <div className="w-full h-full bg-black flex items-center justify-center relative">
-                                      <video 
+                              ) : lang === 'audio' ? (
+                                  <div className="w-full h-full bg-slate-950 flex flex-col items-center justify-center p-8 space-y-6">
+                                      <div className="w-24 h-24 bg-emerald-600/10 rounded-full flex items-center justify-center border border-emerald-500/20 text-emerald-400">
+                                          <Headphones size={48} />
+                                      </div>
+                                      <audio 
                                           src={file.path} 
                                           controls 
                                           autoPlay 
                                           crossOrigin="anonymous"
-                                          className="max-w-full max-h-full" 
-                                          onClick={(e) => e.stopPropagation()} 
+                                          className="w-full max-w-md" 
                                       />
-                                      {isStreamUrl && (
-                                          <div className="absolute top-4 left-4 z-20 px-3 py-1 bg-black/60 backdrop-blur-md rounded-full border border-white/10 text-[9px] font-bold text-white uppercase tracking-widest flex items-center gap-2 pointer-events-none">
-                                              <Activity size={10} className="text-emerald-400 animate-pulse"/> Seeking Active
-                                          </div>
-                                      )}
+                                      <p className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Direct Audio Stream</p>
+                                  </div>
+                              ) : lang === 'video' ? (
+                                  <div className="w-full h-full bg-black flex flex-col items-center justify-center relative p-6 text-center">
+                                      <div className="w-16 h-16 bg-indigo-600/10 rounded-full flex items-center justify-center mb-4 border border-indigo-500/20 text-indigo-400">
+                                          <Video size={32} />
+                                      </div>
+                                      <h3 className="text-white font-bold text-lg mb-2 uppercase tracking-tighter">Legacy Media Bridge</h3>
+                                      <p className="text-slate-400 text-xs max-w-xs mb-8 leading-relaxed">
+                                          Drive API security restricts direct streaming for this video format. To view this recording, download it to your local machine.
+                                      </p>
+                                      
+                                      <button 
+                                        onClick={onMediaDownloadClick}
+                                        disabled={isDownloading}
+                                        className="px-10 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-black uppercase tracking-widest flex items-center gap-3 transition-all active:scale-95 shadow-xl shadow-indigo-900/30 disabled:opacity-50"
+                                      >
+                                          {isDownloading ? <Loader2 size={18} className="animate-spin"/> : <Download size={18}/>}
+                                          {isDownloading ? 'PULLING STREAM...' : 'Download & Play Local'}
+                                      </button>
+
+                                      <div className="mt-8 flex items-center gap-2 text-[10px] font-bold text-slate-600 uppercase tracking-widest">
+                                          <Info size={12}/>
+                                          Matches G-Drive Native Protocol
+                                      </div>
                                   </div>
                               ) : lang === 'youtube' ? (
                                   <div className="w-full h-full bg-black flex items-center justify-center">
@@ -548,7 +587,16 @@ const Slot: React.FC<SlotProps> = ({
                                     <h3 className="text-lg font-bold text-white mb-2">Neural Recording</h3>
                                     <p className="text-sm max-w-xs mb-6">Recorded interview or session. Use the Eye icon to start playback.</p>
                                     <button onClick={() => toggleSlotViewMode(idx)} className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold flex items-center gap-2">
-                                        <Eye size={18}/> Play Recording
+                                        <Eye size={18}/> Access Recording
+                                    </button>
+                                </div>
+                              ) : lang === 'audio' ? (
+                                <div className="flex flex-col items-center justify-center h-full p-8 text-center text-slate-500 bg-slate-900/50">
+                                    <Headphones size={64} className="mb-4 text-emerald-500 opacity-50"/>
+                                    <h3 className="text-lg font-bold text-white mb-2">Audio Archive</h3>
+                                    <p className="text-sm max-w-xs mb-6">Directly playable audio stream. Use the Eye icon to start playback.</p>
+                                    <button onClick={() => toggleSlotViewMode(idx)} className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold flex items-center gap-2">
+                                        <Eye size={18}/> Play Audio
                                     </button>
                                 </div>
                               ) : (
@@ -648,7 +696,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
     const lang = getLanguageFromExt(file.name);
     setSlotViewModes(prev => ({
         ...prev,
-        [0]: ['markdown', 'plantuml', 'pdf', 'whiteboard', 'youtube', 'video'].includes(lang) ? 'preview' : 'code'
+        [0]: ['markdown', 'plantuml', 'pdf', 'whiteboard', 'youtube', 'video', 'audio'].includes(lang) ? 'preview' : 'code'
     }));
   }, [layoutMode]);
 
@@ -1032,46 +1080,34 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
               if (activeTab === 'drive' && driveToken) {
                   const isBinary = node.name.toLowerCase().endsWith('.pdf');
                   const isYouTube = node.name.toLowerCase().endsWith('.youtube');
-                  const isVideo = ['webm', 'mp4', 'mov', 'm4v'].includes(node.name.split('.').pop()?.toLowerCase() || '');
+                  const mime = node.data?.mimeType || '';
+                  const isAudioMime = mime.startsWith('audio/') || (mime === 'video/webm' && node.name.toLowerCase().includes('audio'));
+                  const isVideoMime = mime.startsWith('video/') && !isAudioMime;
                   
                   if (isYouTube) {
                       const text = await readDriveFile(driveToken, node.id);
-                      fileData = { name: node.name, path: `drive://${node.id}`, content: text, language: 'youtube', loaded: true, isDirectory: false, isModified: false };
+                      fileData = { name: node.name, path: `drive://${node.id}`, content: text, language: 'youtube', loaded: true, isDirectory: false, isModified: false, driveId: node.id };
                   } else if (isBinary) {
-                      // IMPROVED: For PDFs, use the Drive Preview UI which is more robust
                       const previewUrl = getDrivePreviewUrl(node.id);
-                      fileData = { 
-                          name: node.name, 
-                          path: previewUrl, 
-                          content: '[BINARY DOCUMENT]', 
-                          language: 'pdf', 
-                          size: node.data?.size ? parseInt(node.data.size) : undefined,
-                          loaded: true, 
-                          isDirectory: false, 
-                          isModified: false 
-                      };
-                  } else if (isVideo) {
-                      // HIGH PERFORMANCE: For large media files, use direct API streaming link
+                      fileData = { name: node.name, path: previewUrl, content: '[BINARY DOCUMENT]', language: 'pdf', size: node.data?.size ? parseInt(node.data.size) : undefined, loaded: true, isDirectory: false, isModified: false, driveId: node.id };
+                  } else if (isAudioMime) {
                       const streamUrl = getDriveFileStreamUrl(driveToken, node.id);
-                      fileData = { 
-                          name: node.name, 
-                          path: streamUrl, 
-                          content: '[STREAMING MEDIA]', 
-                          language: 'video', 
-                          size: node.data?.size ? parseInt(node.data.size) : undefined,
-                          loaded: true, 
-                          isDirectory: false, 
-                          isModified: false 
-                      };
+                      fileData = { name: node.name, path: streamUrl, content: '[AUDIO STREAM]', language: 'audio', size: node.data?.size ? parseInt(node.data.size) : undefined, loaded: true, isDirectory: false, isModified: false, driveId: node.id };
+                  } else if (isVideoMime) {
+                      const streamUrl = getDriveFileStreamUrl(driveToken, node.id);
+                      fileData = { name: node.name, path: streamUrl, content: '[VIDEO STREAM]', language: 'video', size: node.data?.size ? parseInt(node.data.size) : undefined, loaded: true, isDirectory: false, isModified: false, driveId: node.id };
+                  } else if (node.name.toLowerCase().endsWith('.draw') || node.name.toLowerCase().endsWith('.wb')) {
+                      fileData = { name: node.name, path: `drive://${node.id}`, content: '[WHITEBOARD DATA]', language: 'whiteboard', loaded: true, isDirectory: false, isModified: false, driveId: node.id };
                   } else {
                       const text = await readDriveFile(driveToken, node.id);
-                      fileData = { name: node.name, path: `drive://${node.id}`, content: text, language: getLanguageFromExt(node.name), size: node.data?.size ? parseInt(node.data.size) : undefined, loaded: true, isDirectory: false, isModified: false };
+                      fileData = { name: node.name, path: `drive://${node.id}`, content: text, language: getLanguageFromExt(node.name), size: node.data?.size ? parseInt(node.data.size) : undefined, loaded: true, isDirectory: false, isModified: false, driveId: node.id };
                   }
               } else if (activeTab === 'cloud' && node.data?.url) {
-                  const isBinary = node.name.toLowerCase().endsWith('.pdf');
-                  const isVideo = ['webm', 'mp4', 'mov', 'm4v'].includes(node.name.split('.').pop()?.toLowerCase() || '');
-                  if (isBinary || isVideo) {
-                      fileData = { name: node.name, path: node.data.url, content: '[BINARY DATA]', language: isBinary ? 'pdf' : 'video', size: node.size, loaded: true, isDirectory: false, isModified: false };
+                  const ext = node.name.split('.').pop()?.toLowerCase();
+                  if (ext === 'pdf' || ['mp4', 'mov', 'm4v', 'webm', 'mp3', 'wav', 'm4a', 'ogg'].includes(ext || '')) {
+                      fileData = { name: node.name, path: node.data.url, content: '[MEDIA DATA]', language: getLanguageFromExt(node.name), size: node.size, loaded: true, isDirectory: false, isModified: false };
+                  } else if (ext === 'draw' || ext === 'wb') {
+                      fileData = { name: node.name, path: node.data.url, content: '[WHITEBOARD DATA]', language: 'whiteboard', loaded: true, isDirectory: false, isModified: false };
                   } else {
                       const res = await fetch(node.data.url);
                       const text = await res.text();
@@ -1150,6 +1186,24 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       
       if (onFileChange) onFileChange(updatedFile);
       if (isLive && lockStatus === 'mine') updateCodeFile(project.id, updatedFile);
+  };
+
+  const handleDownloadMedia = async (file: CodeFile) => {
+      if (!driveToken || !file.driveId) {
+          alert("Drive authorization required for download.");
+          return;
+      }
+      try {
+          const blob = await downloadDriveFileAsBlob(driveToken, file.driveId);
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = file.name;
+          a.click();
+          URL.revokeObjectURL(url);
+      } catch (e) {
+          alert("Download failed.");
+      }
   };
 
   const handleRunCode = async (slotIdx: number) => {
@@ -1361,7 +1415,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
           <div onMouseDown={() => setIsDraggingLeft(true)} className="w-1 cursor-col-resize hover:bg-indigo-500/50 z-30 shrink-0 bg-slate-800/20"></div>
           <div ref={centerContainerRef} className={`flex-1 bg-slate-950 flex min-w-0 relative ${layoutMode === 'quad' ? 'grid grid-cols-2 grid-rows-2' : layoutMode === 'split-v' ? 'flex-row' : (layoutMode === 'split-h' ? 'flex-col' : 'flex-col')}`}>
               {[0, 1, 2, 3].map(i => (
-                  <Slot key={i} idx={i} activeSlots={activeSlots} focusedSlot={focusedSlot} setFocusedSlot={setFocusedSlot} slotViewModes={slotViewModes} toggleSlotViewMode={toggleSlotViewMode} isFormattingSlots={isFormattingSlots} terminalOutputs={terminalOutputs} setTerminalOutputs={setTerminalOutputs} isTerminalOpen={isTerminalOpen} setIsTerminalOpen={setIsTerminalOpen} isRunning={isRunning} layoutMode={layoutMode} innerSplitRatio={innerSplitRatio} handleRunCode={handleRunCode} handleFormatCode={handleFormatCode} handleCodeChangeInSlot={handleCodeChangeInSlot} updateSlotFile={updateSlotFile} onSyncCodeWithAi={onSyncCodeWithAi} fontSize={fontSize} indentMode={indentMode} isLive={isLive} lockStatus={lockStatus} broadcastCursor={broadcastCursor} isReadOnly={isSharedViewOnly} isInterviewerMode={isInterviewerMode} />
+                  <Slot key={i} idx={i} activeSlots={activeSlots} focusedSlot={focusedSlot} setFocusedSlot={setFocusedSlot} slotViewModes={slotViewModes} toggleSlotViewMode={toggleSlotViewMode} isFormattingSlots={isFormattingSlots} terminalOutputs={terminalOutputs} setTerminalOutputs={setTerminalOutputs} isTerminalOpen={isTerminalOpen} setIsTerminalOpen={setIsTerminalOpen} isRunning={isRunning} layoutMode={layoutMode} innerSplitRatio={innerSplitRatio} handleRunCode={handleRunCode} handleFormatCode={handleFormatCode} handleCodeChangeInSlot={handleCodeChangeInSlot} updateSlotFile={updateSlotFile} onSyncCodeWithAi={onSyncCodeWithAi} handleDownloadMedia={handleDownloadMedia} fontSize={fontSize} indentMode={indentMode} isLive={isLive} lockStatus={lockStatus} broadcastCursor={broadcastCursor} isReadOnly={isSharedViewOnly} isInterviewerMode={isInterviewerMode} />
               ))}
           </div>
           <div onMouseDown={() => setIsDraggingRight(true)} className="w-1 cursor-col-resize hover:bg-indigo-500/50 z-30 shrink-0 bg-slate-800/20"></div>

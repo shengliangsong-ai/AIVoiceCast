@@ -47,6 +47,7 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({
   backgroundColor = '#0f172a'
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [elements, setElements] = useState<WhiteboardElement[]>([]);
   const [isDrawing, setIsDrawing] = useState(false);
   const [currentElement, setCurrentElement] = useState<WhiteboardElement | null>(null);
@@ -427,8 +428,8 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({
       const canvas = canvasRef.current; if (!canvas) return; 
       const ctx = canvas.getContext('2d'); if (!ctx) return;
       
-      canvas.width = canvas.parentElement?.clientWidth || 800; 
-      canvas.height = canvas.parentElement?.clientHeight || 600;
+      canvas.width = containerRef.current?.clientWidth || 800; 
+      canvas.height = containerRef.current?.clientHeight || 600;
       
       ctx.clearRect(0, 0, canvas.width, canvas.height); 
       
@@ -529,7 +530,7 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({
   const selectedElement = elements.find(el => el.id === selectedElementId);
 
   return (
-    <div className={`flex flex-col h-full ${isDarkBackground ? 'bg-slate-950 text-slate-100' : 'bg-white text-slate-900'} overflow-hidden relative`}>
+    <div ref={containerRef} className={`flex flex-col h-full w-full ${isDarkBackground ? 'bg-slate-950 text-slate-100' : 'bg-white text-slate-900'} overflow-hidden relative`}>
         <div className={`${isDarkBackground ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'} border-b p-2 flex flex-wrap justify-between gap-2 shrink-0 z-10 items-center px-4`}>
             <div className="flex items-center gap-2">
                 {onBack && <button onClick={onBack} className={`p-2 rounded-lg ${isDarkBackground ? 'hover:bg-slate-800 text-slate-400' : 'hover:bg-slate-200 text-slate-600'} mr-2`}><ArrowLeft size={20}/></button>}

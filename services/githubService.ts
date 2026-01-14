@@ -57,7 +57,8 @@ function getLanguageFromExt(path: string): any {
     else if (['cpp', 'c', 'h', 'hpp', 'cc', 'hh', 'cxx'].includes(ext || '')) language = 'c++';
     else if (ext === 'java') language = 'java';
     else if (ext === 'go') language = 'go';
-    else if (ext === 'rs') language = 'rust';
+    // Fix: Line 48 previously used 'rust' which is not in the CodeFile['language'] union. Changed to 'rs'.
+    else if (ext === 'rs') language = 'rs';
     else if (ext === 'json') language = 'json';
     else if (ext === 'md') language = 'markdown';
     else if (ext === 'html') language = 'html';

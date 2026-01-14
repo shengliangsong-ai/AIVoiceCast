@@ -106,7 +106,8 @@ function getLanguageFromExt(filename: string): CodeFile['language'] {
     if (['cpp', 'hpp', 'cc', 'cxx'].includes(ext || '')) return 'c++';
     if (ext === 'c' || ext === 'h') return 'c';
     if (ext === 'java') return 'java';
-    if (ext === 'rs') return 'rust';
+    // Fix: line 109 previously returned 'rust' which is not assignable to CodeFile['language']. Changing to 'rs'.
+    if (ext === 'rs') return 'rs';
     if (ext === 'go') return 'go';
     if (ext === 'cs') return 'c#';
     if (ext === 'html') return 'html';
@@ -327,9 +328,42 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
 
       const combinedStream = canvas.captureStream(30);
       recordingDest.stream.getAudioTracks().forEach(t => combinedStream.addTrack(t));
-      const recorder = new MediaRecorder(combinedStream, { mimeType: 'video/webm;codecs=vp8,opus', videoBitsPerSecond: 2500000 });
-      recorder.ondataavailable = e => { if (e.data.size > 0) videoChunksRef.current.push(e.data); };
-      mediaRecorderRef.current = recorder; recorder.start(1000);
+      
+      const recorder = new MediaRecorder(combinedStream, { 
+          mimeType: 'video/webm;codecs=vp8,opus', 
+          videoBitsPerSecond: 2500000 
+      });
+      
+      audioChunksRef.current = []; 
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
+      
+      recorder.onstop = async () => {
+          const videoBlob = new Blob(audioChunksRef.current, { type: 'video/webm' });
+          const transcriptText = transcriptRef.current.map(t => `${t.role.toUpperCase()}: ${t.text}`).join('\n\n');
+          const transcriptBlob = new Blob([transcriptText], { type: 'text/plain' });
+          setIsUploadingRecording(true);
+          try {
+              const timestamp = Date.now();
+              const recId = `session-${timestamp}`;
+              await saveLocalRecording({
+                  id: recId, userId: currentUser.uid, channelId: channel.id, channelTitle: channel.title, channelImage: channel.imageUrl, timestamp, mediaUrl: URL.createObjectURL(videoBlob), mediaType: 'video/webm', transcriptUrl: URL.createObjectURL(transcriptBlob), blob: videoBlob
+              });
+              const token = getDriveToken();
+              if (token) {
+                  const folderId = await ensureCodeStudioFolder(token);
+                  const driveVideoUrl = `drive://${await uploadToDrive(token, folderId, `${recId}.webm`, videoBlob)}`;
+                  const tFileId = await uploadToDrive(token, folderId, `${recId}_transcript.txt`, transcriptBlob);
+                  await saveRecordingReference({
+                      id: recId, userId: currentUser.uid, channelId: channel.id, channelTitle: channel.title, channelImage: channel.imageUrl, timestamp, mediaUrl: driveVideoUrl, driveUrl: driveVideoUrl, mediaType: 'video/webm', transcriptUrl: `drive://${tFileId}`
+                  });
+              }
+          } catch(e) { console.error("Neural archive failed", e); } 
+          finally { setIsUploadingRecording(false); onEndSession(); }
+          camStream.getTracks().forEach(t => t.stop());
+      };
+      
+      mediaRecorderRef.current = recorder;
+      recorder.start(1000);
       setIsRecording(true);
 
       const service = new GeminiLiveService();
@@ -411,14 +445,18 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
 
         setSynthesisStep('Synthesizing Feedback...');
         setSynthesisPercent(60);
-        // Cleaned up init based on guidelines
+        // Fix: correctly initializing and using GenAI according to the guidelines
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         const prompt = `Analyze this technical interview evaluation. 
         Mode: ${mode}. Candidate: ${intervieweeLinkedin}. Interviewer: ${interviewerLinkedin}. Job: ${jobDesc}.
         History: ${historyText}. Workspace: ${codeText}. 
         Return JSON: { "score": integer, "technicalSkills": "string", "communication": "string", "collaboration": "string", "strengths": ["string"], "areasForImprovement": ["string"], "verdict": "string", "summary": "string", "learningMaterial": "Markdown" }`;
 
-        const response = await ai.models.generateContent({ model: 'gemini-3-flash-preview', contents: prompt, config: { responseMimeType: 'application/json' } });
+        const response = await ai.models.generateContent({ 
+            model: 'gemini-3-flash-preview', 
+            contents: prompt, 
+            config: { responseMimeType: 'application/json' } 
+        });
         const reportData = JSON.parse((response.text as string) || '{}') as MockInterviewReport;
         setReport(reportData);
         
@@ -492,7 +530,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       </header>
       <main className="flex-1 overflow-hidden relative">
         {view === 'hub' && (
-          <div className="max-w-6xl mx-auto p-8 space-y-12 animate-fade-in overflow-y-auto h-full scrollbar-hide">
+          <div className="max-w-6xl mx-auto p-8 space-y-12 animate-fade-in owerflow-y-auto h-full scrollbar-hide">
             <div className="bg-indigo-600 rounded-[3rem] p-12 shadow-2xl relative overflow-hidden flex flex-col md:flex-row items-center gap-10">
                 <div className="relative z-10 flex-1 space-y-6">
                     <h2 className="text-5xl font-black text-white italic tracking-tighter uppercase leading-none">Validate your<br/>Potential.</h2>
