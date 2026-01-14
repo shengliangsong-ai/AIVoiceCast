@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { MockInterviewRecording, TranscriptItem, CodeFile, UserProfile, Channel, CodeProject } from '../types';
 import { auth } from '../services/firebaseConfig';
@@ -8,7 +7,8 @@ import { GoogleGenAI, Type } from '@google/genai';
 import { generateSecureId } from '../utils/idUtils';
 import { CodeStudio } from './CodeStudio';
 import { MarkdownView } from './MarkdownView';
-import { ArrowLeft, Video, Mic, Monitor, Play, Save, Loader2, Search, Trash2, CheckCircle, X, Download, ShieldCheck, User, Users, Building, FileText, ChevronRight, Zap, SidebarOpen, SidebarClose, Code, MessageSquare, Sparkles, Languages, Clock, Camera, Bot, CloudUpload, Trophy, BarChart3, ClipboardCheck, Star, Upload, FileUp, Linkedin, FileCheck, Edit3, BookOpen, Lightbulb, Target, ListChecks, MessageCircleCode, GraduationCap, Lock, Globe, ExternalLink, PlayCircle, RefreshCw, FileDown, Briefcase, Package, Code2, StopCircle, Youtube, AlertCircle, Eye, EyeOff, SaveAll, Wifi, WifiOff, Activity, ShieldAlert, Timer, FastForward, ClipboardList, Layers, Bug, Flag, Minus, Fingerprint, FileSearch, RefreshCcw, HeartHandshake, Speech, Send, History, Compass, Square, CheckSquare, Cloud, Award, Terminal, CodeSquare, Quote, Image as ImageIcon, Sparkle, LayoutPanelTop, TerminalSquare, FolderOpen, HardDrive, Shield, Database, Link as LinkIcon, UserCircle } from 'lucide-react';
+// Fixed: Added Calendar to lucide-react imports
+import { ArrowLeft, Video, Mic, Monitor, Play, Save, Loader2, Search, Trash2, CheckCircle, X, Download, ShieldCheck, User, Users, Building, FileText, ChevronRight, Zap, SidebarOpen, SidebarClose, Code, MessageSquare, Sparkles, Languages, Clock, Camera, Bot, CloudUpload, Trophy, BarChart3, ClipboardCheck, Star, Upload, FileUp, Linkedin, FileCheck, Edit3, BookOpen, Lightbulb, Target, ListChecks, MessageCircleCode, GraduationCap, Lock, Globe, ExternalLink, PlayCircle, RefreshCw, FileDown, Briefcase, Package, Code2, StopCircle, Youtube, AlertCircle, Eye, EyeOff, SaveAll, Wifi, WifiOff, Activity, ShieldAlert, Timer, FastForward, ClipboardList, Layers, Bug, Flag, Minus, Fingerprint, FileSearch, RefreshCcw, HeartHandshake, Speech, Send, History, Compass, Square, CheckSquare, Cloud, Award, Terminal, CodeSquare, Quote, Image as ImageIcon, Sparkle, LayoutPanelTop, TerminalSquare, FolderOpen, HardDrive, Shield, Database, Link as LinkIcon, UserCircle, Calendar } from 'lucide-react';
 import { getGlobalAudioContext, getGlobalMediaStreamDest, warmUpAudioContext, stopAllPlatformAudio } from '../utils/audioUtils';
 import { getDriveToken, signInWithGoogle, connectGoogleDrive } from '../services/authService';
 import { ensureFolder, uploadToDrive, downloadDriveFileAsBlob, deleteDriveFile, ensureCodeStudioFolder } from '../services/googleDriveService';
@@ -106,6 +106,28 @@ function getLanguageFromExt(filename: string): CodeFile['language'] {
     return 'text';
 }
 
+const CURSOR_COLORS = [
+    '#f87171', '#fb923c', '#fbbf24', '#facc15', '#a3e635', 
+    '#4ade80', '#34d399', '#2dd4bf', '#22d3ee', '#38bdf8', 
+    '#60a5fa', '#818cf8', '#a78bfa', '#c084fc', '#e879f9', '#fb7185'
+];
+
+const FileIcon = ({ filename }: { filename: string }) => {
+    if (!filename) return <File size={16} className="text-slate-500" />;
+    const lang = getLanguageFromExt(filename);
+    if (lang === 'javascript' || lang === 'typescript' || lang === 'javascript (react)' || lang === 'typescript (react)') return <FileCode size={16} className="text-yellow-400" />;
+    if (lang === 'python') return <FileCode size={16} className="text-blue-400" />;
+    if (lang === 'c++' || lang === 'c') return <FileCode size={16} className="text-indigo-400" />;
+    if (lang === 'html') return <FileCode size={16} className="text-orange-400" />;
+    if (lang === 'css') return <FileCode size={16} className="text-blue-300" />;
+    if (lang === 'json') return <FileCode size={16} className="text-green-400" />;
+    if (lang === 'markdown') return <FileTextIcon size={16} className="text-slate-400" />;
+    if (lang === 'plantuml') return <ImageIcon size={16} className="text-pink-400" />;
+    if (lang === 'whiteboard') return <PenTool size={16} className="text-pink-500" />;
+    if (lang === 'pdf') return <FileTextIcon size={16} className="text-red-400" />;
+    return <File size={16} className="text-slate-500" />;
+};
+
 export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfile, onStartLiveSession }) => {
   const currentUser = auth?.currentUser;
 
@@ -137,7 +159,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
   const [coachingLogs, setCoachingLogs] = useState<{time: string, msg: string, type: 'info' | 'error' | 'warn'}[]>([]);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
 
-  // ADDED: Missing sync log state used by handleForceYouTubeSync
   const [syncLogs, setSyncLogs] = useState<{time: string, msg: string, type: 'info' | 'error' | 'warn' | 'success'}[]>([]);
   const [showSyncLog, setShowSyncLog] = useState(false);
 
@@ -149,13 +170,13 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
   const [synthesisPercent, setSynthesisPercent] = useState(0);
 
   // PREP STATE
-  const [mode, setMode] = useState<'coding' | 'system_design' | 'behavioral' | 'quick_screen' | 'assessment_30' | 'assessment_60'>('coding');
+  const [mode, setMode] = useState<'coding' | 'system_design' | 'behavioral'>('coding');
   const [durationMinutes, setDurationMinutes] = useState<number>(30);
   const [language, setLanguage] = useState(userProfile?.defaultLanguage || 'C++');
   const [jobDescType, setJobDescType] = useState<'text' | 'link'>('text');
   const [jobDesc, setJobDesc] = useState('');
-  const [interviewerInfo, setInterviewerInfo] = useState('');
-  const [intervieweeInfo, setIntervieweeInfo] = useState('');
+  const [interviewerLinkedin, setInterviewerLinkedin] = useState('');
+  const [intervieweeLinkedin, setIntervieweeLinkedin] = useState('');
   const [resumeText, setResumeText] = useState(userProfile?.resumeText || '');
   const [visibility, setVisibility] = useState<'public' | 'private'>('public');
   
@@ -193,7 +214,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
     setApiLogs(prev => [{time, msg, type}, ...prev].slice(0, 50));
   };
 
-  // ADDED: Missing addSyncLog helper (similar to RecordingList.tsx)
   const addSyncLog = useCallback((msg: string, type: 'info' | 'error' | 'warn' | 'success' = 'info') => {
       const time = new Date().toLocaleTimeString();
       setSyncLogs(prev => [{ time, msg, type }, ...prev].slice(0, 50));
@@ -208,6 +228,9 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
     if (userProfile?.resumeText && !resumeText) {
       setResumeText(userProfile.resumeText);
     }
+    if (userProfile?.linkedinUrl && !intervieweeLinkedin) {
+        setIntervieweeLinkedin(userProfile.linkedinUrl);
+    }
   }, [userProfile]);
 
   const handleSyncFromProfile = () => {
@@ -215,9 +238,12 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         let profileSummary = "";
         if (userProfile.headline) profileSummary += `Headline: ${userProfile.headline}\n`;
         if (userProfile.company) profileSummary += `Current Company: ${userProfile.company}\n`;
-        if (userProfile.linkedinUrl) profileSummary += `LinkedIn: ${userProfile.linkedinUrl}\n`;
+        if (userProfile.linkedinUrl) {
+            profileSummary += `LinkedIn: ${userProfile.linkedinUrl}\n`;
+            setIntervieweeLinkedin(userProfile.linkedinUrl);
+        }
+        
         if (profileSummary) {
-            setIntervieweeInfo(prev => prev ? `${prev}\n\n${profileSummary}` : profileSummary);
             logApi("Synced candidate identity from User Profile.", "info");
         } else {
             alert("No profile data found. Go to Settings to update your professional profile.");
@@ -307,8 +333,8 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
             mode, 
             language, 
             jobDescription: jobDesc, 
-            interviewerInfo, 
-            intervieweeInfo, 
+            interviewerInfo: interviewerLinkedin, 
+            intervieweeInfo: intervieweeLinkedin, 
             timestamp: Date.now(), 
             videoUrl: '', 
             transcript: latestTranscript, 
@@ -367,7 +393,13 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         setSynthesisStep('Synthesizing Feedback...');
         setSynthesisPercent(60);
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        const prompt = `Analyze this technical interview evaluation. Mode: ${mode}. History: ${historyText}. Workspace: ${codeText}. CRITICAL: Use a strict 0-100 integer scale. Return JSON: { "score": integer, "technicalSkills": "string", "communication": "string", "collaboration": "string", "strengths": ["string"], "areasForImprovement": ["string"], "verdict": "string", "summary": "string", "learningMaterial": "Markdown" }`;
+        const prompt = `Analyze this technical interview evaluation. 
+        Mode: ${mode}. 
+        Candidate Context: ${intervieweeLinkedin}. 
+        Interviewer Context: ${interviewerLinkedin}.
+        Job Specification: ${jobDesc}.
+        History: ${historyText}. Workspace: ${codeText}. 
+        CRITICAL: Use a strict 0-100 integer scale. Return JSON: { "score": integer, "technicalSkills": "string", "communication": "string", "collaboration": "string", "strengths": ["string"], "areasForImprovement": ["string"], "verdict": "string", "summary": "string", "learningMaterial": "Markdown" }`;
 
         const response = await ai.models.generateContent({ model: 'gemini-3-flash-preview', contents: prompt, config: { responseMimeType: 'application/json' } });
         const reportData = JSON.parse(response.text || '{}') as MockInterviewReport;
@@ -376,7 +408,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         setSynthesisStep('Archiving Video to Drive...');
         setSynthesisPercent(85);
         const videoBlob = new Blob(videoChunksRef.current, { type: 'video/webm' });
-        const recording: MockInterviewRecording = { id: interviewId, userId: currentUser?.uid || 'guest', userName: currentUser?.displayName || 'Guest', userPhoto: currentUser?.photoURL, mode, language, jobDescription: jobDesc, interviewerInfo, intervieweeInfo, timestamp: Date.now(), videoUrl: '', transcript: latestTranscript, feedback: JSON.stringify(reportData), visibility };
+        const recording: MockInterviewRecording = { id: interviewId, userId: currentUser?.uid || 'guest', userName: currentUser?.displayName || 'Guest', userPhoto: currentUser?.photoURL, mode, language, jobDescription: jobDesc, interviewerInfo: interviewerLinkedin, intervieweeInfo: intervieweeLinkedin, timestamp: Date.now(), videoUrl: '', transcript: latestTranscript, feedback: JSON.stringify(reportData), visibility };
 
         if (currentUser) {
             const token = getDriveToken();
@@ -395,91 +427,10 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         setSynthesisPercent(100);
         setSynthesisStep('Refraction Complete');
         setTimeout(() => { setIsGeneratingReport(false); setView('report'); }, 800);
-    } catch (e) { 
+    } catch (e: any) { 
         console.error("Report synthesis failed", e);
         setIsGeneratingReport(false); 
         setView('hub'); 
-    }
-  };
-
-  const handleForceYouTubeSync = async (rec: any) => {
-    if (!currentUser) return;
-    
-    setShowSyncLog(true);
-    setSyncLogs([]);
-    addSyncLog(`FORCING YouTube Transfer: ${rec.userName}`, 'info');
-
-    let token = getDriveToken();
-    if (!token) {
-        addSyncLog("OAuth missing. Requesting new session...", 'warn');
-        const user = await signInWithGoogle();
-        if (!user) {
-            addSyncLog("Login canceled.", 'error');
-            return;
-        }
-        token = getDriveToken();
-    }
-
-    const isDriveUrl = (url: string) => url?.startsWith('drive://') || url?.includes('drive.google.com');
-
-    setSyncingId(rec.id);
-    try {
-        let videoBlob: Blob;
-        const isFromDrive = isDriveUrl(rec.videoUrl);
-        const originalDriveUrl = isFromDrive ? rec.videoUrl : rec.driveUrl;
-        
-        if (rec.blob instanceof Blob) {
-            addSyncLog("Loading local buffer (Source: Local)...", 'info');
-            videoBlob = rec.blob;
-        } else if (isFromDrive) {
-            addSyncLog("Downloading source from Google Drive...", 'info');
-            const fileId = rec.videoUrl.replace('drive://', '').split('&')[0];
-            videoBlob = await downloadDriveFileAsBlob(token!, fileId);
-            addSyncLog("Drive download successful.", 'success');
-        } else {
-            throw new Error("Recording source not found locally or on Drive.");
-        }
-
-        addSyncLog("Step 1: Initiating YouTube Handshake...", 'info');
-        let videoUrl = "";
-        try {
-            const ytId = await uploadToYouTube(token!, videoBlob, {
-                title: `${rec.userName} - ${rec.mode} Interview (Neural Archive)`,
-                description: `Transferred via AIVoiceCast.\nOriginal Source: ${rec.videoUrl}`,
-                privacyStatus: 'unlisted'
-            });
-            videoUrl = getYouTubeVideoUrl(ytId);
-            addSyncLog(`YouTube Upload Success: ${ytId}`, 'success');
-        } catch (ytErr: any) { 
-            // FIXED: Explicitly handle ytErr as any to avoid 'unknown' type errors (Fix Error 1)
-            const msg = (ytErr as any)?.message || String(ytErr);
-            addSyncLog(`YouTube FAILED: ${msg}`, 'error');
-            
-            if (isFromDrive) {
-                addSyncLog("RETENTION POLICY: Source is already on Drive. If YouTube fails, we keep the original Drive link active.", 'warn');
-                setSyncingId(null);
-                return; 
-            }
-
-            addSyncLog("FALLBACK: Saving local buffer to Drive instead...", 'warn');
-            const folderId = await ensureCodeStudioFolder(token!);
-            const driveFileId = await uploadToDrive(token!, folderId, `${rec.id}.webm`, videoBlob);
-            videoUrl = `drive://${driveFileId}`;
-            addSyncLog(`Drive Fallback Success: ${driveFileId}`, 'success');
-        }
-
-        addSyncLog("Step 2: Updating neural ledger references...", 'info');
-        await updateInterviewMetadata(rec.id, { videoUrl });
-        addSyncLog("Neural ledger updated to new URI.", 'success');
-        
-        setTimeout(() => {
-            loadInterviewsInternal();
-            setSyncingId(null);
-        }, 800);
-        
-    } catch (e: any) {
-        addSyncLog(`CRITICAL SYNC ERROR: ${e.message}`, 'error');
-        setSyncingId(null);
     }
   };
 
@@ -549,7 +500,12 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       const service = new GeminiLiveService();
       activeServiceIdRef.current = service.id; liveServiceRef.current = service;
       
-      const sysPrompt = `Role: Senior Interviewer. Mode: ${mode}. Duration: ${durationMinutes}m. Candidate: ${currentUser?.displayName}. RESUME_TEXT: "${resumeText}". TARGET_JOB_DESC: "${jobDesc}". INTERVIEWEE_BIO_CONTEXT: "${intervieweeInfo}". INTERVIEWER_PERSONA_CONTEXT: "${interviewerInfo}". STRICT ANTI-SPOILING RULE: DO NOT AUTO-GENERATE SOLUTIONS. Present problem first. NEURAL TRUTH RULE: Trust blocks marked [NEURAL_TRUTH].`;
+      const sysPrompt = `Role: Senior Interviewer. Mode: ${mode.toUpperCase()}. Duration: ${durationMinutes}m. Candidate: ${currentUser?.displayName}. 
+      RESUME_TEXT: "${resumeText}". 
+      CANDIDATE_LINKEDIN: "${intervieweeLinkedin}".
+      INTERVIEWER_LINKEDIN: "${interviewerLinkedin}".
+      TARGET_JOB_SPEC: "${jobDesc}".
+      STRICT ANTI-SPOILING RULE: DO NOT AUTO-GENERATE SOLUTIONS. Present problem first. NEURAL TRUTH RULE: Trust blocks marked [NEURAL_TRUTH].`;
       
       await service.connect(mode === 'behavioral' ? 'Zephyr' : 'Software Interview Voice', sysPrompt, {
         onOpen: () => {
@@ -691,12 +647,11 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       const combined = Array.from(myMap.values());
       setMyInterviews(combined.sort((a, b) => b.timestamp - a.timestamp));
       setPublicInterviews(publicData.sort((a, b) => b.timestamp - a.timestamp));
-    } catch (e) { console.error("Ledger retrieval error", e); } finally { setLoading(false); }
+    } catch (e: any) { console.error("Ledger retrieval error", e); } finally { setLoading(false); }
   };
 
   useEffect(() => { loadInterviewsInternal(); }, [currentUser]);
 
-  // ADDED: Missing renderInterviewsList function (Fix Error 2)
   const renderInterviewsList = (list: MockInterviewRecording[], isMyHistory: boolean) => {
     if (list.length === 0) {
         return (
@@ -781,8 +736,8 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
             <div className="space-y-8">
                 <div className="flex justify-between items-center">
                     <div className="flex bg-slate-900 p-1 rounded-2xl border border-slate-800 w-fit shadow-lg">
-                        <button onClick={() => setHubTab('history')} className={`px-6 py-2 rounded-xl text-xs font-black uppercase transition-all ${hubTab === 'history' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500'}`}>History</button>
-                        <button onClick={() => setHubTab('explore')} className={`px-6 py-2 rounded-xl text-xs font-black uppercase transition-all ${hubTab === 'explore' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500'}`}>Discovery</button>
+                        <button onClick={() => setHubTab('history')} className={`px-6 py-2 rounded-xl text-xs font-black uppercase transition-all ${hubTab === 'history' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-50'}`}>History</button>
+                        <button onClick={() => setHubTab('explore')} className={`px-6 py-2 rounded-xl text-xs font-black uppercase transition-all ${hubTab === 'explore' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-50'}`}>Discovery</button>
                     </div>
                     {selectedIds.size > 0 && (
                         <button onClick={handleDeleteSelected} disabled={isBulkDeleting} className="flex items-center gap-2 px-4 py-2 bg-red-600/10 hover:bg-red-600 text-red-400 hover:text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all">{isBulkDeleting ? <Loader2 size={14} className="animate-spin"/> : <Trash2 size={14}/>} Purge {selectedIds.size}</button>
@@ -802,31 +757,63 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                         {!driveToken && <button onClick={handleConnectDrive} className="px-4 py-1.5 bg-red-600 text-white rounded-lg text-[10px] font-black uppercase shadow-lg">Authorize Drive</button>}
                     </div>
                     <div className="bg-slate-950 p-6 rounded-[2rem] border border-slate-800 space-y-6 shadow-inner">
-                        <div className="flex items-center justify-between px-1"><h3 className="text-xs font-black text-indigo-400 uppercase tracking-widest flex items-center gap-2"><UserCircle size={16}/> Candidate Context</h3><button onClick={handleSyncFromProfile} className="text-[10px] font-black text-indigo-400 hover:text-white transition-all flex items-center gap-1 uppercase tracking-widest"><RefreshCw size={10}/> Sync Profile</button></div>
+                        <div className="flex items-center justify-between px-1"><h3 className="text-xs font-black text-indigo-400 uppercase tracking-widest flex items-center gap-2"><UserCircle size={16}/> Professional Identity</h3><button onClick={handleSyncFromProfile} className="text-[10px] font-black text-indigo-400 hover:text-white transition-all flex items-center gap-1 uppercase tracking-widest"><RefreshCw size={10}/> Sync Profile</button></div>
                         <div className="space-y-4">
-                            <div><label className="text-[9px] font-black text-slate-500 uppercase tracking-widest block mb-2 px-1">Interviewee Profile (Bio/LinkedIn)</label><textarea value={intervieweeInfo} onChange={e => setIntervieweeInfo(e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-xs text-indigo-200 outline-none focus:border-indigo-500 resize-none h-24" placeholder="Professional summary..."/></div>
-                            <div><label className="text-[9px] font-black text-slate-500 uppercase tracking-widest block mb-2 px-1">Target Interviewer Persona</label><textarea value={interviewerInfo} onChange={e => setInterviewerInfo(e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-indigo-500 resize-none h-24" placeholder="Principal Engineer from Netflix..."/></div>
+                            <div><label className="text-[9px] font-black text-slate-500 uppercase tracking-widest block mb-2 px-1">Interviewee LinkedIn</label><input type="url" value={intervieweeLinkedin} onChange={e => setIntervieweeLinkedin(e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-xs text-indigo-200 outline-none focus:border-indigo-500" placeholder="https://linkedin.com/in/you"/></div>
+                            <div><label className="text-[9px] font-black text-slate-500 uppercase tracking-widest block mb-2 px-1">Interviewer LinkedIn (Target Persona)</label><input type="url" value={interviewerLinkedin} onChange={e => setInterviewerLinkedin(e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-indigo-500" placeholder="https://linkedin.com/in/interviewer-profile"/></div>
+                        </div>
+                    </div>
+                    <div className="bg-slate-950 p-6 rounded-[2rem] border border-slate-800 space-y-4 shadow-inner">
+                        <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Target size={16}/> Evaluation Depth</h3>
+                        <div className="grid grid-cols-1 gap-2">
+                            {[
+                                { id: 'coding', icon: Code, label: 'Algorithms & Logic' }, 
+                                { id: 'system_design', icon: Layers, label: 'System Architecture' }, 
+                                { id: 'behavioral', icon: MessageSquare, label: 'Cultural Fit (STAR)' }
+                            ].map(m => (
+                                <button 
+                                    key={m.id} 
+                                    onClick={() => setMode(m.id as any)} 
+                                    className={`p-4 rounded-2xl border text-left flex items-center justify-between transition-all group ${mode === m.id ? 'bg-indigo-600 border-indigo-500 text-white shadow-xl shadow-indigo-900/20' : 'bg-slate-900 border-slate-800 text-slate-500 hover:border-slate-600'}`}
+                                >
+                                    <div className="flex items-center gap-3">
+                                        <m.icon size={18} className={mode === m.id ? 'text-white' : 'text-slate-600'}/>
+                                        <span className="text-[11px] font-black uppercase tracking-wider">{m.label}</span>
+                                    </div>
+                                    {mode === m.id && <CheckCircle size={16} fill="white" className="text-indigo-600"/>}
+                                </button>
+                            ))}
                         </div>
                     </div>
                 </div>
                 <div className="space-y-8">
-                    <div className="bg-slate-950 p-6 rounded-[2rem] border border-slate-800 space-y-6 shadow-inner">
-                        <div className="flex items-center justify-between px-1"><h3 className="text-xs font-black text-emerald-400 uppercase tracking-widest flex items-center gap-2"><FileSearch size={16}/> Target Specification</h3></div>
-                        <textarea value={jobDesc} onChange={e => setJobDesc(e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-2xl p-4 text-xs text-emerald-100 outline-none focus:border-emerald-500 resize-none h-48" placeholder="Paste job description..."/>
-                    </div>
-                    <div className="bg-slate-950 p-6 rounded-[2rem] border border-slate-800 space-y-6 shadow-inner">
-                        <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Timer size={16}/> Session Chronometry</h3>
-                        <div className="flex bg-slate-900 p-1 rounded-2xl border border-slate-800">
-                            {[15, 25, 30, 45, 60].map(m => (
-                                <button key={m} onClick={() => setDurationMinutes(m)} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase transition-all ${durationMinutes === m ? 'bg-indigo-600 text-white shadow-xl' : 'text-slate-500 hover:text-slate-300'}`}>{m}m</button>
-                            ))}
+                    <div className="bg-slate-950 p-6 rounded-[2rem] border border-slate-800 space-y-6 shadow-inner h-full">
+                        <div className="flex items-center justify-between px-1">
+                            <h3 className="text-xs font-black text-emerald-400 uppercase tracking-widest flex items-center gap-2"><FileSearch size={16}/> Target Specification</h3>
+                            <div className="flex bg-slate-900 p-1 rounded-lg border border-slate-800">
+                                <button onClick={() => setJobDescType('text')} className={`px-3 py-1 rounded text-[9px] font-black uppercase transition-all ${jobDescType === 'text' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500'}`}>Text</button>
+                                <button onClick={() => setJobDescType('link')} className={`px-3 py-1 rounded text-[9px] font-black uppercase transition-all ${jobDescType === 'link' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500'}`}>Link</button>
+                            </div>
+                        </div>
+                        {jobDescType === 'link' ? (
+                            <input type="url" value={jobDesc} onChange={e => setJobDesc(e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-xs text-emerald-100 outline-none focus:border-emerald-500" placeholder="https://lever.co/job/123..."/>
+                        ) : (
+                            <textarea value={jobDesc} onChange={e => setJobDesc(e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-2xl p-4 text-xs text-emerald-100 outline-none focus:border-emerald-500 resize-none h-48" placeholder="Paste job description..."/>
+                        )}
+                        <div className="mt-4">
+                            <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2 mb-3"><Timer size={16}/> Session Chronometry</h3>
+                            <div className="flex bg-slate-900 p-1 rounded-2xl border border-slate-800">
+                                {[15, 25, 30, 45, 60].map(m => (
+                                    <button key={m} onClick={() => setDurationMinutes(m)} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase transition-all ${durationMinutes === m ? 'bg-indigo-600 text-white shadow-xl' : 'text-slate-500 hover:text-slate-300'}`}>{m}m</button>
+                                ))}
+                            </div>
                         </div>
                     </div>
                 </div>
               </div>
               <div className="pt-8">
                 <button onClick={handleStartInterview} disabled={isStarting || !driveToken} className="w-full py-6 bg-gradient-to-r from-red-600 to-indigo-600 text-white font-black uppercase tracking-[0.3em] rounded-3xl shadow-2xl transition-all hover:scale-[1.01] active:scale-95 disabled:opacity-30">
-                    {isStarting ? <Loader2 className="animate-spin mx-auto" /> : `Launch ${durationMinutes}min Evaluation Protocol`}
+                    {isStarting ? <Loader2 className="animate-spin mx-auto" /> : `Launch ${durationMinutes}min ${mode.toUpperCase()} Evaluation`}
                 </button>
               </div>
             </div>
@@ -834,6 +821,27 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         )}
         {view === 'interview' && (
           <div className="h-full flex flex-col overflow-hidden relative">
+            <div className="p-3 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-6">
+                <div className="flex items-center gap-6">
+                    <div className="flex items-center gap-2">
+                        <div className={`w-2 h-2 rounded-full ${intervieweeLinkedin ? 'bg-emerald-500' : 'bg-slate-700'}`}></div>
+                        <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Candidate Profile</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <div className={`w-2 h-2 rounded-full ${interviewerLinkedin ? 'bg-emerald-500' : 'bg-slate-700'}`}></div>
+                        <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Interviewer Ingested</span>
+                    </div>
+                    {jobDescType === 'link' && jobDesc && (
+                         <div className="flex items-center gap-2">
+                            <LinkIcon size={12} className="text-indigo-400"/>
+                            <span className="text-[10px] font-black uppercase text-indigo-400 tracking-widest truncate max-w-[150px]">JD: {jobDesc}</span>
+                        </div>
+                    )}
+                </div>
+                <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-black uppercase text-slate-500 bg-slate-950 px-2 py-1 rounded border border-slate-800">Protocol: {mode}</span>
+                </div>
+            </div>
             <div className="flex-1 bg-slate-950 relative flex flex-col md:flex-row overflow-hidden">
                 <div className="flex-1 overflow-hidden relative flex flex-col bg-slate-950">
                     <CodeStudio onBack={() => {}} currentUser={currentUser} userProfile={userProfile} onSessionStart={() => {}} onSessionStop={() => {}} onStartLiveSession={onStartLiveSession as any} initialFiles={initialStudioFiles} externalChatContent={transcript.map(t => ({ role: t.role, text: t.text }))} onSendExternalMessage={handleSendTextMessage} isInterviewerMode={true} isAiThinking={isAiThinking} onFileChange={handleEditorFileChange} onSyncCodeWithAi={handleSyncWithAi}/>
@@ -852,14 +860,27 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
               {report ? (
                 <div className="flex flex-col items-center gap-6 w-full">
                     <div className="flex flex-wrap justify-center gap-4"><div className="px-8 py-4 bg-slate-950 rounded-2xl border border-slate-800"><p className="text-[10px] text-slate-500 uppercase">Score</p><p className="text-4xl font-black text-indigo-400">{report.score}</p></div><div className="px-8 py-4 bg-slate-950 rounded-2xl border border-slate-800"><p className="text-[10px] text-slate-500 uppercase">Verdict</p><p className={`text-xl font-black ${report.verdict.includes('Hire') ? 'text-emerald-400' : 'text-red-400'}`}>{report.verdict}</p></div></div>
-                    <div className="w-full text-left w-full bg-slate-950 p-8 rounded-[2rem] border border-slate-800"><h3 className="font-bold text-white mb-4"><Sparkles className="text-indigo-400" size={18}/> Summary</h3><p className="text-sm text-slate-400 leading-relaxed">{report.summary}</p></div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
+                        <div className="bg-slate-950 p-6 rounded-3xl border border-slate-800 text-left">
+                            <h3 className="text-xs font-black text-indigo-400 uppercase tracking-widest mb-3 flex items-center gap-2"><User size={14}/> Context Refraction</h3>
+                            <div className="space-y-2">
+                                <p className="text-xs text-slate-400"><span className="text-slate-600 font-bold uppercase mr-2">Mode:</span> {mode.toUpperCase()}</p>
+                                <p className="text-xs text-slate-400 truncate"><span className="text-slate-600 font-bold uppercase mr-2">Target JD:</span> {jobDesc || 'General Tech'}</p>
+                                <p className="text-xs text-slate-400 truncate"><span className="text-slate-600 font-bold uppercase mr-2">Interviewer:</span> {interviewerLinkedin || 'Anonymous'}</p>
+                            </div>
+                        </div>
+                        <div className="bg-slate-950 p-6 rounded-3xl border border-slate-800 text-left">
+                            <h3 className="text-xs font-black text-emerald-400 uppercase tracking-widest mb-3 flex items-center gap-2"><ShieldCheck size={14}/> Verified Artifacts</h3>
+                            <button onClick={() => setView('artifact_viewer')} className="w-full py-2 bg-indigo-600/10 hover:bg-indigo-600 text-indigo-400 hover:text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all">Explore Session Workspace</button>
+                        </div>
+                    </div>
+                    <div className="text-left w-full bg-slate-950 p-8 rounded-[2rem] border border-slate-800"><h3 className="font-bold text-white mb-4"><Sparkles className="text-indigo-400" size={18}/> Summary</h3><p className="text-sm text-slate-400 leading-relaxed">{report.summary}</p></div>
                     <div className="text-left w-full bg-slate-950 p-8 rounded-[2rem] border border-slate-800"><h3 className="font-bold text-white mb-4"><BookOpen className="text-indigo-400" size={18}/> Growth Path</h3><div className="prose prose-invert prose-sm max-w-none"><MarkdownView content={report.learningMaterial} /></div></div>
                 </div>
               ) : <Loader2 size={32} className="animate-spin text-indigo-400" />}
             </div>
           </div>
         )}
-        {/* ADDED: Missing Artifact Viewer block */}
         {view === 'artifact_viewer' && activeRecording && (
           <div className="h-full flex flex-col bg-slate-950 animate-fade-in overflow-hidden">
              <div className="flex-1 overflow-y-auto p-8 space-y-12 scrollbar-hide pb-32">
@@ -881,8 +902,9 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                         <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-8 shadow-xl">
                             <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2"><FileSearch size={20} className="text-emerald-400"/> Context Refraction</h3>
                             <div className="space-y-6">
-                                <div><p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Target Role</p><p className="text-sm text-slate-300 leading-relaxed italic line-clamp-4">{activeRecording.jobDescription || 'N/A'}</p></div>
-                                <div><p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Interviewer Profile</p><p className="text-sm text-slate-300 leading-relaxed italic">{activeRecording.interviewerInfo || 'N/A'}</p></div>
+                                <div><p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Target Specification</p><p className="text-sm text-slate-300 leading-relaxed italic line-clamp-4">{activeRecording.jobDescription || 'N/A'}</p></div>
+                                <div><p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Interviewer Context</p><p className="text-sm text-slate-300 leading-relaxed italic">{activeRecording.interviewerInfo || 'N/A'}</p></div>
+                                <div><p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Candidate Profile</p><p className="text-sm text-slate-300 leading-relaxed italic">{activeRecording.intervieweeInfo || 'N/A'}</p></div>
                             </div>
                         </div>
                         <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-8 shadow-xl">
@@ -933,7 +955,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       </main>
       {isGeneratingReport && (<div className="fixed inset-0 z-[200] bg-slate-950/80 backdrop-blur-md flex flex-col items-center justify-center gap-8 animate-fade-in"><div className="relative"><div className="w-32 h-32 border-4 border-indigo-500/10 rounded-full"></div><div className="absolute inset-0 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"/><Activity className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-indigo-400" size={40}/><div className="absolute -bottom-10 left-1/2 -translate-x-1/2 text-3xl font-black text-white">{Math.round(synthesisPercent)}%</div></div><h3 className="text-xl font-black text-white uppercase">{synthesisStep}</h3></div>)}
       
-      {/* Sync Log Overlay (Mock Interview specifics) */}
       {showSyncLog && (
           <div className="fixed bottom-6 left-6 w-96 z-[100] bg-slate-900 border border-slate-700 rounded-3xl overflow-hidden flex flex-col shadow-2xl animate-fade-in-up max-h-[400px]">
               <div className="p-4 border-b border-slate-800 bg-slate-950/50 flex justify-between items-center shrink-0">
