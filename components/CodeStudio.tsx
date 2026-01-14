@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { CodeProject, CodeFile, UserProfile, Channel, CursorPosition, CloudItem } from '../types';
 import { ArrowLeft, Save, Plus, Github, Cloud, HardDrive, Code, X, ChevronRight, ChevronDown, File, Folder, DownloadCloud, Loader2, CheckCircle, AlertTriangle, Info, FolderPlus, FileCode, RefreshCw, LogIn, CloudUpload, Trash2, ArrowUp, Edit2, FolderOpen, MoreVertical, Send, MessageSquare, Bot, Mic, Sparkles, SidebarClose, SidebarOpen, Users, Eye, FileText as FileTextIcon, Image as ImageIcon, StopCircle, Minus, Maximize2, Minimize2, Lock, Unlock, Share2, Terminal as TerminalIcon, Copy, WifiOff, PanelRightClose, PanelRightOpen, PanelLeftClose, PanelLeftOpen, Monitor, Laptop, PenTool, Edit3, ShieldAlert, ZoomIn, ZoomOut, Columns, Rows, Grid2X2, Square as SquareIcon, GripVertical, GripHorizontal, FileSearch, Indent, Wand2, Check, Link, MousePointer2, Activity, Key, Search, FilePlus, FileUp, Play, Trash, ExternalLink, GraduationCap, ShieldCheck } from 'lucide-react';
@@ -130,7 +129,7 @@ const FileTreeItem = ({ node, depth, activeId, onSelect, onToggle, onDelete, onS
                             node={child} 
                             depth={depth + 1} 
                             activeId={activeId} 
-                            onSelect={onSelect} 
+                            onSelect={node} 
                             onToggle={onToggle}
                             onDelete={onDelete}
                             onShare={onShare}
@@ -296,7 +295,7 @@ const AIChatPanel = ({ isOpen, onClose, messages, onSendMessage, isThinking, cur
                     <button 
                         type="submit" 
                         disabled={!currentInput.trim() || isThinking}
-                        className="p-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 disabled:grayscale text-white rounded-xl transition-all shadow-lg active:scale-95"
+                        className="p-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:grayscale text-white rounded-xl transition-all shadow-lg active:scale-95"
                     >
                         <Send size={18}/>
                     </button>
@@ -477,81 +476,68 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       return null;
   }, [initialFiles]);
 
+  /**
+   * Helper to update active slots using LRU logic.
+   * New or newly focused files are always shifted to Slot 0.
+   */
+  const updateSlotsLRU = useCallback((file: CodeFile) => {
+    // Correctly calculate max visible based on current Tie-View (Layout)
+    const maxVisible = layoutMode === 'single' ? 1 : (layoutMode === 'quad' ? 4 : 2);
+    
+    setActiveSlots(prev => {
+        // 1. Remove this file if it already exists in any of the 4 slots
+        const filtered = prev.filter(s => s !== null && s.path !== file.path);
+        // 2. Put the new file at the very front (index 0 / MRU)
+        // 3. Keep only 'maxVisible' files total. The overflow is dropped from view.
+        const next = [file, ...filtered].slice(0, maxVisible);
+        // 4. Pad to 4 so the UI grid always has indices 0-3 available to map
+        while (next.length < 4) next.push(null);
+        return next;
+    });
+    setFocusedSlot(0);
+    
+    // Auto-detect view mode for the newly opened file in Slot 0
+    const lang = getLanguageFromExt(file.name);
+    setSlotViewModes(prev => ({
+        ...prev,
+        [0]: ['markdown', 'plantuml', 'pdf', 'whiteboard'].includes(lang) ? 'preview' : 'code'
+    }));
+  }, [layoutMode]);
+
   useEffect(() => {
     if (initialFiles && initialFiles.length > 0) {
         const sid = currentSessionIdFromPaths;
         const isNewSession = sid !== lastSessionIdRef.current;
 
-        // CRITICAL FIX: If we detect a new session ID in the paths, wipe all local state 
-        // to prevent mixing files from different interviews.
+        // If we detect a new session ID in the paths, wipe all local state 
         if (isNewSession) {
             setActiveSlots([null, null, null, null]);
             internalFileContentRef.current.clear();
             lastSessionIdRef.current = sid;
         }
 
-        // Logic: Sync incoming files with current slots WITHOUT blindly overwriting everything
-        // to preserve the user's focus and unsaved keystrokes unless the content actually changed
-        // via an external source (like AI).
-        const nextSlots = [...activeSlots];
-        let changed = false;
+        // Determine if a new file was ADDED by the AI (interviewer)
+        const latestFile = initialFiles[initialFiles.length - 1];
 
-        // If the number of initial files increased, automatically switch to the newest file
-        const prevFileCount = internalFileContentRef.current.size;
-        const newFileAdded = initialFiles.length > prevFileCount;
-
-        initialFiles.slice(0, 4).forEach((incomingFile, i) => {
-            const currentSlot = activeSlots[i];
-            const internalLastContent = internalFileContentRef.current.get(incomingFile.path);
-            
-            // Case 1: Slot is empty, fill it.
-            if (!currentSlot && incomingFile) {
-                nextSlots[i] = incomingFile;
-                internalFileContentRef.current.set(incomingFile.path, incomingFile.content);
-                changed = true;
-            }
-            // Case 2: Incoming file has DIFFERENT content than what we last recorded as "synced",
-            // meaning it was likely changed by an external tool (AI).
-            else if (currentSlot && currentSlot.path === incomingFile.path && incomingFile.content !== internalLastContent) {
-                nextSlots[i] = incomingFile;
-                internalFileContentRef.current.set(incomingFile.path, incomingFile.content);
-                changed = true;
-            }
-            // Case 3: Paths changed (new file focused or opened).
-            else if (currentSlot && currentSlot.path !== incomingFile.path) {
-                nextSlots[i] = incomingFile;
-                internalFileContentRef.current.set(incomingFile.path, incomingFile.content);
-                changed = true;
-            }
-        });
-
-        if (changed) {
-            setActiveSlots(nextSlots);
-            // Auto-detect view modes for new files
-            const nextVModes = { ...slotViewModes };
-            nextSlots.forEach((s, i) => {
-                if (s) {
-                    const lang = getLanguageFromExt(s.name);
-                    if (!nextVModes[i]) {
-                        nextVModes[i] = ['markdown', 'plantuml', 'pdf', 'whiteboard'].includes(lang) ? 'preview' : 'code';
-                    }
+        // If a new file was added (not present in our internal map yet)
+        if (latestFile && !internalFileContentRef.current.has(latestFile.path)) {
+            updateSlotsLRU(latestFile);
+        } else {
+            // Otherwise just update content for existing slots if they changed externally
+            setActiveSlots(prev => prev.map((s) => {
+                if (!s) return null;
+                const match = initialFiles.find(f => f.path === s.path);
+                if (match && match.content !== internalFileContentRef.current.get(match.path)) {
+                    internalFileContentRef.current.set(match.path, match.content);
+                    return { ...s, content: match.content, isModified: false };
                 }
-            });
-            setSlotViewModes(nextVModes);
-            
-            // If AI just added a new file, focus the slot that now contains it
-            if (newFileAdded) {
-                const latestFile = initialFiles[initialFiles.length - 1];
-                const targetSlot = nextSlots.findIndex(s => s?.path === latestFile.path);
-                if (targetSlot !== -1) setFocusedSlot(targetSlot);
-            }
-
-            if (initialFiles.length > 1 && layoutMode === 'single') setLayoutMode('split-v');
+                return s;
+            }));
         }
-        
-        // Update the set of paths we know about
+
+        // Always sync the internal tracking map
         initialFiles.forEach(f => {
-            if (!internalFileContentRef.current.has(f.path)) {
+            if (!internalFileContentRef.current.has(f.path) || internalFileContentRef.current.get(f.path) !== f.content) {
                 internalFileContentRef.current.set(f.path, f.content);
             }
         });
@@ -562,7 +548,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
             setSlotViewModes({ 0: 'code' });
         }
     }
-  }, [initialFiles, currentSessionIdFromPaths]);
+  }, [initialFiles, currentSessionIdFromPaths, updateSlotsLRU]);
 
   const [innerSplitRatio, setInnerSplitRatio] = useState(50);
   const [isDraggingInner, setIsDraggingInner] = useState(false);
@@ -914,19 +900,8 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                   const text = await fetchFileContent(githubToken, owner, repo, node.id, branch);
                   fileData = { name: node.name, path: node.id, content: text, language: getLanguageFromExt(node.name), loaded: true, isDirectory: false, isModified: false, sha: node.data?.sha };
               } else if (activeTab === 'session') {
-                  // FIXED: Correctly find and switch to session artifacts
-                  const foundInSlots = activeSlots.find(s => s?.path === node.id);
-                  if (foundInSlots) {
-                      setFocusedSlot(activeSlots.indexOf(foundInSlots));
-                  } else if (initialFiles) {
-                      const foundInInitial = initialFiles.find(f => f.path === node.id);
-                      if (foundInInitial) {
-                          // Try to reuse an empty slot or replace current focus
-                          const emptySlotIdx = activeSlots.findIndex(s => s === null);
-                          const targetIdx = emptySlotIdx !== -1 ? emptySlotIdx : focusedSlot;
-                          updateSlotFile(foundInInitial, targetIdx);
-                      }
-                  }
+                  const match = initialFiles?.find(f => f.path === node.id);
+                  if (match) fileData = match;
               }
               if (fileData) updateSlotFile(fileData, focusedSlot);
           } catch(e: any) { alert(e.message); }
@@ -934,17 +909,15 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
   };
 
   const updateSlotFile = async (file: CodeFile | null, slotIndex: number) => {
-      const newSlots = [...activeSlots];
-      newSlots[slotIndex] = file;
-      setActiveSlots(newSlots);
       if (file) {
-        const lang = getLanguageFromExt(file.name);
-        setSlotViewModes(prev => ({ ...prev, [slotIndex]: ['markdown', 'plantuml', 'pdf', 'whiteboard'].includes(lang) ? 'preview' : 'code' }));
-        internalFileContentRef.current.set(file.path, file.content);
-        if (onFileChange) onFileChange(file);
-        setFocusedSlot(slotIndex);
+          updateSlotsLRU(file);
+          if (isLive && lockStatus === 'mine' && file.path) updateProjectActiveFile(project.id, file.path);
+      } else {
+          // If closing a file, just remove from slots
+          setActiveSlots(prev => prev.map((s, i) => i === slotIndex ? null : s));
       }
-      if (isLive && lockStatus === 'mine' && file?.path) updateProjectActiveFile(project.id, file.path);
+      
+      if (file && onFileChange) onFileChange(file);
   };
 
   const handleCodeChangeInSlot = (newCode: string, slotIdx: number) => {
@@ -1085,6 +1058,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
   }, [cloudItems]);
 
   const filteredRepos = useMemo(() => {
+      // FIX: use githubSearchQuery instead of searchQuery which is not defined here
       if (!githubSearchQuery.trim()) return githubRepos;
       return githubRepos.filter(r => r.full_name.toLowerCase().includes(githubSearchQuery.toLowerCase()));
   }, [githubRepos, githubSearchQuery]);
@@ -1160,7 +1134,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                           ) : (
                               <div className="flex-1 flex flex-col overflow-hidden">
                                   <div className="p-3"><div className="relative"><Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" size={14}/><input type="text" value={githubSearchQuery} onChange={e => setGithubSearchQuery(e.target.value)} placeholder="Search repositories..." className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-8 pr-3 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500"/></div></div>
-                                  <div className="flex-1 overflow-y-auto scrollbar-hide">{filteredRepos.length === 0 ? <div className="p-8 text-center text-slate-600 text-xs italic">No repositories found.</div> : filteredRepos.map(repo => <button key={repo.id} onClick={() => handleSelectRepo(repo)} className="w-full text-left p-3 border-b border-slate-800 hover:bg-slate-800 transition-colors group"><div className="flex items-center justify-between mb-1"><span className="text-xs font-bold text-slate-300 group-hover:text-white truncate">{repo.name}</span><span className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded border ${repo.private ? 'bg-amber-900/20 text-amber-500 border-amber-900/50' : 'bg-emerald-900/20 text-emerald-500 border-emerald-900/50'}`}>{repo.private ? 'Private' : 'Public'}</span></div><p className="text-[10px] text-slate-500 line-clamp-1">{repo.description || 'No description provided.'}</p></button>)}</div>
+                                  <div className="flex-1 overflow-y-auto scrollbar-hide">{filteredRepos.length === 0 ? <div className="p-8 text-center text-slate-600 text-xs italic">No repositories found.</div> : filteredRepos.map(repo => <button key={repo.id} onClick={() => handleSelectRepo(repo)} className="w-full text-left p-3 border-b border-slate-800 hover:bg-slate-800 transition-colors group"><div className="flex items-center justify-between mb-1"><span className="text-xs font-bold text-slate-300 group-hover:text-white truncate">{repo.name}</span><span className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded border ${repo.private ? 'bg-amber-900/20 text-amber-500 border-amber-900/50' : 'bg-emerald-900/20 text-emerald-400 border-emerald-900/50'}`}>{repo.private ? 'Private' : 'Public'}</span></div><p className="text-[10px] text-slate-500 line-clamp-1">{repo.description || 'No description provided.'}</p></button>)}</div>
                                   <div className="p-3 bg-slate-950 border-t border-slate-800 text-center"><button onClick={() => { localStorage.removeItem('github_token'); setGithubToken(null); }} className="text-[9px] font-black text-slate-500 uppercase hover:text-red-400">Logout GitHub</button></div>
                               </div>
                           )}

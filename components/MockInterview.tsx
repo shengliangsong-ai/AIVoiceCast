@@ -6,7 +6,7 @@ import { saveInterviewRecording, getPublicInterviews, deleteInterview, updateUse
 import { GeminiLiveService } from '../services/geminiLive';
 import { GoogleGenAI, Type } from '@google/genai';
 import { generateSecureId } from '../utils/idUtils';
-import CodeStudio from './CodeStudio';
+import { CodeStudio } from './CodeStudio';
 import { MarkdownView } from './MarkdownView';
 import { ArrowLeft, Video, Mic, Monitor, Play, Save, Loader2, Search, Trash2, CheckCircle, X, Download, ShieldCheck, User, Users, Building, FileText, ChevronRight, Zap, SidebarOpen, SidebarClose, Code, MessageSquare, Sparkles, Languages, Clock, Camera, Bot, CloudUpload, Trophy, BarChart3, ClipboardCheck, Star, Upload, FileUp, Linkedin, FileCheck, Edit3, BookOpen, Lightbulb, Target, ListChecks, MessageCircleCode, GraduationCap, Lock, Globe, ExternalLink, PlayCircle, RefreshCw, FileDown, Briefcase, Package, Code2, StopCircle, Youtube, AlertCircle, Eye, EyeOff, SaveAll, Wifi, WifiOff, Activity, ShieldAlert, Timer, FastForward, ClipboardList, Layers, Bug, Flag, Minus, Fingerprint, FileSearch, RefreshCcw, HeartHandshake, Speech, Send, History, Compass, Square, CheckSquare, Cloud, Award, Terminal, CodeSquare, Quote, Image as ImageIcon, Sparkle, LayoutPanelTop, TerminalSquare, FolderOpen, HardDrive, Shield, Database } from 'lucide-react';
 import { getGlobalAudioContext, getGlobalMediaStreamDest, warmUpAudioContext, stopAllPlatformAudio } from '../utils/audioUtils';
@@ -105,12 +105,6 @@ function getLanguageFromExt(filename: string): CodeFile['language'] {
     if (ext === 'pdf') return 'pdf';
     return 'text';
 }
-
-const CURSOR_COLORS = [
-    '#f87171', '#fb923c', '#fbbf24', '#facc15', '#a3e635', 
-    '#4ade80', '#34d399', '#2dd4bf', '#22d3ee', '#38bdf8', 
-    '#60a5fa', '#818cf8', '#a78bfa', '#c084fc', '#e879f9', '#fb7185'
-];
 
 export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfile, onStartLiveSession }) => {
   const currentUser = auth?.currentUser;
@@ -419,11 +413,16 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                       service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: "Editor updated." } }]);
                   } else if (fc.name === 'create_interview_file') {
                       const { filename, content } = fc.args as any;
-                      const path = `drive://${currentSessionId}/${filename}`;
-                      const newFile: CodeFile = { name: filename, path, language: getLanguageFromExt(filename) as any, content, loaded: true, isDirectory: false, isModified: false };
+                      // ENFORCEMENT: Prepend prefix if missing
+                      let finalFilename = filename;
+                      if (sessionPrefix && !filename.startsWith(sessionPrefix)) {
+                          finalFilename = `${sessionPrefix}_${filename}`;
+                      }
+                      const path = `drive://${currentSessionId}/${finalFilename}`;
+                      const newFile: CodeFile = { name: finalFilename, path, language: getLanguageFromExt(finalFilename) as any, content, loaded: true, isDirectory: false, isModified: false };
                       activeCodeFilesMapRef.current.set(path, newFile);
                       setInitialStudioFiles(prev => [...prev.filter(f => f.path !== path), newFile]);
-                      service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Success: '${filename}' created.` } }]);
+                      service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Success: '${finalFilename}' created.` } }]);
                   }
               }
           }
@@ -542,7 +541,8 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       activeStreamRef.current = camStream; activeScreenStreamRef.current = screenStream;
 
       const ext = language.toLowerCase() === 'python' ? 'py' : (language.toLowerCase().includes('java') ? 'java' : 'cpp');
-      const filesToInit: CodeFile[] = [{ name: `${prefix}_problem1.${ext}`, path: `drive://${uuid}/${prefix}_problem1.${ext}`, language: language.toLowerCase() as any, content: `/* \n * Interview: ${mode}\n * Waiting for interviewer to provide problem 1...\n */\n\n`, loaded: true, isDirectory: false, isModified: false }];
+      const initialFilename = `${prefix}_problem1.${ext}`;
+      const filesToInit: CodeFile[] = [{ name: initialFilename, path: `drive://${uuid}/${initialFilename}`, language: language.toLowerCase() as any, content: `/* \n * Interview: ${mode}\n * Waiting for interviewer to provide problem 1...\n */\n\n`, loaded: true, isDirectory: false, isModified: false }];
       filesToInit.forEach(f => activeCodeFilesMapRef.current.set(f.path, f));
       setInitialStudioFiles(filesToInit);
       await saveCodeProject({ id: uuid, name: `Interview_${mode}_${new Date().toLocaleDateString()}`, files: filesToInit, lastModified: Date.now(), accessLevel: 'restricted', allowedUserIds: currentUser ? [currentUser.uid] : [] });
@@ -622,8 +622,13 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
               service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: "Updated." } }]);
             } else if (fc.name === 'create_interview_file') {
               const { filename, content } = fc.args as any;
-              const path = `drive://${uuid}/${filename}`;
-              const newFile: CodeFile = { name: filename, path, language: getLanguageFromExt(filename) as any, content, loaded: true, isDirectory: false, isModified: false };
+              // ENFORCEMENT: Prepend prefix if missing
+              let finalFilename = filename;
+              if (prefix && !filename.startsWith(prefix)) {
+                  finalFilename = `${prefix}_${filename}`;
+              }
+              const path = `drive://${uuid}/${finalFilename}`;
+              const newFile: CodeFile = { name: finalFilename, path, language: getLanguageFromExt(finalFilename) as any, content, loaded: true, isDirectory: false, isModified: false };
               activeCodeFilesMapRef.current.set(path, newFile);
               setInitialStudioFiles(prev => [...prev.filter(f => f.path !== path), newFile]);
               service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: "File created." } }]);
@@ -682,7 +687,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                                 <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-indigo-400">
                                     <Video size={20}/>
                                 </div>
-                                <div>
+                                <div className="min-w-0">
                                     <h4 className="font-bold text-white text-sm line-clamp-1">{rec.mode.replace('_', ' ').toUpperCase()}</h4>
                                     <p className="text-[10px] text-slate-500 font-bold uppercase">{new Date(rec.timestamp).toLocaleDateString()}</p>
                                 </div>
