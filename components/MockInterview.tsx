@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { MockInterviewRecording, TranscriptItem, CodeFile, UserProfile, Channel, CodeProject } from '../types';
 import { auth } from '../services/firebaseConfig';
@@ -45,24 +44,22 @@ interface MockInterviewProps {
 
 const getCodeTool: any = {
   name: "get_current_code",
-  description: "Read the content of a specific file or the active file in the editor. Use this frequently to stay synced with the candidate's implementation.",
+  description: "Read the current state of the workspace. ALWAYS use this before judging code or providing specific line-by-line feedback.",
   parameters: { 
     type: Type.OBJECT, 
     properties: {
-      filename: { type: Type.STRING, description: "Optional: The name of the file to read. If omitted, returns the currently focused file." },
-      request_context: { type: Type.STRING, description: "Context for why the code is being read." }
+      filename: { type: Type.STRING, description: "Optional: The specific file to read. If omitted, reads the primary/active file." }
     }
   }
 };
 
 const updateActiveFileTool: any = {
   name: "update_active_file",
-  description: "Update the content of the active code file in the editor. Use this to modify existing work, add hints as comments, or provide a corrected solution ONLY if asked.",
+  description: "Modify the active code file. Use this for adding comments, hints, or boilerplate.",
   parameters: {
     type: Type.OBJECT,
     properties: {
-      new_content: { type: Type.STRING, description: "The full content for the file, including headers and comments." },
-      summary: { type: Type.STRING, description: "Brief description of the changes." }
+      new_content: { type: Type.STRING, description: "Full new content for the file." }
     },
     required: ["new_content"]
   }
@@ -70,12 +67,12 @@ const updateActiveFileTool: any = {
 
 const createInterviewFileTool: any = {
   name: "create_interview_file",
-  description: "Create a new file in the environment. Use this to provide a new technical challenge or a code template. Names will automatically be prefixed with the session ID.",
+  description: "Generate a new problem file in the workspace. This is the primary way to present technical challenges.",
   parameters: {
     type: Type.OBJECT,
     properties: {
-      filename: { type: Type.STRING, description: "Name of the file. Use unique names like 'problem2.cpp'." },
-      content: { type: Type.STRING, description: "Initial content, including the problem statement and template." }
+      filename: { type: Type.STRING, description: "Descriptive name (e.g. 'binary_tree_sum.cpp')." },
+      content: { type: Type.STRING, description: "Initial file content (problem statement + template)." }
     },
     required: ["filename", "content"]
   }
@@ -337,10 +334,14 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         if (view === 'coaching') setCoachingTranscript(prev => [...prev, userMsg]);
         else setTranscript(prev => [...prev, userMsg]);
         
-        // ENFORCEMENT: Explicitly tell AI to check code if message contains markdown or code-like patterns
-        const augmentedText = (text.includes('```') || text.length > 200) 
-            ? `[SYSTEM_SIGNAL]: User sent a large block or code block. Please evaluate the technical content provided below:\n\n${text}`
-            : text;
+        // NEURAL TRUTH: In technical modes, always bundle a code snapshot with the message
+        let augmentedText = text;
+        if (mode === 'coding' || mode === 'system_design') {
+             const activeFile = activeFilePath ? activeCodeFilesMapRef.current.get(activeFilePath) : Array.from(activeCodeFilesMapRef.current.values())[0];
+             if (activeFile) {
+                 augmentedText = `[CANDIDATE_MSG]: ${text}\n\n[LATEST_EDITOR_CONTENT ("${activeFile.name}")]:\n\`\`\`\n${activeFile.content}\n\`\`\``;
+             }
+        }
             
         liveServiceRef.current.sendText(augmentedText);
     }
@@ -349,9 +350,15 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
   const handleSyncWithAi = useCallback((file: CodeFile) => {
     if (liveServiceRef.current && isAiConnected) {
         setIsAiThinking(true);
-        const syncMsg = `[NEURAL_SNAPSHOT]: The candidate has manually requested a sync for file "${file.name}". Please observe the latest implementation and provide feedback:\n\n\`\`\`\n${file.content}\n\`\`\``;
+        // NEURAL FORCE SYNC: Send the full code content to ensure context window is updated
+        const syncMsg = `[CRITICAL_CONTEXT_UPDATE]: The candidate has performed a manual sync of "${file.name}". 
+        BELOW IS THE EXACT CURRENT CONTENT. USE THIS AS THE SOURCE OF TRUTH.
+        
+        \`\`\`
+        ${file.content}
+        \`\`\``;
         liveServiceRef.current.sendText(syncMsg);
-        logApi(`Neural Snapshot for ${file.name} pushed to AI context.`, "info");
+        logApi(`Neural Force-Sync for ${file.name} pushed to conversation history.`, "info");
     }
   }, [isAiConnected]);
 
@@ -387,7 +394,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
           ${interviewerInfo ? `STRICT PERSONA LOCK: You are simulating: "${interviewerInfo}".` : ''}
           WORKSPACE STATE:\n${workspaceManifest}\nHISTORY:\n${historyText}\n
           STRICT ANTI-SPOILING RULE: NEVER solve the problem for the candidate. Provide hints only if they are stuck.
-          STRICT SYNC RULE: Whenever the user says they "updated the code", always use the 'get_current_code' tool to see the latest changes.
+          STRICT VISIBILITY RULE: You must ALWAYS verify the candidate's code using the provided history or 'get_current_code' tool before making assumptions.
           STRICT INSTRUCTION: Pick up exactly where the last message ended. Do NOT restart the greeting.`;
       }
       
@@ -419,39 +426,35 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                   if (fc.name === 'get_current_code') {
                       const { filename } = fc.args as any;
                       const allFiles = Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[];
-                      
                       let targetFile;
-                      if (filename) {
-                          targetFile = allFiles.find(f => f.name === filename);
-                      } else {
-                          // Default to currently focused path tracked in state
-                          targetFile = allFiles.find(f => f.path === activeFilePath) || allFiles[0];
-                      }
+                      if (filename) targetFile = allFiles.find(f => f.name === filename);
+                      else targetFile = allFiles.find(f => f.path === activeFilePath) || allFiles[0];
                       
                       service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: targetFile?.content || "// File not found or empty." } }]);
                   } else if (fc.name === 'update_active_file') {
                       const { new_content } = fc.args as any;
                       const allFiles = Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[];
                       const targetFile = allFiles.find(f => f.path === activeFilePath) || allFiles[0];
-                      
                       if (targetFile) {
                         const updatedFile = { ...targetFile, content: new_content };
                         activeCodeFilesMapRef.current.set(updatedFile.path, updatedFile);
                         setInitialStudioFiles(prev => prev.map(f => f.path === updatedFile.path ? updatedFile : f));
+                        service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `[NEURAL_SYNC_SUCCESS]: "${targetFile.name}" updated with your changes.` } }]);
+                      } else {
+                        service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: "Error: No active file." } }]);
                       }
-                      service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: "Editor updated." } }]);
                   } else if (fc.name === 'create_interview_file') {
                       const { filename, content } = fc.args as any;
-                      // ENFORCEMENT: Prefix check for AI file creation
                       let finalFilename = filename;
-                      if (sessionPrefix && !filename.startsWith(sessionPrefix)) {
-                          finalFilename = `${sessionPrefix}_${filename}`;
+                      if (sessionPrefix) {
+                          const baseName = filename.split('/').pop();
+                          if (!baseName.startsWith(sessionPrefix)) finalFilename = `${sessionPrefix}_${baseName}`;
                       }
                       const path = `drive://${currentSessionId}/${finalFilename}`;
                       const newFile: CodeFile = { name: finalFilename, path, language: getLanguageFromExt(finalFilename) as any, content, loaded: true, isDirectory: false, isModified: false };
                       activeCodeFilesMapRef.current.set(path, newFile);
                       setInitialStudioFiles(prev => [...prev.filter(f => f.path !== path), newFile]);
-                      service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Success: '${finalFilename}' created.` } }]);
+                      service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `[NEURAL_SYNC_SUCCESS]: "${finalFilename}" created in workspace.` } }]);
                   }
               }
           }
@@ -497,7 +500,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
 
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         const prompt = `Analyze this technical interview evaluation. Mode: ${mode}. History: ${historyText}. Workspace: ${codeText}. 
-        CRITICAL: Use a strict 0-100 integer scale for the score. 
+        CRITICAL: Use a strict 0-100 integer scale for the score. DO NOT use 1-10.
         Return JSON: { "score": integer (0 to 100), "technicalSkills": "string", "communication": "string", "collaboration": "string", "strengths": ["string"], "areasForImprovement": ["string"], "verdict": "string", "summary": "string", "learningMaterial": "Markdown" }`;
 
         const response = await ai.models.generateContent({ model: 'gemini-3-flash-preview', contents: prompt, config: { responseMimeType: 'application/json' } });
@@ -613,6 +616,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       const sysPrompt = `Role: Senior Interviewer. Mode: ${mode}. Candidate: ${currentUser?.displayName}. Resume: ${resumeText}. Job: ${jobDesc}. 
       STRICT ANTI-SPOILING RULE: DO NOT AUTO-GENERATE SOLUTIONS. Present the problem statement first. Observe the candidate. Provide hints ONLY if requested or if they are significantly struggling.
       FILE NAMING RULE: Always use unique, descriptive file names for new problems (e.g., '${prefix}_binary_search.cpp'). DO NOT overwrite existing problem files.
+      VISIBILITY RULE: When the user trigger a sync or sends a message, use the code snapshot provided in the prompt or 'get_current_code' tool to see the actual implementation.
       GOAL: Greet and begin the evaluation. Inject problem 1 into the sidebar using tools.`;
       
       await service.connect(mode === 'behavioral' ? 'Zephyr' : 'Software Interview Voice', sysPrompt, {
@@ -652,19 +656,22 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                 const updated = { ...targetFile, content: new_content };
                 activeCodeFilesMapRef.current.set(updated.path, updated);
                 setInitialStudioFiles(prev => prev.map(f => f.path === updated.path ? updated : f));
+                service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Success: Updated ${targetFile.name}.` } }]);
+              } else {
+                service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: "Error: No target file." } }]);
               }
-              service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: "Updated." } }]);
             } else if (fc.name === 'create_interview_file') {
               const { filename, content } = fc.args as any;
               let finalFilename = filename;
-              if (prefix && !filename.startsWith(prefix)) {
-                  finalFilename = `${prefix}_${filename}`;
+              if (prefix) {
+                  const base = filename.split('/').pop();
+                  if (!base.startsWith(prefix)) finalFilename = `${prefix}_${base}`;
               }
               const path = `drive://${uuid}/${finalFilename}`;
               const newFile: CodeFile = { name: finalFilename, path, language: getLanguageFromExt(finalFilename) as any, content, loaded: true, isDirectory: false, isModified: false };
               activeCodeFilesMapRef.current.set(path, newFile);
               setInitialStudioFiles(prev => [...prev.filter(f => f.path !== path), newFile]);
-              service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: "File created." } }]);
+              service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Success: '${finalFilename}' created for candidate.` } }]);
             }
           }
         }

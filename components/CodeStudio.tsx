@@ -475,6 +475,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
   
   const internalFileContentRef = useRef<Map<string, string>>(new Map());
   const lastSessionIdRef = useRef<string | null>(null);
+  const lastFilePathsRef = useRef<Set<string>>(new Set());
 
   const currentSessionIdFromPaths = useMemo(() => {
       const firstPath = initialFiles?.[0]?.path;
@@ -515,14 +516,26 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
         if (isNewSession) {
             setActiveSlots([null, null, null, null]);
             internalFileContentRef.current.clear();
+            lastFilePathsRef.current.clear();
             lastSessionIdRef.current = sid;
         }
 
-        const latestFile = initialFiles[initialFiles.length - 1];
+        // Detect if there is a BRAND NEW file (not just an update)
+        const currentPaths = new Set(initialFiles.map(f => f.path));
+        let newFileToOpen: CodeFile | null = null;
+        
+        for (const file of initialFiles) {
+            if (!lastFilePathsRef.current.has(file.path)) {
+                newFileToOpen = file;
+                break;
+            }
+        }
+        lastFilePathsRef.current = currentPaths;
 
-        if (latestFile && !internalFileContentRef.current.has(latestFile.path)) {
-            updateSlotsLRU(latestFile);
+        if (newFileToOpen) {
+            updateSlotsLRU(newFileToOpen);
         } else {
+            // Update contents of existing slots if they changed in the background
             setActiveSlots(prev => prev.map((s) => {
                 if (!s) return null;
                 const match = initialFiles.find(f => f.path === s.path);
