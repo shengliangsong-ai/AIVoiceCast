@@ -837,6 +837,19 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
     }
   };
 
+  const createNewFileTool: FunctionDeclaration = {
+    name: "create_new_file",
+    description: "Creates a new file in the workspace and switches focus to it. Use this for starting new implementations or interview questions.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        filename: { type: Type.STRING, description: "The name of the file (e.g., 'solution.py' or 'algorithm.cpp')." },
+        content: { type: Type.STRING, description: "The initial code content for the file." }
+      },
+      required: ["filename", "content"]
+    }
+  };
+
   const toggleSlotViewMode = (idx: number) => {
       setSlotViewModes(prev => ({
           ...prev,
@@ -1054,12 +1067,12 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       await updateProjectAccess(project.id, isPublic ? 'public' : 'restricted', uids);
   };
 
-  const handleCreateNewFile = () => {
-      const fileName = prompt("Enter filename (with extension):", "NewFile.ts");
+  const handleCreateNewFile = (fileNameInput?: string, contentInput?: string) => {
+      const fileName = fileNameInput || prompt("Enter filename (with extension):", "NewFile.ts");
       if (!fileName) return;
       const newFile: CodeFile = {
           name: fileName, path: activeTab === 'drive' ? `drive://${fileName}` : fileName,
-          content: "", language: getLanguageFromExt(fileName), loaded: true, isDirectory: false, isModified: true
+          content: contentInput || "", language: getLanguageFromExt(fileName), loaded: true, isDirectory: false, isModified: true
       };
       updateSlotFile(newFile, focusedSlot);
       setSaveStatus('modified');
@@ -1107,7 +1120,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                   const isWhiteboard = node.name.toLowerCase().endsWith('.draw') || node.name.toLowerCase().endsWith('.wb');
                   const mime = node.data?.mimeType || '';
                   const isAudioMime = mime.startsWith('audio/') || (mime === 'video/webm' && node.name.toLowerCase().includes('audio'));
-                  const isVideoMime = mime.startsWith('video/') && !isAudioMime;
+                  const isDefaultVideoMime = mime.startsWith('video/') && !isAudioMime;
                   
                   if (isYouTube) {
                       const text = await readDriveFile(driveToken, node.id);
@@ -1118,7 +1131,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                   } else if (isAudioMime) {
                       const streamUrl = getDriveFileStreamUrl(driveToken, node.id);
                       fileData = { name: node.name, path: streamUrl, content: '[AUDIO STREAM]', language: 'audio', size: node.data?.size ? parseInt(node.data.size) : undefined, loaded: true, isDirectory: false, isModified: false, driveId: node.id };
-                  } else if (isVideoMime) {
+                  } else if (isDefaultVideoMime) {
                       const streamUrl = getDriveFileStreamUrl(driveToken, node.id);
                       fileData = { name: node.name, path: streamUrl, content: '[VIDEO STREAM]', language: 'video', size: node.data?.size ? parseInt(node.data.size) : undefined, loaded: true, isDirectory: false, isModified: false, driveId: node.id };
                   } else if (isWhiteboard) {
@@ -1283,17 +1296,35 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       const history = chatMessages.map(m => ({ role: (m.role === 'ai' ? 'model' : 'user') as 'model' | 'user', parts: [{ text: m.text }] }));
       let contextualMessage = text;
       if (activeFile) contextualMessage = `CONTEXT: Focused File "${activeFile.name}" content:\n\`\`\`${activeFile.language}\n${activeFile.content}\n\`\`\`\n\nUSER REQUEST: ${text}`;
-      const response = await ai.models.generateContent({ model: 'gemini-3-pro-preview', contents: [ ...history, { role: 'user', parts: [{ text: contextualMessage }] } ], config: { systemInstruction: "Expert pair programmer.", tools: [{ functionDeclarations: [updateFileTool] }] } });
-      if (response.functionCalls?.[0]?.name === 'update_active_file') {
-          const args = response.functionCalls[0].args as any;
-          if (args.new_content) { 
-              handleCodeChangeInSlot(args.new_content, focusedSlot); 
-              setChatMessages(prev => [...prev, { role: 'ai', text: `✅ Updated. ${args.summary || ''}` }]); 
-              if (onFileChange && activeSlots[focusedSlot]) {
-                onFileChange({ ...activeSlots[focusedSlot]!, content: args.new_content });
+      
+      const response = await ai.models.generateContent({ 
+          model: 'gemini-3-pro-preview', 
+          contents: [ ...history, { role: 'user', parts: [{ text: contextualMessage }] } ], 
+          config: { 
+              systemInstruction: "Expert pair programmer. You can modify files or create new ones.", 
+              tools: [{ functionDeclarations: [updateFileTool, createNewFileTool] }] 
+          } 
+      });
+
+      if (response.functionCalls?.[0]) {
+          const fc = response.functionCalls[0];
+          if (fc.name === 'update_active_file') {
+              const args = fc.args as any;
+              if (args.new_content) { 
+                  handleCodeChangeInSlot(args.new_content, focusedSlot); 
+                  setChatMessages(prev => [...prev, { role: 'ai', text: `✅ Updated focused file. ${args.summary || ''}` }]); 
+                  if (onFileChange && activeSlots[focusedSlot]) {
+                    onFileChange({ ...activeSlots[focusedSlot]!, content: args.new_content });
+                  }
               }
+          } else if (fc.name === 'create_new_file') {
+              const args = fc.args as any;
+              handleCreateNewFile(args.filename, args.content);
+              setChatMessages(prev => [...prev, { role: 'ai', text: `🚀 Opened and implemented new file: **${args.filename}**` }]);
           }
-      } else { setChatMessages(prev => [...prev, { role: 'ai', text: response.text || "No response." }]); }
+      } else { 
+          setChatMessages(prev => [...prev, { role: 'ai', text: response.text || "No response." }]); 
+      }
     } catch (e: any) { setChatMessages(prev => [...prev, { role: 'ai', text: "Error: " + e.message }]); } finally { setIsChatThinking(false); }
   };
 
@@ -1308,7 +1339,9 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
 
     const sysInstruction = `You are a world-class pair-programming assistant. 
     You have direct access to the user's current code via tool calling.
-    When a user asks you to write code, modify a file, or fix a bug, use the 'update_active_file' tool.
+    - When asked to write code, modify a file, or fix a bug in the CURRENT file, use 'update_active_file'.
+    - When asked to start a NEW problem, solve an interview question, or 'open a new file', use 'create_new_file'.
+    Always implement the solution fully and explain your thought process verbally.
     Keep your spoken responses concise and helpful.`;
 
     setIsLiveChatActive(true);
@@ -1340,10 +1373,15 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                         handleCodeChangeInSlot(new_content, focusedSlot);
                         setChatMessages(prev => [...prev, { role: 'ai', text: `*[System]: Injected code changes via Voice Command. ${summary || ''}*` }]);
                         service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: "Success: Workspace updated." } }]);
+                    } else if (fc.name === 'create_new_file') {
+                        const { filename, content } = fc.args as any;
+                        handleCreateNewFile(filename, content);
+                        setChatMessages(prev => [...prev, { role: 'ai', text: `*[System]: Opened and implemented new file '${filename}' via Voice Command.*` }]);
+                        service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Success: '${filename}' created and focused.` } }]);
                     }
                 }
             }
-        }, [{ functionDeclarations: [updateFileTool] }]);
+        }, [{ functionDeclarations: [updateFileTool, createNewFileTool] }]);
     } catch (e) {
         setIsLiveChatActive(false);
     }
@@ -1461,7 +1499,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
               <div className="flex-1 flex flex-col overflow-hidden">
                   <div className="p-3 border-b border-slate-800 flex gap-1.5 shrink-0 bg-slate-900/50">
                       <button onClick={refreshExplorer} disabled={isExplorerLoading} className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700 transition-colors" title="Refresh Explorer">{isExplorerLoading ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}</button>
-                      {!isSharedViewOnly && <button onClick={handleCreateNewFile} className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white py-1.5 rounded-lg text-[10px] font-black uppercase flex items-center justify-center gap-1.5 shadow-lg transition-all active:scale-95"><FilePlus size={14}/> New File</button>}
+                      {!isSharedViewOnly && <button onClick={() => handleCreateNewFile()} className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white py-1.5 rounded-lg text-[10px] font-black uppercase flex items-center justify-center gap-1.5 shadow-lg transition-all active:scale-95"><FilePlus size={14}/> New File</button>}
                   </div>
                   
                   {activeTab === 'session' && (
