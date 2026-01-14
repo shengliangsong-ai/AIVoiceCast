@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { CodeProject, CodeFile, UserProfile, Channel, CursorPosition, CloudItem } from '../types';
-import { ArrowLeft, Save, Plus, Github, Cloud, HardDrive, Code, X, ChevronRight, ChevronDown, File, Folder, DownloadCloud, Loader2, CheckCircle, AlertTriangle, Info, FolderPlus, FileCode, RefreshCw, LogIn, CloudUpload, Trash2, ArrowUp, Edit2, FolderOpen, MoreVertical, Send, MessageSquare, Bot, Mic, MicOff, Sparkles, SidebarClose, SidebarOpen, Users, Eye, FileText as FileTextIcon, Image as ImageIcon, StopCircle, Minus, Maximize2, Minimize2, Lock, Unlock, Share2, Terminal as TerminalIcon, Copy, WifiOff, PanelRightClose, PanelRightOpen, PanelLeftClose, PanelLeftOpen, Monitor, Laptop, PenTool, Edit3, ShieldAlert, ZoomIn, ZoomOut, Columns, Rows, Grid2X2, Square as SquareIcon, GripVertical, GripHorizontal, FileSearch, Indent, Wand2, Check, Link, MousePointer2, Activity, Key, Search, FilePlus, FileUp, Play, Trash, ExternalLink, GraduationCap, ShieldCheck, Youtube, Video } from 'lucide-react';
+import { ArrowLeft, Save, Plus, Github, Cloud, HardDrive, Code, X, ChevronRight, ChevronDown, File, Folder, DownloadCloud, Loader2, CheckCircle, AlertTriangle, Info, FolderPlus, FileCode, RefreshCw, LogIn, CloudUpload, Trash2, ArrowUp, Edit2, FolderOpen, MoreVertical, Send, MessageSquare, Bot, Mic, MicOff, Sparkles, SidebarClose, SidebarOpen, Users, Eye, FileText as FileTextIcon, Image as ImageIcon, StopCircle, Minus, Maximize2, Minimize2, Lock, Unlock, Share2, Terminal as TerminalIcon, Copy, WifiOff, PanelRightClose, PanelRightOpen, PanelLeftClose, PanelLeftOpen, Monitor, Laptop, PenTool, Edit3, ShieldAlert, ZoomIn, ZoomOut, Columns, Rows, Grid2X2, Square as SquareIcon, GripVertical, GripHorizontal, FileSearch, Indent, Wand2, Check, Link, MousePointer2, Activity, Key, Search, FilePlus, FileUp, Play, Trash, ExternalLink, GraduationCap, ShieldCheck, Youtube, Video, Zap } from 'lucide-react';
 import { listCloudDirectory, saveProjectToCloud, deleteCloudItem, createCloudFolder, subscribeToCodeProject, saveCodeProject, updateCodeFile, updateCursor, claimCodeProjectLock, updateProjectActiveFile, deleteCodeFile, updateProjectAccess, sendShareNotification, deleteCloudFolderRecursive } from '../services/firestoreService';
-import { ensureCodeStudioFolder, listDriveFiles, readDriveFile, saveToDrive, deleteDriveFile, createDriveFolder, DriveFile, moveDriveFile, shareFileWithEmail, getDriveFileSharingLink, downloadDriveFileAsBlob } from '../services/googleDriveService';
+import { ensureCodeStudioFolder, listDriveFiles, readDriveFile, saveToDrive, deleteDriveFile, createDriveFolder, DriveFile, moveDriveFile, shareFileWithEmail, getDriveFileSharingLink, downloadDriveFileAsBlob, getDriveFileStreamUrl } from '../services/googleDriveService';
 import { connectGoogleDrive, getDriveToken, signInWithGitHub } from '../services/authService';
 import { fetchRepoInfo, fetchRepoContents, fetchFileContent, updateRepoFile, fetchUserRepos, fetchRepoSubTree } from '../services/githubService';
 import { MarkdownView } from './MarkdownView';
@@ -21,6 +21,7 @@ interface TreeNode {
   data?: any;
   isLoaded?: boolean;
   status?: 'modified' | 'new' | 'deleted';
+  size?: number;
 }
 
 type LayoutMode = 'single' | 'split-v' | 'split-h' | 'quad';
@@ -70,6 +71,15 @@ function getLanguageFromExt(filename: string): CodeFile['language'] {
     return 'text';
 }
 
+function formatSize(bytes?: number): string {
+    if (bytes === undefined || bytes === null || isNaN(bytes)) return '';
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
 const CURSOR_COLORS = [
     '#f87171', '#fb923c', '#fbbf24', '#facc15', '#a3e635', 
     '#4ade80', '#34d399', '#2dd4bf', '#22d3ee', '#38bdf8', 
@@ -117,6 +127,9 @@ const FileTreeItem = ({ node, depth, activeId, onSelect, onToggle, onDelete, onS
                     <FileIcon filename={node.name} />
                 )}
                 <span className="text-xs truncate flex-1">{node.name}</span>
+                {node.type === 'file' && node.size !== undefined && (
+                    <span className="text-[9px] font-mono text-slate-600 group-hover:text-slate-400 mr-2">{formatSize(node.size)}</span>
+                )}
                 {node.type === 'file' && (
                     <button 
                         onClick={(e) => { e.stopPropagation(); onShare(node); }}
@@ -427,6 +440,8 @@ const Slot: React.FC<SlotProps> = ({
         return match ? match[1] : null;
     };
 
+    const isStreamUrl = file?.path && (file.path.startsWith('http') || file.path.includes('access_token='));
+
     return (
         <div 
             onClick={() => setFocusedSlot(idx)} 
@@ -439,6 +454,11 @@ const Slot: React.FC<SlotProps> = ({
                       <div className="flex items-center gap-2 overflow-hidden">
                           <FileIcon filename={file.name} />
                           <span className={`text-xs font-bold truncate ${isFocused ? 'text-indigo-200' : 'text-slate-400'}`}>{file.name}</span>
+                          {isStreamUrl && (
+                              <div className="hidden sm:flex items-center gap-1 text-[8px] font-black bg-indigo-900/40 text-indigo-400 border border-indigo-500/30 px-1.5 py-0.5 rounded-full uppercase tracking-widest">
+                                  <Zap size={8} fill="currentColor"/> Neural Stream
+                              </div>
+                          )}
                       </div>
                       <div className="flex items-center gap-1">
                           {isInterviewerMode && (
@@ -468,8 +488,13 @@ const Slot: React.FC<SlotProps> = ({
                               ) : lang === 'pdf' ? (
                                   <iframe src={file.path} className="w-full h-full border-none bg-white" title="PDF Viewer" />
                               ) : lang === 'video' ? (
-                                  <div className="w-full h-full bg-black flex items-center justify-center">
-                                      <video src={file.path} controls className="max-w-full max-h-full" />
+                                  <div className="w-full h-full bg-black flex items-center justify-center relative">
+                                      <video src={file.path} controls autoPlay className="max-w-full max-h-full" />
+                                      {isStreamUrl && (
+                                          <div className="absolute top-4 left-4 z-20 px-3 py-1 bg-black/60 backdrop-blur-md rounded-full border border-white/10 text-[9px] font-bold text-white uppercase tracking-widest flex items-center gap-2">
+                                              <Activity size={10} className="text-emerald-400 animate-pulse"/> Seeking Active
+                                          </div>
+                                      )}
                                   </div>
                               ) : lang === 'youtube' ? (
                                   <div className="w-full h-full bg-black flex items-center justify-center">
@@ -791,6 +816,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
               name: f.name.split('/').pop() || f.name,
               type: (f.isDirectory ? 'folder' : 'file') as 'file' | 'folder',
               isLoaded: f.childrenFetched,
+              size: f.size,
               data: f
           }));
           setGithubTree(tree);
@@ -815,6 +841,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
               name: f.name.split('/').pop() || f.name,
               type: (f.isDirectory ? 'folder' : 'file') as 'file' | 'folder',
               isLoaded: f.childrenFetched,
+              size: f.size,
               data: f
           }));
           setGithubTree(tree);
@@ -974,7 +1001,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
               } else if (activeTab === 'github' && project.github) {
                   const { owner, repo, branch } = project.github;
                   const children = await fetchRepoSubTree(githubToken, owner, repo, node.data.treeSha, node.id);
-                  const childNodes: TreeNode[] = children.map(f => ({ id: f.path || f.name, name: f.name.split('/').pop() || f.name, type: (f.isDirectory ? 'folder' : 'file') as 'file' | 'folder', isLoaded: f.childrenFetched, data: f }));
+                  const childNodes: TreeNode[] = children.map(f => ({ id: f.path || f.name, name: f.name.split('/').pop() || f.name, type: (f.isDirectory ? 'folder' : 'file') as 'file' | 'folder', isLoaded: f.childrenFetched, size: f.size, data: f }));
                   setGithubTree(prev => {
                       const updateRecursive = (list: TreeNode[]): TreeNode[] => list.map(n => {
                           if (n.id === node.id) return { ...n, isLoaded: true, children: childNodes };
@@ -1001,28 +1028,37 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                       const text = await readDriveFile(driveToken, node.id);
                       fileData = { name: node.name, path: `drive://${node.id}`, content: text, language: 'youtube', loaded: true, isDirectory: false, isModified: false };
                   } else if (isBinary || isVideo) {
-                      const blob = await downloadDriveFileAsBlob(driveToken, node.id);
-                      const blobUrl = URL.createObjectURL(blob);
-                      blobUrlsRef.current.add(blobUrl);
-                      fileData = { name: node.name, path: blobUrl, content: '[BINARY DATA]', language: isBinary ? 'pdf' : 'video', loaded: true, isDirectory: false, isModified: false };
+                      // HIGH PERFORMANCE: For large media/pdf files, use direct API streaming link
+                      // This avoids downloading the entire multi-GB file before playback
+                      const streamUrl = getDriveFileStreamUrl(driveToken, node.id);
+                      fileData = { 
+                          name: node.name, 
+                          path: streamUrl, 
+                          content: '[STREAMING MEDIA]', 
+                          language: isBinary ? 'pdf' : 'video', 
+                          size: node.data?.size ? parseInt(node.data.size) : undefined,
+                          loaded: true, 
+                          isDirectory: false, 
+                          isModified: false 
+                      };
                   } else {
                       const text = await readDriveFile(driveToken, node.id);
-                      fileData = { name: node.name, path: `drive://${node.id}`, content: text, language: getLanguageFromExt(node.name), loaded: true, isDirectory: false, isModified: false };
+                      fileData = { name: node.name, path: `drive://${node.id}`, content: text, language: getLanguageFromExt(node.name), size: node.data?.size ? parseInt(node.data.size) : undefined, loaded: true, isDirectory: false, isModified: false };
                   }
               } else if (activeTab === 'cloud' && node.data?.url) {
                   const isBinary = node.name.toLowerCase().endsWith('.pdf');
                   const isVideo = ['webm', 'mp4', 'mov', 'm4v'].includes(node.name.split('.').pop()?.toLowerCase() || '');
                   if (isBinary || isVideo) {
-                      fileData = { name: node.name, path: node.data.url, content: '[BINARY DATA]', language: isBinary ? 'pdf' : 'video', loaded: true, isDirectory: false, isModified: false };
+                      fileData = { name: node.name, path: node.data.url, content: '[BINARY DATA]', language: isBinary ? 'pdf' : 'video', size: node.size, loaded: true, isDirectory: false, isModified: false };
                   } else {
                       const res = await fetch(node.data.url);
                       const text = await res.text();
-                      fileData = { name: node.name, path: node.id, content: text, language: getLanguageFromExt(node.name), loaded: true, isDirectory: false, isModified: false };
+                      fileData = { name: node.name, path: node.id, content: text, language: getLanguageFromExt(node.name), size: node.size, loaded: true, isDirectory: false, isModified: false };
                   }
               } else if (activeTab === 'github' && project.github) {
                   const { owner, repo, branch } = project.github;
                   const text = await fetchFileContent(githubToken, owner, repo, node.id, branch);
-                  fileData = { name: node.name, path: node.id, content: text, language: getLanguageFromExt(node.name), loaded: true, isDirectory: false, isModified: false, sha: node.data?.sha };
+                  fileData = { name: node.name, path: node.id, content: text, language: getLanguageFromExt(node.name), size: node.size, loaded: true, isDirectory: false, isModified: false, sha: node.data?.sha };
               } else if (activeTab === 'session') {
                   const match = initialFiles?.find(f => f.path === node.id);
                   if (match) fileData = match;
@@ -1155,6 +1191,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
           name: f.name,
           type: 'file' as const,
           isLoaded: true,
+          size: f.size,
           data: f
       }));
   }, [isInterviewerMode, initialFiles]);
@@ -1162,7 +1199,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
   const driveTree = useMemo(() => {
       const root: TreeNode[] = [];
       const map = new Map<string, TreeNode>();
-      driveItems.forEach(item => map.set(item.id, { id: item.id, name: item.name, type: item.mimeType === 'application/vnd.google-apps.folder' ? 'folder' : 'file', data: item, children: [], isLoaded: item.isLoaded }));
+      driveItems.forEach(item => map.set(item.id, { id: item.id, name: item.name, type: item.mimeType === 'application/vnd.google-apps.folder' ? 'folder' : 'file', data: item, children: [], isLoaded: item.isLoaded, size: item.size ? parseInt(item.size) : undefined }));
       driveItems.forEach(item => {
           const node = map.get(item.id)!;
           if (item.parentId && map.has(item.parentId)) map.get(item.parentId)!.children.push(node);
@@ -1174,7 +1211,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
   const cloudTree = useMemo(() => {
     const root: TreeNode[] = [];
     const map = new Map<string, TreeNode>();
-    cloudItems.forEach(item => map.set(item.fullPath, { id: item.fullPath, name: item.name, type: item.isFolder ? 'folder' : 'file', data: item, children: [], isLoaded: true }));
+    cloudItems.forEach(item => map.set(item.fullPath, { id: item.fullPath, name: item.name, type: item.isFolder ? 'folder' : 'file', data: item, children: [], isLoaded: true, size: item.size }));
     cloudItems.forEach(item => { const node = map.get(item.fullPath)!; const parts = item.fullPath.split('/'); parts.pop(); const pPath = parts.join('/'); if (map.has(pPath)) map.get(pPath)!.children.push(node); else root.push(node); });
     return root;
   }, [cloudItems]);

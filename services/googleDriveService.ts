@@ -6,9 +6,19 @@ export interface DriveFile {
   name: string;
   mimeType: string;
   webViewLink?: string;
+  size?: string;
 }
 
 const APP_STATE_FILE = 'aivoicecast_state_v2.json';
+
+/**
+ * Generates a streamable URL for media tags (video/audio/pdf).
+ * NOTE: Using access_token in URL is the most reliable way to enable 
+ * native browser Range Requests (streaming) for private Drive files.
+ */
+export function getDriveFileStreamUrl(accessToken: string, fileId: string): string {
+  return `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&access_token=${accessToken}`;
+}
 
 /**
  * Searches for a folder by name, optionally within a parent folder.
@@ -155,7 +165,7 @@ export async function loadAppStateFromDrive(accessToken: string, folderId: strin
 
 export async function listDriveFiles(accessToken: string, folderId: string): Promise<DriveFile[]> {
   const query = `'${folderId}' in parents and trashed=false`;
-  const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name,mimeType,webViewLink)`, {
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name,mimeType,webViewLink,size)`, {
     headers: { Authorization: `Bearer ${accessToken}` }
   });
   const data = await res.json();

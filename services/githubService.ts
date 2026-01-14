@@ -1,3 +1,4 @@
+
 import { CodeFile, CodeProject } from '../types';
 
 const GITHUB_API_BASE = 'https://api.github.com';
@@ -75,6 +76,7 @@ const transformTreeItem = (item: any, prefix: string = ''): CodeFile => {
         language: getLanguageFromExt(fullPath),
         content: '', // Lazy load content
         sha: item.sha,
+        size: item.size, // Added size field
         path: fullPath,
         loaded: false,
         isDirectory: isDir,

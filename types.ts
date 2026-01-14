@@ -196,6 +196,7 @@ export interface CodeFile {
   path: string;
   language: 'javascript' | 'typescript' | 'javascript (react)' | 'typescript (react)' | 'python' | 'c++' | 'c' | 'java' | 'rust' | 'go' | 'c#' | 'html' | 'css' | 'json' | 'markdown' | 'plantuml' | 'whiteboard' | 'pdf' | 'text' | 'youtube' | 'video';
   content: string;
+  size?: number;
   loaded?: boolean;
   isDirectory?: boolean;
   isModified?: boolean;
