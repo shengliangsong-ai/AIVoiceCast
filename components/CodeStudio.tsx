@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { CodeProject, CodeFile, UserProfile, Channel, CursorPosition, CloudItem } from '../types';
-import { ArrowLeft, Save, Plus, Github, Cloud, HardDrive, Code, X, ChevronRight, ChevronDown, File, Folder, DownloadCloud, Loader2, CheckCircle, AlertTriangle, Info, FolderPlus, FileCode, RefreshCw, LogIn, CloudUpload, Trash2, ArrowUp, Edit2, FolderOpen, MoreVertical, Send, MessageSquare, Bot, Mic, Sparkles, SidebarClose, SidebarOpen, Users, Eye, FileText as FileTextIcon, Image as ImageIcon, StopCircle, Minus, Maximize2, Minimize2, Lock, Unlock, Share2, Terminal as TerminalIcon, Copy, WifiOff, PanelRightClose, PanelRightOpen, PanelLeftClose, PanelLeftOpen, Monitor, Laptop, PenTool, Edit3, ShieldAlert, ZoomIn, ZoomOut, Columns, Rows, Grid2X2, Square as SquareIcon, GripVertical, GripHorizontal, FileSearch, Indent, Wand2, Check, Link, MousePointer2, Activity, Key, Search, FilePlus, FileUp, Play, Trash, ExternalLink, GraduationCap, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, Save, Plus, Github, Cloud, HardDrive, Code, X, ChevronRight, ChevronDown, File, Folder, DownloadCloud, Loader2, CheckCircle, AlertTriangle, Info, FolderPlus, FileCode, RefreshCw, LogIn, CloudUpload, Trash2, ArrowUp, Edit2, FolderOpen, MoreVertical, Send, MessageSquare, Bot, Mic, MicOff, Sparkles, SidebarClose, SidebarOpen, Users, Eye, FileText as FileTextIcon, Image as ImageIcon, StopCircle, Minus, Maximize2, Minimize2, Lock, Unlock, Share2, Terminal as TerminalIcon, Copy, WifiOff, PanelRightClose, PanelRightOpen, PanelLeftClose, PanelLeftOpen, Monitor, Laptop, PenTool, Edit3, ShieldAlert, ZoomIn, ZoomOut, Columns, Rows, Grid2X2, Square as SquareIcon, GripVertical, GripHorizontal, FileSearch, Indent, Wand2, Check, Link, MousePointer2, Activity, Key, Search, FilePlus, FileUp, Play, Trash, ExternalLink, GraduationCap, ShieldCheck, Youtube, Video } from 'lucide-react';
 import { listCloudDirectory, saveProjectToCloud, deleteCloudItem, createCloudFolder, subscribeToCodeProject, saveCodeProject, updateCodeFile, updateCursor, claimCodeProjectLock, updateProjectActiveFile, deleteCodeFile, updateProjectAccess, sendShareNotification, deleteCloudFolderRecursive } from '../services/firestoreService';
 import { ensureCodeStudioFolder, listDriveFiles, readDriveFile, saveToDrive, deleteDriveFile, createDriveFolder, DriveFile, moveDriveFile, shareFileWithEmail, getDriveFileSharingLink, downloadDriveFileAsBlob } from '../services/googleDriveService';
 import { connectGoogleDrive, getDriveToken, signInWithGitHub } from '../services/authService';
@@ -47,6 +47,8 @@ interface CodeStudioProps {
 function getLanguageFromExt(filename: string): CodeFile['language'] {
     if (!filename) return 'text';
     const ext = filename.split('.').pop()?.toLowerCase();
+    if (ext === 'youtube' || filename.includes('youtube.com') || filename.includes('youtu.be')) return 'youtube';
+    if (['webm', 'mp4', 'mov', 'm4v'].includes(ext || '')) return 'video';
     if (ext === 'jsx') return 'javascript (react)';
     if (ext === 'tsx') return 'typescript (react)';
     if (ext === 'js') return 'javascript';
@@ -77,6 +79,8 @@ const CURSOR_COLORS = [
 const FileIcon = ({ filename }: { filename: string }) => {
     if (!filename) return <File size={16} className="text-slate-500" />;
     const lang = getLanguageFromExt(filename);
+    if (lang === 'youtube') return <Youtube size={16} className="text-red-500" />;
+    if (lang === 'video') return <Video size={16} className="text-indigo-400" />;
     if (lang === 'javascript' || lang === 'typescript' || lang === 'javascript (react)' || lang === 'typescript (react)') return <FileCode size={16} className="text-yellow-400" />;
     if (lang === 'python') return <FileCode size={16} className="text-blue-400" />;
     if (lang === 'c++' || lang === 'c') return <FileCode size={16} className="text-indigo-400" />;
@@ -204,12 +208,43 @@ const AIChatPanel = ({ isOpen, onClose, messages, onSendMessage, isThinking, cur
     const [showLocalPaste, setShowLocalPaste] = useState(false);
     const [pasteBuffer, setPasteBuffer] = useState('');
     const [pasteLang, setPasteLang] = useState('cpp');
+    const [isListening, setIsListening] = useState(false);
+    const recognitionRef = useRef<any>(null);
     
     useEffect(() => {
         if (scrollRef.current) {
             scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
         }
     }, [messages, isThinking]);
+
+    useEffect(() => {
+        const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+        if (SpeechRecognition) {
+            recognitionRef.current = new SpeechRecognition();
+            recognitionRef.current.continuous = true;
+            recognitionRef.current.interimResults = true;
+            recognitionRef.current.onresult = (event: any) => {
+                let finalTranscript = '';
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    if (event.results[i].isFinal) finalTranscript += event.results[i][0].transcript;
+                }
+                if (finalTranscript) {
+                    onInputChange((prev: string) => prev + ' ' + finalTranscript);
+                }
+            };
+            recognitionRef.current.onend = () => setIsListening(false);
+        }
+    }, [onInputChange]);
+
+    const toggleVoiceInput = () => {
+        if (!recognitionRef.current) return alert("Speech recognition not supported.");
+        if (isListening) {
+            recognitionRef.current.stop();
+        } else {
+            recognitionRef.current.start();
+            setIsListening(true);
+        }
+    };
 
     const handleLocalPaste = () => {
         if (!pasteBuffer.trim()) return;
@@ -293,6 +328,14 @@ const AIChatPanel = ({ isOpen, onClose, messages, onSendMessage, isThinking, cur
                             className="flex-1 bg-transparent border-none py-2.5 text-sm text-slate-300 focus:ring-0 placeholder-slate-600" 
                             placeholder={isInterviewerMode ? "Reply to AI..." : "Ask AI to edit code..."} 
                         />
+                        <button 
+                            type="button" 
+                            onClick={toggleVoiceInput} 
+                            className={`p-1.5 rounded-full transition-all ${isListening ? 'text-red-500 bg-red-500/20 animate-pulse' : 'text-slate-500 hover:text-white'}`}
+                            title="Voice Input"
+                        >
+                            {isListening ? <MicOff size={18}/> : <Mic size={18}/>}
+                        </button>
                     </div>
                     <button 
                         type="submit" 
@@ -379,6 +422,11 @@ const Slot: React.FC<SlotProps> = ({
     const lang = file ? getLanguageFromExt(file.name) : 'text';
     const canRun = ['c++', 'c', 'python', 'javascript', 'typescript'].includes(lang);
 
+    const getYouTubeId = (url: string) => {
+        const match = url.match(/(?:v=|\/)([0-9A-Za-z_-]{11})/);
+        return match ? match[1] : null;
+    };
+
     return (
         <div 
             onClick={() => setFocusedSlot(idx)} 
@@ -405,10 +453,10 @@ const Slot: React.FC<SlotProps> = ({
                                   <span className="hidden md:inline">Run</span>
                               </button>
                           )}
-                          {vMode === 'code' && !['markdown', 'pdf', 'whiteboard'].includes(lang) && (
+                          {vMode === 'code' && !['markdown', 'pdf', 'whiteboard', 'youtube', 'video'].includes(lang) && (
                               <button onClick={(e) => { e.stopPropagation(); handleFormatCode(idx); }} disabled={isFormatting} className={`p-1.5 rounded ${isFormatting ? 'text-indigo-400' : 'text-slate-500 hover:text-indigo-400'}`} title="AI Format"><Wand2 size={14}/></button>
                           )}
-                          {['md', 'puml', 'plantuml', 'pdf', 'draw', 'whiteboard', 'wb'].includes(file.name.split('.').pop()?.toLowerCase() || '') && <button onClick={(e) => { e.stopPropagation(); toggleSlotViewMode(idx); }} className={`p-1.5 rounded ${vMode === 'preview' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-white'}`}>{vMode === 'preview' ? <Code size={14}/> : <Eye size={14}/>}</button>}
+                          {['md', 'puml', 'plantuml', 'pdf', 'draw', 'whiteboard', 'wb', 'youtube', 'webm', 'mp4', 'mov', 'm4v'].includes(file.name.split('.').pop()?.toLowerCase() || '') && <button onClick={(e) => { e.stopPropagation(); toggleSlotViewMode(idx); }} className={`p-1.5 rounded ${vMode === 'preview' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-white'}`}>{vMode === 'preview' ? <Code size={14}/> : <Eye size={14}/>}</button>}
                           <button onClick={(e) => { e.stopPropagation(); updateSlotFile(null, idx); }} className="p-1.5 hover:bg-slate-800 rounded text-slate-500 hover:text-white"><X size={14}/></button>
                       </div>
                   </div>
@@ -419,21 +467,53 @@ const Slot: React.FC<SlotProps> = ({
                                   <div className="w-full h-full"><Whiteboard isReadOnly={isReadOnly} /></div>
                               ) : lang === 'pdf' ? (
                                   <iframe src={file.path} className="w-full h-full border-none bg-white" title="PDF Viewer" />
+                              ) : lang === 'video' ? (
+                                  <div className="w-full h-full bg-black flex items-center justify-center">
+                                      <video src={file.path} controls className="max-w-full max-h-full" />
+                                  </div>
+                              ) : lang === 'youtube' ? (
+                                  <div className="w-full h-full bg-black flex items-center justify-center">
+                                      <iframe 
+                                          width="100%" height="100%" 
+                                          src={`https://www.youtube.com/embed/${getYouTubeId(file.content || file.path)}`} 
+                                          frameBorder="0" allowFullScreen title="YouTube Preview"
+                                      />
+                                  </div>
                               ) : (
                                   <div className="h-full overflow-y-auto p-8 scrollbar-hide">
                                       <MarkdownView content={file.content} />
                                   </div>
                               )
                           ) : (
-                              <RichCodeEditor 
-                                  code={file.content} 
-                                  onChange={(c: string) => handleCodeChangeInSlot(c, idx)} 
-                                  onCursorMove={broadcastCursor}
-                                  language={file.language} 
-                                  fontSize={fontSize} 
-                                  indentMode={indentMode} 
-                                  readOnly={isReadOnly || (isLive && lockStatus === 'busy')}
-                              />
+                              lang === 'youtube' ? (
+                                <div className="flex flex-col items-center justify-center h-full p-8 text-center text-slate-500 bg-slate-900/50">
+                                    <Youtube size={64} className="mb-4 text-red-500 opacity-50"/>
+                                    <h3 className="text-lg font-bold text-white mb-2">YouTube View File</h3>
+                                    <p className="text-sm max-w-xs mb-6">This is a media reference file. Click the Eye icon in the toolbar to play the video.</p>
+                                    <button onClick={() => toggleSlotViewMode(idx)} className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold flex items-center gap-2">
+                                        <Eye size={18}/> Preview & Play
+                                    </button>
+                                </div>
+                              ) : lang === 'video' ? (
+                                <div className="flex flex-col items-center justify-center h-full p-8 text-center text-slate-500 bg-slate-900/50">
+                                    <Video size={64} className="mb-4 text-indigo-500 opacity-50"/>
+                                    <h3 className="text-lg font-bold text-white mb-2">Neural Recording</h3>
+                                    <p className="text-sm max-w-xs mb-6">Recorded interview or session. Use the Eye icon to start playback.</p>
+                                    <button onClick={() => toggleSlotViewMode(idx)} className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold flex items-center gap-2">
+                                        <Eye size={18}/> Play Recording
+                                    </button>
+                                </div>
+                              ) : (
+                                <RichCodeEditor 
+                                    code={file.content} 
+                                    onChange={(c: string) => handleCodeChangeInSlot(c, idx)} 
+                                    onCursorMove={broadcastCursor}
+                                    language={file.language} 
+                                    fontSize={fontSize} 
+                                    indentMode={indentMode} 
+                                    readOnly={isReadOnly || (isLive && lockStatus === 'busy')}
+                                />
+                              )
                           )}
                       </div>
 
@@ -529,7 +609,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
     const lang = getLanguageFromExt(file.name);
     setSlotViewModes(prev => ({
         ...prev,
-        [0]: ['markdown', 'plantuml', 'pdf', 'whiteboard'].includes(lang) ? 'preview' : 'code'
+        [0]: ['markdown', 'plantuml', 'pdf', 'whiteboard', 'youtube', 'video'].includes(lang) ? 'preview' : 'code'
     }));
   }, [layoutMode]);
 
@@ -913,20 +993,27 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
           let fileData: CodeFile | null = null;
           try {
               if (activeTab === 'drive' && driveToken) {
-                  const iSBinary = node.name.toLowerCase().endsWith('.pdf');
-                  if (iSBinary) {
+                  const isBinary = node.name.toLowerCase().endsWith('.pdf');
+                  const isYouTube = node.name.toLowerCase().endsWith('.youtube');
+                  const isVideo = ['webm', 'mp4', 'mov', 'm4v'].includes(node.name.split('.').pop()?.toLowerCase() || '');
+                  
+                  if (isYouTube) {
+                      const text = await readDriveFile(driveToken, node.id);
+                      fileData = { name: node.name, path: `drive://${node.id}`, content: text, language: 'youtube', loaded: true, isDirectory: false, isModified: false };
+                  } else if (isBinary || isVideo) {
                       const blob = await downloadDriveFileAsBlob(driveToken, node.id);
                       const blobUrl = URL.createObjectURL(blob);
                       blobUrlsRef.current.add(blobUrl);
-                      fileData = { name: node.name, path: blobUrl, content: '[BINARY DATA]', language: 'pdf', loaded: true, isDirectory: false, isModified: false };
+                      fileData = { name: node.name, path: blobUrl, content: '[BINARY DATA]', language: isBinary ? 'pdf' : 'video', loaded: true, isDirectory: false, isModified: false };
                   } else {
                       const text = await readDriveFile(driveToken, node.id);
                       fileData = { name: node.name, path: `drive://${node.id}`, content: text, language: getLanguageFromExt(node.name), loaded: true, isDirectory: false, isModified: false };
                   }
               } else if (activeTab === 'cloud' && node.data?.url) {
-                  const iSBinary = node.name.toLowerCase().endsWith('.pdf');
-                  if (iSBinary) {
-                      fileData = { name: node.name, path: node.data.url, content: '[BINARY DATA]', language: 'pdf', loaded: true, isDirectory: false, isModified: false };
+                  const isBinary = node.name.toLowerCase().endsWith('.pdf');
+                  const isVideo = ['webm', 'mp4', 'mov', 'm4v'].includes(node.name.split('.').pop()?.toLowerCase() || '');
+                  if (isBinary || isVideo) {
+                      fileData = { name: node.name, path: node.data.url, content: '[BINARY DATA]', language: isBinary ? 'pdf' : 'video', loaded: true, isDirectory: false, isModified: false };
                   } else {
                       const res = await fetch(node.data.url);
                       const text = await res.text();
@@ -1109,9 +1196,9 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
          <div className="flex items-center space-x-2">
             <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800 mr-4">
                 <button onClick={() => handleSetLayout('single')} className={`p-1.5 rounded ${layoutMode === 'single' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500'}`}><SquareIcon size={16}/></button>
-                <button onClick={() => handleSetLayout('split-v')} className={`p-1.5 rounded ${layoutMode === 'split-v' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500'}`}><Columns size={16}/></button>
-                <button onClick={() => handleSetLayout('split-h')} className={`p-1.5 rounded ${layoutMode === 'split-h' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500'}`}><Rows size={16}/></button>
-                <button onClick={() => handleSetLayout('quad')} className={`p-1.5 rounded ${layoutMode === 'quad' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500'}`}><Grid2X2 size={16}/></button>
+                <button onClick={() => handleSetLayout('split-v')} className={`p-1.5 rounded ${layoutMode === 'split-v' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-50'}`}><Columns size={16}/></button>
+                <button onClick={() => handleSetLayout('split-h')} className={`p-1.5 rounded ${layoutMode === 'split-h' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-50'}`}><Rows size={16}/></button>
+                <button onClick={() => handleSetLayout('quad')} className={`p-1.5 rounded ${layoutMode === 'quad' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-50'}`}><Grid2X2 size={16}/></button>
             </div>
             {!isSharedViewOnly && (
                 <>
