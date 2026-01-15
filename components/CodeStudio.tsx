@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { CodeProject, CodeFile, UserProfile, Channel, CursorPosition, CloudItem, TranscriptItem } from '../types';
 import { listCloudDirectory, saveProjectToCloud, deleteCloudItem, createCloudFolder, subscribeToCodeProject, saveCodeProject, updateCodeFile, updateCursor, claimCodeProjectLock, updateProjectActiveFile, deleteCodeFile, updateProjectAccess } from '../services/firestoreService';
-import { ensureCodeStudioFolder, ensureFolder, listDriveFiles, readDriveFile, saveToDrive, deleteDriveFile, createDriveFolder, DriveFile, moveDriveFile, getDriveFileStreamUrl, getDrivePreviewUrl, findFolder } from '../services/googleDriveService';
+// Added downloadDriveFileAsBlob to imports
+import { ensureCodeStudioFolder, ensureFolder, listDriveFiles, readDriveFile, saveToDrive, deleteDriveFile, createDriveFolder, DriveFile, moveDriveFile, getDriveFileStreamUrl, getDrivePreviewUrl, findFolder, downloadDriveFileAsBlob } from '../services/googleDriveService';
 import { connectGoogleDrive, getDriveToken, signInWithGoogle, signInWithGitHub } from '../services/authService';
 import { fetchRepoInfo, fetchRepoContents, fetchFileContent, updateRepoFile, fetchUserRepos, fetchRepoSubTree, deleteRepoFile, renameRepoFile } from '../services/githubService';
 import { GeminiLiveService } from '../services/geminiLive';
@@ -124,15 +125,24 @@ const FileTreeItem = ({ node, depth, activeId, onSelect, onToggle, onDelete, onS
     const isLoading = loadingIds[node.id];
     const isActive = activeId === node.id || activeId === `drive://${node.id}`;
     
+    const handleRowClick = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (node.type === 'folder') {
+            onToggle(node);
+        } else {
+            onSelect(node);
+        }
+    };
+
     return (
         <div>
             <div 
                 className={`flex items-center gap-1 py-1 px-2 cursor-pointer select-none hover:bg-slate-800/50 group ${isActive ? 'bg-indigo-600/20 text-white shadow-sm ring-1 ring-indigo-500/30' : 'text-slate-400 hover:text-white'}`}
                 style={{ paddingLeft: `${depth * 12 + 8}px` }}
-                onClick={() => onSelect(node)}
+                onClick={handleRowClick}
             >
                 {node.type === 'folder' && (
-                    <div onClick={(e) => { e.stopPropagation(); onToggle(node); }} className="p-0.5 hover:text-white">
+                    <div className="p-0.5 hover:text-white">
                         {isLoading ? <Loader2 size={12} className="animate-spin text-indigo-400"/> : isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                     </div>
                 )}
@@ -185,7 +195,7 @@ const FileTreeItem = ({ node, depth, activeId, onSelect, onToggle, onDelete, onS
                             node={child} 
                             depth={depth + 1} 
                             activeId={activeId} 
-                            onSelect={child.type === 'folder' ? () => onToggle(child) : () => onSelect(child)} 
+                            onSelect={node.type === 'file' ? onSelect : undefined} 
                             onToggle={onToggle}
                             onDelete={onDelete}
                             onShare={onShare}
@@ -873,10 +883,10 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
     name: "update_active_file",
     description: "Updates the content of the currently focused file in the editor.",
     parameters: {
-      type: Type.OBJECT,
+      type: GenType.OBJECT,
       properties: {
-        new_content: { type: Type.STRING, description: "The complete new content of the file." },
-        summary: { type: Type.STRING, description: "A brief summary of what you changed." }
+        new_content: { type: GenType.STRING, description: "The complete new content of the file." },
+        summary: { type: GenType.STRING, description: "A brief summary of what you changed." }
       },
       required: ["new_content"]
     }
@@ -886,11 +896,11 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
     name: "create_new_file",
     description: "Creates a new file in the workspace and switches focus to it.",
     parameters: {
-      type: Type.OBJECT,
+      type: GenType.OBJECT,
       properties: {
-        filename: { type: Type.STRING, description: "The name of the file." },
-        content: { type: Type.STRING, description: "The initial code content." },
-        directory_path: { type: Type.STRING, description: "Optional path." }
+        filename: { type: GenType.STRING, description: "The name of the file." },
+        content: { type: GenType.STRING, description: "The initial code content." },
+        directory_path: { type: GenType.STRING, description: "Optional path." }
       },
       required: ["filename", "content"]
     }
@@ -900,10 +910,10 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
     name: "create_directory",
     description: "Creates a new directory.",
     parameters: {
-      type: Type.OBJECT,
+      type: GenType.OBJECT,
       properties: {
-        directory_name: { type: Type.STRING },
-        parent_path: { type: Type.STRING }
+        directory_name: { type: GenType.STRING },
+        parent_path: { type: GenType.STRING }
       },
       required: ["directory_name"]
     }
@@ -940,10 +950,65 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
               const items = await listCloudDirectory(`projects/${currentUser.uid}`);
               setCloudItems(items);
           } else if (activeTab === 'github' && githubToken) {
-              const repos = await fetchUserRepos(githubToken);
-              setGithubRepos(repos);
+              if (project.github && githubTree.length === 0) {
+                   await handleAutoLoadDefaultRepo(githubToken, `${project.github.owner}/${project.github.repo}`);
+              } else {
+                  const repos = await fetchUserRepos(githubToken);
+                  setGithubRepos(repos);
+              }
           }
       } finally { setIsExplorerLoading(false); }
+  };
+
+  const handleAutoLoadDefaultRepo = async (token: string, repoFullName: string) => {
+      const [owner, repo] = repoFullName.split('/');
+      setIsGithubLoading(true);
+      try {
+          const info = await fetchRepoInfo(owner, repo, token);
+          const { files, latestSha } = await fetchRepoContents(token, owner, repo, info.default_branch);
+          const tree: TreeNode[] = files.map(f => ({
+              id: f.path || f.name,
+              name: f.name.split('/').pop() || f.name,
+              type: (f.isDirectory ? 'folder' : 'file') as 'file' | 'folder',
+              isLoaded: f.childrenFetched,
+              size: f.size,
+              data: f
+          }));
+          setGithubTree(tree);
+          setProject(prev => ({
+              ...prev,
+              github: { owner, repo, branch: info.default_branch, sha: latestSha }
+          }));
+      } catch (e: any) {
+          addSystemLog("Failed to load repo: " + e.message, 'error');
+      } finally {
+          setIsGithubLoading(false);
+      }
+  };
+
+  const handleSelectRepo = async (repo: any) => {
+      if (!githubToken) return;
+      setIsGithubLoading(true);
+      try {
+          const { files, latestSha } = await fetchRepoContents(githubToken, repo.owner.login, repo.name, repo.default_branch);
+          const tree: TreeNode[] = files.map(f => ({
+              id: f.path || f.name,
+              name: f.name.split('/').pop() || f.name,
+              type: (f.isDirectory ? 'folder' : 'file') as 'file' | 'folder',
+              isLoaded: f.childrenFetched,
+              size: f.size,
+              data: f
+          }));
+          setGithubTree(tree);
+          setProject(prev => ({
+              ...prev,
+              github: { owner: repo.owner.login, repo: repo.name, branch: repo.default_branch, sha: latestSha }
+          }));
+      } catch (e: any) {
+          alert("Failed to load repository tree: " + e.message);
+      } finally {
+          setIsGithubLoading(false);
+      }
   };
 
   const handleSmartSave = async (targetFileOverride?: CodeFile) => {
@@ -957,6 +1022,11 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
              await saveToDrive(driveToken, folderId, fileToSave.name, fileToSave.content, driveId);
         } else if (activeTab === 'cloud' && currentUser) {
              await saveProjectToCloud(`projects/${currentUser.uid}`, fileToSave.name, fileToSave.content);
+        } else if (activeTab === 'github' && githubToken && project.github) {
+            const { owner, repo, branch } = project.github;
+            const res = await updateRepoFile(githubToken, owner, repo, fileToSave.path || fileToSave.name, fileToSave.content, fileToSave.sha, `Update ${fileToSave.name}`, branch);
+            fileToSave.sha = res.sha;
+            fileToSave.isModified = false;
         }
         if (isLive && lockStatus === 'mine') await updateCodeFile(project.id, fileToSave);
         setSaveStatus('saved');
@@ -999,6 +1069,14 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
               } else if (activeTab === 'session') {
                   const match = project.files.find(f => f.path === node.id);
                   if (match) fileData = match;
+              } else if (activeTab === 'github' && project.github) {
+                  const { owner, repo, branch } = project.github;
+                  const text = await fetchFileContent(githubToken, owner, repo, node.id, branch);
+                  fileData = { name: node.name, path: node.id, content: text || "", language: getLanguageFromExt(node.name), size: node.size, loaded: true, isDirectory: false, isModified: false, sha: node.data?.sha };
+              } else if (activeTab === 'cloud' && node.data?.url) {
+                  const res = await fetch(node.data.url);
+                  const text = await res.text();
+                  fileData = { name: node.name, path: node.id, content: text || "", language: getLanguageFromExt(node.name), size: node.size, loaded: true, isDirectory: false, isModified: false };
               }
               if (fileData) updateSlotFile(fileData, focusedSlot);
           } catch(e: any) { 
@@ -1013,13 +1091,37 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
 
   const toggleFolder = async (node: TreeNode) => {
       setExpandedIds(prev => ({ ...prev, [node.id]: !prev[node.id] }));
-      if (!expandedIds[node.id] && !node.isLoaded && activeTab === 'drive' && driveToken) {
+      
+      // Load Children if not already loaded
+      if (!expandedIds[node.id] && !node.isLoaded) {
           setLoadingIds(prev => ({ ...prev, [node.id]: true }));
           try {
-              const files = await listDriveFiles(driveToken, node.id);
-              const driveChildren = files.map(f => ({ ...f, parentId: node.id, isLoaded: false }));
-              setDriveItems(prev => [...prev, ...driveChildren]);
-              setDriveItems(prev => prev.map(item => item.id === node.id ? { ...item, isLoaded: true } : item));
+              if (activeTab === 'drive' && driveToken) {
+                  const files = await listDriveFiles(driveToken, node.id);
+                  const driveChildren = files.map(f => ({ ...f, parentId: node.id, isLoaded: false }));
+                  setDriveItems(prev => [...prev, ...driveChildren]);
+                  setDriveItems(prev => prev.map(item => item.id === node.id ? { ...item, isLoaded: true } : item));
+              } else if (activeTab === 'github' && githubToken && project.github) {
+                  const { owner, repo } = project.github;
+                  const children = await fetchRepoSubTree(githubToken, owner, repo, node.data.sha, node.id);
+                  const childNodes: TreeNode[] = children.map(f => ({
+                      id: f.path || f.name,
+                      name: f.name.split('/').pop() || f.name,
+                      type: (f.isDirectory ? 'folder' : 'file') as 'file' | 'folder',
+                      isLoaded: f.childrenFetched,
+                      size: f.size,
+                      data: f
+                  }));
+                  
+                  const updateTree = (nodes: TreeNode[]): TreeNode[] => {
+                      return nodes.map(n => {
+                          if (n.id === node.id) return { ...n, children: childNodes, isLoaded: true };
+                          if (n.children) return { ...n, children: updateTree(n.children) };
+                          return n;
+                      });
+                  };
+                  setGithubTree(prev => updateTree(prev));
+              }
           } catch (e: any) {
               addSystemLog(`Failed to expand folder: ${e.message}`, 'error');
           } finally {
@@ -1036,7 +1138,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       });
       if (file) {
           const lang = getLanguageFromExt(file.name);
-          setSlotViewModes(prev => ({ ...prev, [slotIndex]: ['markdown', 'pdf', 'whiteboard', 'video', 'audio'].includes(lang) ? 'preview' : 'code' }));
+          setSlotViewModes(prev => ({ ...prev, [slotIndex]: ['markdown', 'pdf', 'whiteboard', 'video', 'audio', 'youtube'].includes(lang) ? 'preview' : 'code' }));
       }
   };
 
@@ -1129,7 +1231,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       }
   }, [isDraggingLeft, isDraggingRight, resize]);
 
-  useEffect(() => { refreshExplorer(); }, [activeTab, driveToken, currentUser]);
+  useEffect(() => { refreshExplorer(); }, [activeTab, driveToken, githubToken, currentUser]);
 
   const driveTree = useMemo(() => {
       const root: TreeNode[] = [];
@@ -1155,12 +1257,34 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
               {isInterviewerMode && <button onClick={() => setActiveTab('session')} className={`flex-1 py-3 transition-colors ${activeTab === 'session' ? 'border-b-2 border-indigo-500 bg-slate-800' : ''}`}>
                 <Activity size={18}/>
               </button>}
-              <button onClick={() => setActiveTab('drive')} className={`flex-1 py-3 transition-colors ${activeTab === 'drive' ? 'border-b-2 border-indigo-500 bg-slate-800' : ''}`}><HardDrive size={18}/></button>
-              <button onClick={() => setActiveTab('cloud')} className={`flex-1 py-3 transition-colors ${activeTab === 'cloud' ? 'border-b-2 border-indigo-500 bg-slate-800' : ''}`}><Cloud size={18}/></button>
+              <button onClick={() => setActiveTab('drive')} className={`flex-1 py-3 transition-colors ${activeTab === 'drive' ? 'border-b-2 border-indigo-500 bg-slate-800 text-white' : 'text-slate-500 hover:text-white'}`}>
+                <HardDrive size={18}/>
+              </button>
+              <button onClick={() => setActiveTab('cloud')} className={`flex-1 py-3 transition-colors ${activeTab === 'cloud' ? 'border-b-2 border-indigo-500 bg-slate-800 text-white' : 'text-slate-500 hover:text-white'}`}>
+                <Cloud size={18}/>
+              </button>
+              <button onClick={() => setActiveTab('github')} className={`flex-1 py-3 transition-colors ${activeTab === 'github' ? 'border-b-2 border-indigo-500 bg-slate-800 text-white' : 'text-slate-500 hover:text-white'}`}>
+                <Github size={18}/>
+              </button>
           </div>
           <div className="flex-1 overflow-y-auto scrollbar-hide py-2">
               {activeTab === 'drive' && (driveToken ? driveTree.map(node => <FileTreeItem key={node.id} node={node} depth={0} activeId={activeFile?.path} onSelect={handleExplorerSelect} onToggle={toggleFolder} expandedIds={expandedIds} loadingIds={loadingIds}/>) : <div className="p-8 text-center"><button onClick={handleConnectDrive} className="px-4 py-2 bg-indigo-600 rounded-lg text-xs font-bold">Connect Drive</button></div>)}
               {activeTab === 'session' && sessionTree.map(node => <FileTreeItem key={node.id} node={node} depth={0} activeId={activeFile?.path} onSelect={handleExplorerSelect} onToggle={toggleFolder} expandedIds={expandedIds} loadingIds={loadingIds}/>)}
+              {activeTab === 'cloud' && (currentUser ? cloudItems.map(node => <FileTreeItem key={node.name} node={{ id: node.fullPath, name: node.name, type: node.isFolder ? 'folder' : 'file', size: node.size, data: node }} depth={0} activeId={activeFile?.path} onSelect={handleExplorerSelect} onToggle={toggleFolder} expandedIds={expandedIds} loadingIds={loadingIds}/>) : <p className="p-4 text-xs text-slate-500">Sign in to view Cloud</p>)}
+              {activeTab === 'github' && (githubToken ? (
+                  githubTree.length > 0 ? (
+                      githubTree.map(node => <FileTreeItem key={node.id} node={node} depth={0} activeId={activeFile?.path} onSelect={handleExplorerSelect} onToggle={toggleFolder} expandedIds={expandedIds} loadingIds={loadingIds}/>)
+                  ) : (
+                      <div className="p-4 space-y-4">
+                          <h3 className="text-xs font-bold text-slate-500 uppercase">My Repositories</h3>
+                          {isGithubLoading ? <Loader2 className="animate-spin mx-auto text-indigo-400" size={32}/> : githubRepos.map(repo => (
+                              <button key={repo.id} onClick={() => handleSelectRepo(repo)} className="w-full text-left p-2 rounded hover:bg-slate-800 text-xs text-slate-300 transition-colors flex items-center gap-2">
+                                  <Github size={14}/> {repo.name}
+                              </button>
+                          ))}
+                      </div>
+                  )
+              ) : <div className="p-8 text-center"><button onClick={() => signInWithGitHub().then(setGithubToken)} className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-bold border border-slate-700">Link GitHub</button></div>)}
           </div>
       </div>
       <div onMouseDown={() => setIsDraggingLeft(true)} className="w-1 cursor-col-resize hover:bg-indigo-500 z-30 bg-slate-800/20"></div>
@@ -1180,7 +1304,13 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
           </header>
           <div className={`flex-1 bg-slate-950 flex relative ${layoutMode === 'quad' ? 'grid grid-cols-2 grid-rows-2' : layoutMode === 'split-v' ? 'flex-row' : 'flex-col'}`}>
               {[0, 1, 2, 3].map(i => (
-                  <Slot key={i} idx={i} activeSlots={activeSlots} focusedSlot={focusedSlot} setFocusedSlot={setFocusedSlot} slotViewModes={slotViewModes} toggleSlotViewMode={toggleSlotViewMode} isFormattingSlots={isFormattingSlots} terminalOutputs={terminalOutputs} setTerminalOutputs={setTerminalOutputs} isTerminalOpen={isTerminalOpen} setIsTerminalOpen={setIsTerminalOpen} isRunning={isRunning} layoutMode={layoutMode} innerSplitRatio={innerSplitRatio} handleRunCode={handleRunCode} handleFormatCode={handleFormatCode} handleCodeChangeInSlot={handleCodeChangeInSlot} updateSlotFile={updateSlotFile} fontSize={fontSize} indentMode={indentMode} isLive={isLive} lockStatus={lockStatus} broadcastCursor={broadcastCursor} isInterviewerMode={isInterviewerMode} handleDownloadMedia={async () => {}} />
+                  <Slot key={i} idx={i} activeSlots={activeSlots} focusedSlot={focusedSlot} setFocusedSlot={setFocusedSlot} slotViewModes={slotViewModes} toggleSlotViewMode={toggleSlotViewMode} isFormattingSlots={isFormattingSlots} terminalOutputs={terminalOutputs} setTerminalOutputs={setTerminalOutputs} isTerminalOpen={isTerminalOpen} setIsTerminalOpen={setIsTerminalOpen} isRunning={isRunning} layoutMode={layoutMode} innerSplitRatio={innerSplitRatio} handleRunCode={handleRunCode} handleFormatCode={handleFormatCode} handleCodeChangeInSlot={handleCodeChangeInSlot} updateSlotFile={updateSlotFile} fontSize={fontSize} indentMode={indentMode} isLive={isLive} lockStatus={lockStatus} broadcastCursor={broadcastCursor} isInterviewerMode={isInterviewerMode} handleDownloadMedia={async (file) => {
+                      if (!driveToken) return;
+                      const fileId = file.path.replace('drive://', '');
+                      const blob = await downloadDriveFileAsBlob(driveToken, fileId);
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a'); a.href = url; a.download = file.name; a.click();
+                  }} />
               ))}
           </div>
       </div>

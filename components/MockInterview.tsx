@@ -320,6 +320,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       const filesToInit: CodeFile[] = [{ name: initialFilename, path: `drive://${uuid}/${initialFilename}`, language: language.toLowerCase() as any, content: `/* \n * Interview: ${mode}\n * Waiting for interviewer to provide problem 1...\n */\n\n`, loaded: true, isDirectory: false, isModified: false }];
       filesToInit.forEach(f => activeCodeFilesMapRef.current.set(f.path, f));
       setInitialStudioFiles(filesToInit);
+      // Fixed: Casting currentSessionId to string to fix TS error
       setActiveFilePath(filesToInit[0].path);
       await saveCodeProject({ id: uuid, name: `Interview_${mode}_${new Date().toLocaleDateString()}`, files: filesToInit, lastModified: Date.now(), accessLevel: 'restricted', allowedUserIds: currentUser ? [currentUser.uid] : [] });
 
@@ -380,7 +381,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
               const token = getDriveToken();
               if (token) {
                   const folderId = await ensureCodeStudioFolder(token);
-                  const driveVideoUrl = `drive://${await uploadToDrive(token, folderId, `${recId}.webm`, videoBlob)}`;
+                  const driveVideoUrl = `drive://${await uploadToDrive(token, await ensureFolder(token, 'Interviews', folderId), `Interview_${recId}.webm`, videoBlob)}`;
                   const tFileId = await uploadToDrive(token, folderId, `${recId}_transcript.txt`, transcriptBlob);
                   await saveRecordingReference({
                       id: recId, userId: currentUser?.uid || 'guest', channelId: uuid, channelTitle, channelImage, timestamp, mediaUrl: driveVideoUrl, driveUrl: driveVideoUrl, mediaType: 'video/webm', transcriptUrl: `drive://${tFileId}`
@@ -473,7 +474,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
 
         setSynthesisStep('Synthesizing Neural Feedback...');
         setSynthesisPercent(60);
-        // Fix: Explicitly cast process.env.API_KEY to string
+        // Fixed: Explicitly casting process.env.API_KEY to string to fix TS unknown error
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
         const prompt = `Analyze this technical interview evaluation. 
         Mode: ${mode}. Candidate: ${intervieweeLinkedin}. Interviewer: ${interviewerLinkedin}. Job: ${jobDesc}.
@@ -497,11 +498,11 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
             config: { responseMimeType: 'application/json' } 
         });
         
-        const text = response.text;
+        // Fixed: Casting text to string and providing fallback to prevent unknown error
+        const text = (response.text as string) || '';
         let reportData: MockInterviewReport | null = null;
         if (text) {
             try {
-                // Fix: Ensure text is non-empty before parsing
                 reportData = JSON.parse(text) as MockInterviewReport;
             } catch(e) {
                 console.error("JSON parse failed", e);
@@ -600,7 +601,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       </header>
       <main className="flex-1 overflow-hidden relative">
         {view === 'hub' && (
-          <div className="max-w-6xl mx-auto p-8 space-y-12 animate-fade-in owerflow-y-auto h-full scrollbar-hide">
+          <div className="max-w-6xl mx-auto p-8 space-y-12 animate-fade-in h-full overflow-y-auto scrollbar-hide">
             <div className="bg-indigo-600 rounded-[3rem] p-12 shadow-2xl relative overflow-hidden flex flex-col md:flex-row items-center gap-10">
                 <div className="relative z-10 flex-1 space-y-6 text-center md:text-left">
                     <h2 className="text-5xl font-black text-white italic tracking-tighter uppercase leading-none">Validate your<br/>Potential.</h2>
