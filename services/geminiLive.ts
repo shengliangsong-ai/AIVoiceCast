@@ -9,6 +9,7 @@ export interface LiveConnectionCallbacks {
   onVolumeUpdate: (volume: number) => void;
   onTranscript: (text: string, isUser: boolean) => void;
   onToolCall?: (toolCall: any) => void;
+  onTurnComplete?: () => void;
 }
 
 function getValidLiveVoice(voiceName: string): string {
@@ -151,6 +152,10 @@ export class GeminiLiveService {
                 this.nextStartTime = 0;
                 this.isPlayingResponse = false;
             }
+
+            if (message.serverContent?.turnComplete) {
+                callbacks.onTurnComplete?.();
+            }
           },
           onclose: (e: any) => {
             if (!this.isActive) return;
@@ -160,14 +165,12 @@ export class GeminiLiveService {
           onerror: (e: any) => {
             if (!this.isActive) return;
             this.cleanup();
-            // Parse for 429 Rate Limits
             const code = e?.message?.includes('429') ? 'RATE_LIMIT' : 'ERROR';
             callbacks.onError(e?.message || "Handshake Error", code);
           }
         }
       });
 
-      // Session Watchdog: Timeout after 8 seconds if no onOpen
       const timeoutPromise = new Promise((_, reject) => 
           setTimeout(() => reject(new Error("Handshake timeout (8s)")), 8000)
       );
@@ -185,7 +188,6 @@ export class GeminiLiveService {
 
   private startHeartbeat() {
     if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
-    // Send a small empty text keep-alive every 15 seconds
     this.heartbeatInterval = setInterval(() => {
         if (this.session && this.isActive) {
             this.sendText(" "); 

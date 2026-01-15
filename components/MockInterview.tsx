@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { MockInterviewRecording, TranscriptItem, CodeFile, UserProfile, Channel, CodeProject, RecordingSession } from '../types';
 import { auth } from '../services/firebaseConfig';
@@ -26,7 +25,6 @@ import {
 import { getGlobalAudioContext, getGlobalMediaStreamDest, warmUpAudioContext, stopAllPlatformAudio } from '../utils/audioUtils';
 import { getDriveToken, signInWithGoogle, connectGoogleDrive } from '../services/authService';
 import { ensureFolder, uploadToDrive, downloadDriveFileAsBlob, deleteDriveFile, ensureCodeStudioFolder } from '../services/googleDriveService';
-import { getYouTubeVideoUrl, uploadToYouTube, getYouTubeEmbedUrl, deleteYouTubeVideo } from '../services/youtubeService';
 import { saveLocalRecording } from '../utils/db';
 
 interface OptimizedStarStory {
@@ -356,7 +354,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       
       const recorder = new MediaRecorder(combinedStream, { 
           mimeType: 'video/webm;codecs=vp8,opus', 
-          videoBitsToSecond: 2500000 
+          videoBitsPerSecond: 2500000 
       });
       
       mediaRecorderRef.current = recorder;
@@ -417,7 +415,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         2. All files MUST be created in the session directory using path: "drive://${uuid}/filename".
         3. Do NOT provide the solution. Provide a clear problem statement and a starting template.
         4. Greet the candidate via voice AND start the technical evaluation immediately after the greeting.
-        5. Use 'get_current_code' periodically to see their progress without asking them to copy-paste.
+        5. You are encouraged to use 'get_current_code' frequently to track progress without interrupting.
         
         BEHAVIORAL RULE: If mode is behavioral, use markdown files to list key scenarios if helpful, otherwise focus on voice dialogue and identifying 'STAR' stories.
       `;
@@ -442,6 +440,9 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
             if (prev.length > 0 && prev[prev.length - 1].role === role) return [...prev.slice(0, -1), { ...prev[prev.length - 1], text: prev[prev.length - 1].text + text }];
             return [...prev, { role, text, timestamp: Date.now() }];
           });
+        },
+        onTurnComplete: () => {
+          if (activeServiceIdRef.current === service.id) setIsAiThinking(false);
         },
         onToolCall: async (toolCall: any) => {
           for (const fc of toolCall.functionCalls) {
@@ -495,11 +496,20 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
     setSynthesisStep('Freezing Neural State...');
     setSynthesisPercent(10);
     
+    const interviewId = currentSessionId;
+    const timestamp = Date.now();
+    const recId = `interview-${timestamp}`;
+    const channelTitle = `Mock Interview (${mode})`;
+    const channelImage = 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=600&q=80';
+    const uuid = currentSessionId;
+
     try {
-        const interviewId = currentSessionId;
         const currentFiles = Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[];
         const latestTranscript = transcriptRef.current;
         
+        const transcriptText = latestTranscript.map(t => `${t.role.toUpperCase()}: ${t.text}`).join('\n\n');
+        const transcriptBlob = new Blob([transcriptText], { type: 'text/plain' });
+
         await saveCodeProject({ 
             id: interviewId, 
             name: `Interview_${mode}_${new Date().toLocaleDateString()}`, 
@@ -553,9 +563,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         }
         setReport(reportData);
         
-        setSynthesisStep('Archiving Interview Assets...');
-        setSynthesisPercent(60);
-        
         const recording: MockInterviewRecording = { 
             id: interviewId, 
             userId: currentUser?.uid || 'guest', 
@@ -573,6 +580,9 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
             visibility 
         };
 
+        setSynthesisStep('Archiving Interview Assets...');
+        setSynthesisPercent(60);
+        
         if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
             mediaRecorderRef.current.stop();
             await new Promise(resolve => setTimeout(resolve, 1500)); 
@@ -583,13 +593,20 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
             setSynthesisPercent(80);
             
             const token = getDriveToken();
-            // CHECK FRESH TOKEN - Satisfies potential type error by ensuring token exists and is string
+            // Added explicit cast to string for the token and intermediate IDs to satisfy TypeScript's string requirement
             if (token && typeof token === 'string' && videoChunksRef.current.length > 0) {
                 try {
                     const videoBlob = new Blob(videoChunksRef.current, { type: 'video/webm' });
-                    const folderId = await ensureCodeStudioFolder(token);
-                    const driveFileId = await uploadToDrive(token, await ensureFolder(token, 'Interviews', folderId), `Interview_${interviewId}.webm`, videoBlob);
-                    recording.videoUrl = `drive://${driveFileId}`;
+                    const driveTokenString = token as string;
+                    const folderId: string = await ensureCodeStudioFolder(driveTokenString);
+                    const interviewsFolderId: string = await ensureFolder(driveTokenString, 'Interviews', folderId);
+                    const driveVideoId: string = await uploadToDrive(driveTokenString, interviewsFolderId, `Interview_${interviewId}.webm`, videoBlob);
+                    const driveVideoUrl = `drive://${driveVideoId}`;
+                    const tFileId: string = await uploadToDrive(driveTokenString, folderId, `${recId}_transcript.txt`, transcriptBlob);
+                    
+                    await saveRecordingReference({
+                        id: recId, userId: currentUser?.uid || 'guest', channelId: uuid, channelTitle, channelImage, timestamp, mediaUrl: driveVideoUrl, driveUrl: driveVideoUrl, mediaType: 'video/webm', transcriptUrl: `drive://${tFileId}`
+                    });
                 } catch(e: any) {
                     console.error("Video sync failed, saving metadata anyway.", e);
                 }
@@ -615,9 +632,27 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
 
   const handleSendTextMessage = (text: string) => {
     if (!text.trim() || !liveServiceRef.current) return;
+    
+    // Construct text with code context for grounding
+    const allFiles = Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[];
+    const currentFile = (allFiles.find(f => f.path === activeFilePath) || allFiles[0]) as CodeFile | undefined;
+    
+    let messageToAi = text;
+    if (currentFile && currentFile.content.length > 0 && currentFile.content.length < 5000) {
+        // Send a grounding update alongside user message
+        messageToAi = `[USER_MESSAGE]: ${text}\n\n[NEURAL_GROUNDING (File: ${currentFile.name})]:\n${currentFile.content}`;
+    }
+
     setTranscript(prev => [...prev, { role: 'user', text, timestamp: Date.now() }]);
     setIsAiThinking(true);
-    liveServiceRef.current.sendText(text);
+    liveServiceRef.current.sendText(messageToAi);
+  };
+
+  const handleSyncCodeWithAi = (file: CodeFile) => {
+    if (!liveServiceRef.current) return;
+    setTranscript(prev => [...prev, { role: 'user', text: `*[System]: Synced code for ${file.name} to neural core.*`, timestamp: Date.now() }]);
+    setIsAiThinking(true);
+    liveServiceRef.current.sendText(`The user has manually triggered a code sync. Current content of ${file.name}:\n\n\`\`\`\n${file.content}\n\`\`\``);
   };
 
   const loadInterviewsInternal = async () => {
@@ -784,7 +819,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         {view === 'interview' && (
           <div className="h-full w-full flex flex-col overflow-hidden relative">
             <div className="flex-1 bg-slate-950 relative flex overflow-hidden w-full h-full">
-                <CodeStudio onBack={() => {}} currentUser={currentUser} userProfile={userProfile} onSessionStart={() => {}} onSessionStop={() => {}} onStartLiveSession={onStartLiveSession as any} initialFiles={initialStudioFiles} externalChatContent={transcript.map(t => ({ role: t.role, text: t.text }))} onSendExternalMessage={handleSendTextMessage} isInterviewerMode={true} isAiThinking={isAiThinking} onFileChange={(f) => activeCodeFilesMapRef.current.set(f.path, f)}/>
+                <CodeStudio onBack={() => {}} currentUser={currentUser} userProfile={userProfile} onSessionStart={() => {}} onSessionStop={() => {}} onStartLiveSession={onStartLiveSession as any} initialFiles={initialStudioFiles} externalChatContent={transcript.map(t => ({ role: t.role, text: t.text }))} onSendExternalMessage={handleSendTextMessage} onSyncCodeWithAi={handleSyncCodeWithAi} isInterviewerMode={true} isAiThinking={isAiThinking} onFileChange={(f: CodeFile) => activeCodeFilesMapRef.current.set(f.path, f)}/>
             </div>
             
             <div className={`absolute bottom-24 left-6 w-64 aspect-video rounded-3xl overflow-hidden border-4 ${isAiConnected ? 'border-indigo-500/50 shadow-indigo-500/20' : 'border-red-500/50 animate-pulse'} shadow-2xl z-[100] bg-black group`}>
