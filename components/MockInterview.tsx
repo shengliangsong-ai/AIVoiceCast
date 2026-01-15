@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { MockInterviewRecording, TranscriptItem, CodeFile, UserProfile, Channel, CodeProject, RecordingSession } from '../types';
 import { auth } from '../services/firebaseConfig';
@@ -20,7 +21,7 @@ import {
   RefreshCcw, HeartHandshake, Speech, Send, History, Compass, Square, CheckSquare, 
   Cloud, Award, Terminal, CodeSquare, Quote, ImageIcon, Sparkle, LayoutPanelTop, 
   TerminalSquare, FolderOpen, HardDrive, Shield, Database, Link as LinkIcon, UserCircle, 
-  Calendar, Palette, Award as AwardIcon, CheckCircle2, AlertTriangle, TrendingUp, Presentation, Rocket 
+  Calendar, Palette, Award as AwardIcon, CheckCircle2, AlertTriangle, TrendingUp, Presentation, Rocket, Flame, ShieldOff
 } from 'lucide-react';
 import { getGlobalAudioContext, getGlobalMediaStreamDest, warmUpAudioContext, stopAllPlatformAudio } from '../utils/audioUtils';
 import { getDriveToken, signInWithGoogle, connectGoogleDrive } from '../services/authService';
@@ -239,6 +240,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
   const [timeLeft, setTimeLeft] = useState<number>(0); 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [isEnding, setIsEnding] = useState(false);
+  const [showRetentionChoice, setShowRetentionChoice] = useState(false);
 
   const [apiLogs, setApiLogs] = useState<{time: string, msg: string, type: 'info' | 'error' | 'warn'}[]>([]);
   const activeServiceIdRef = useRef<string | null>(null);
@@ -362,34 +364,8 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       recorder.ondataavailable = (e) => { if (e.data.size > 0) videoChunksRef.current.push(e.data); };
       
       recorder.onstop = async () => {
-          const videoBlob = new Blob(videoChunksRef.current, { type: 'video/webm' });
-          const transcriptText = transcriptRef.current.map(t => `${t.role.toUpperCase()}: ${t.text}`).join('\n\n');
-          const transcriptBlob = new Blob([transcriptText], { type: 'text/plain' });
-          
-          setIsUploadingRecording(true);
-          try {
-              const timestamp = Date.now();
-              const recId = `interview-${timestamp}`;
-              const channelTitle = `Mock Interview (${mode})`;
-              const channelImage = 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=600&q=80';
-
-              await saveLocalRecording({
-                  id: recId, userId: currentUser?.uid || 'guest', channelId: uuid, channelTitle, channelImage, timestamp, 
-                  mediaUrl: URL.createObjectURL(videoBlob), mediaType: 'video/webm', transcriptUrl: URL.createObjectURL(transcriptBlob), blob: videoBlob
-              });
-
-              const token = getDriveToken();
-              if (token) {
-                  const folderId = await ensureCodeStudioFolder(token);
-                  const driveVideoUrl = `drive://${await uploadToDrive(token, await ensureFolder(token, 'Interviews', folderId), `Interview_${recId}.webm`, videoBlob)}`;
-                  const tFileId = await uploadToDrive(token, folderId, `${recId}_transcript.txt`, transcriptBlob);
-                  await saveRecordingReference({
-                      id: recId, userId: currentUser?.uid || 'guest', channelId: uuid, channelTitle, channelImage, timestamp, mediaUrl: driveVideoUrl, driveUrl: driveVideoUrl, mediaType: 'video/webm', transcriptUrl: `drive://${tFileId}`
-                  });
-              }
-          } catch(e) { console.error("Neural archive failed", e); } 
-          finally { setIsUploadingRecording(false); }
-          camStream.getTracks().forEach(t => t.stop());
+          // This recorder stop callback is triggered ONLY if we decide to preserve.
+          // Discarding simply halts the tracks and wipes videoChunksRef without triggering this upload flow.
       };
       
       recorder.start(1000);
@@ -486,11 +462,36 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
 
   const handleEndInterview = async () => {
     if (isEndingRef.current) return;
-    isEndingRef.current = true;
-    setIsEnding(true);
     
+    // Halt all streams and link first
     if (timerRef.current) clearInterval(timerRef.current);
     if (liveServiceRef.current) { liveServiceRef.current.disconnect(); setIsAiConnected(false); }
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop();
+    }
+    if (activeStreamRef.current) {
+        activeStreamRef.current.getTracks().forEach(t => t.stop());
+    }
+    if (activeScreenStreamRef.current) {
+        activeScreenStreamRef.current.getTracks().forEach(t => t.stop());
+    }
+
+    setShowRetentionChoice(true);
+  };
+
+  const handleDiscardSession = () => {
+      isEndingRef.current = false;
+      setShowRetentionChoice(false);
+      videoChunksRef.current = [];
+      setTranscript([]);
+      activeCodeFilesMapRef.current.clear();
+      setView('hub');
+  };
+
+  const handlePreserveSession = async () => {
+    isEndingRef.current = true;
+    setIsEnding(true);
+    setShowRetentionChoice(false);
     
     setIsGeneratingReport(true);
     setSynthesisStep('Freezing Neural State...');
@@ -500,7 +501,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
     const timestamp = Date.now();
     const recId = `interview-${timestamp}`;
     const channelTitle = `Mock Interview (${mode})`;
-    const channelImage = 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=600&q=80';
     const uuid = currentSessionId;
 
     try {
@@ -583,21 +583,19 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         setSynthesisStep('Archiving Interview Assets...');
         setSynthesisPercent(60);
         
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-            mediaRecorderRef.current.stop();
-            await new Promise(resolve => setTimeout(resolve, 1500)); 
-        }
+        await new Promise(resolve => setTimeout(resolve, 800));
 
         if (currentUser) {
             setSynthesisStep('Syncing to Cloud Ledger...');
             setSynthesisPercent(80);
             
             const token = getDriveToken();
-            // Added explicit cast to string for the token and intermediate IDs to satisfy TypeScript's string requirement
+            // Added check to ensure token is typed as a string for use in GDrive functions
             if (token && typeof token === 'string' && videoChunksRef.current.length > 0) {
                 try {
                     const videoBlob = new Blob(videoChunksRef.current, { type: 'video/webm' });
-                    const driveTokenString = token as string;
+                    // Explicitly treat token as string after type check
+                    const driveTokenString: string = token;
                     const folderId: string = await ensureCodeStudioFolder(driveTokenString);
                     const interviewsFolderId: string = await ensureFolder(driveTokenString, 'Interviews', folderId);
                     const driveVideoId: string = await uploadToDrive(driveTokenString, interviewsFolderId, `Interview_${interviewId}.webm`, videoBlob);
@@ -605,7 +603,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                     const tFileId: string = await uploadToDrive(driveTokenString, folderId, `${recId}_transcript.txt`, transcriptBlob);
                     
                     await saveRecordingReference({
-                        id: recId, userId: currentUser?.uid || 'guest', channelId: uuid, channelTitle, channelImage, timestamp, mediaUrl: driveVideoUrl, driveUrl: driveVideoUrl, mediaType: 'video/webm', transcriptUrl: `drive://${tFileId}`
+                        id: recId, userId: currentUser?.uid || 'guest', channelId: uuid, channelTitle, channelImage: 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=600&q=80', timestamp, mediaUrl: driveVideoUrl, driveUrl: driveVideoUrl, mediaType: 'video/webm', transcriptUrl: `drive://${tFileId}`
                     });
                 } catch(e: any) {
                     console.error("Video sync failed, saving metadata anyway.", e);
@@ -633,13 +631,11 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
   const handleSendTextMessage = (text: string) => {
     if (!text.trim() || !liveServiceRef.current) return;
     
-    // Construct text with code context for grounding
     const allFiles = Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[];
     const currentFile = (allFiles.find(f => f.path === activeFilePath) || allFiles[0]) as CodeFile | undefined;
     
     let messageToAi = text;
     if (currentFile && currentFile.content.length > 0 && currentFile.content.length < 5000) {
-        // Send a grounding update alongside user message
         messageToAi = `[USER_MESSAGE]: ${text}\n\n[NEURAL_GROUNDING (File: ${currentFile.name})]:\n${currentFile.content}`;
     }
 
@@ -700,7 +696,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
           <button onClick={() => view === 'hub' ? onBack() : setView('hub')} className="p-2 hover:bg-slate-800 rounded-lg text-slate-400"><ArrowLeft size={20} /></button>
           <h1 className="text-lg font-bold text-white flex items-center gap-2"><Video className="text-red-500" size={20} /> Mock Interview</h1>
         </div>
-        {view === 'interview' && (
+        {view === 'interview' && !showRetentionChoice && (
             <div className="flex items-center gap-3">
                 <div className="px-4 py-1.5 rounded-2xl border border-indigo-500/30 text-indigo-400 bg-slate-950/50 flex items-center gap-2">
                     <Timer size={14}/>
@@ -787,12 +783,12 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                                 { id: 'system_design', label: 'Architecture & Scalability', icon: Layers },
                                 { id: 'behavioral', label: 'STAR Story Analysis', icon: UserCircle }
                             ].map(m => (
-                                <button key={m.id} onClick={() => setMode(m.id as any)} className={`p-4 rounded-2xl border text-left flex items-center justify-between transition-all ${mode === m.id ? 'bg-indigo-600 border-indigo-500 text-white shadow-xl' : 'bg-slate-950 border-slate-800 text-slate-500 hover:border-slate-600'}`}>
+                                <button key={m.id} onClick={() => setMode(m.id as any)} className={`p-4 rounded-2xl border text-left flex items-center justify-between transition-all ${m.id === mode ? 'bg-indigo-600 border-indigo-500 text-white shadow-xl' : 'bg-slate-950 border-slate-800 text-slate-500 hover:border-slate-600'}`}>
                                     <div className="flex items-center gap-3">
-                                        <m.icon size={18} className={mode === m.id ? 'text-white' : 'text-indigo-400'}/>
+                                        <m.icon size={18} className={m.id === mode ? 'text-white' : 'text-indigo-400'}/>
                                         <span className="text-[11px] font-black uppercase tracking-wider">{m.label}</span>
                                     </div>
-                                    {mode === m.id && <CheckCircle size={16} fill="white" className="text-indigo-600"/>}
+                                    {m.id === mode && <CheckCircle size={16} fill="white" className="text-indigo-600"/>}
                                 </button>
                             ))}
                         </div>
@@ -834,6 +830,51 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                     </div>
                 </div>
             </div>
+
+            {/* Retention Choice Overlay */}
+            {showRetentionChoice && (
+                <div className="absolute inset-0 z-[150] bg-slate-950/80 backdrop-blur-xl flex items-center justify-center p-6 animate-fade-in">
+                    <div className="max-w-xl w-full bg-slate-900 border border-slate-700 rounded-[3rem] p-10 shadow-2xl text-center space-y-8 animate-fade-in-up">
+                        <div className="flex justify-center">
+                            <div className="p-5 bg-indigo-600/10 rounded-[2rem] border border-indigo-500/30 text-indigo-400">
+                                <ShieldCheck size={48}/>
+                            </div>
+                        </div>
+                        <div>
+                            <h2 className="text-3xl font-black text-white uppercase tracking-tighter italic">Neural Retention Policy</h2>
+                            <p className="text-slate-400 mt-2 leading-relaxed">The technical evaluation has concluded. Choose how the Neural Core should handle the session artifacts.</p>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4">
+                            <button 
+                                onClick={handleDiscardSession}
+                                className="group flex flex-col items-center gap-4 p-6 bg-slate-950 border border-slate-800 rounded-[2rem] hover:border-red-500/50 transition-all text-left"
+                            >
+                                <div className="p-3 bg-red-950/30 rounded-xl text-red-400 group-hover:scale-110 transition-transform">
+                                    <ShieldOff size={24}/>
+                                </div>
+                                <div className="text-center">
+                                    <span className="block font-black text-white text-xs uppercase tracking-widest">Discard & Forget</span>
+                                    <span className="text-[10px] text-slate-600 font-bold uppercase mt-1">INCINERATE LOGIC</span>
+                                </div>
+                            </button>
+
+                            <button 
+                                onClick={handlePreserveSession}
+                                className="group flex flex-col items-center gap-4 p-6 bg-indigo-600 border border-indigo-400 rounded-[2rem] hover:bg-indigo-500 transition-all text-left shadow-xl shadow-indigo-900/40"
+                            >
+                                <div className="p-3 bg-white/20 rounded-xl text-white group-hover:scale-110 transition-transform">
+                                    <Zap size={24}/>
+                                </div>
+                                <div className="text-center">
+                                    <span className="block font-black text-white text-xs uppercase tracking-widest">Preserve & Analyze</span>
+                                    <span className="text-[10px] text-indigo-100/60 font-bold uppercase mt-1">GENERATE REPORT</span>
+                                </div>
+                            </button>
+                        </div>
+                        <p className="text-[10px] text-slate-600 font-black uppercase tracking-[0.2em]">Session ID: {currentSessionId.substring(0,8)}... Artifacts currently in ephemeral memory</p>
+                    </div>
+                </div>
+            )}
           </div>
         )}
 
