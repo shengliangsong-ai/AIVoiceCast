@@ -94,8 +94,6 @@ const createInterviewFileTool: any = {
   }
 };
 
-type VideoFilter = 'none' | 'blur' | 'studio-noir' | 'executive';
-
 function getLanguageFromExt(filename: string): CodeFile['language'] {
     if (!filename) return 'text';
     const ext = filename.split('.').pop()?.toLowerCase();
@@ -420,6 +418,8 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         },
         onToolCall: async (toolCall: any) => {
           for (const fc of toolCall.functionCalls) {
+            // Fix: Cast args to any to handle 'unknown' properties from FunctionCall.args
+            const args = fc.args as any;
             if (fc.name === 'get_current_code') {
               const allFiles = Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[];
               let targetFile = allFiles.find(f => f.path === activeFilePath) || allFiles[0];
@@ -428,17 +428,17 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
               const allFiles = Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[];
               const targetFile = allFiles.find(f => f.path === activeFilePath) || allFiles[0];
               if (targetFile) {
-                const updated = { ...targetFile, content: fc.args.new_content };
+                const updated = { ...targetFile, content: args.new_content };
                 activeCodeFilesMapRef.current.set(updated.path, updated);
                 setInitialStudioFiles(prev => prev.map(f => f.path === updated.path ? updated : f));
                 service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Success: Updated ${targetFile.name}.` } }]);
               }
             } else if (fc.name === 'create_interview_file') {
-              const path = `drive://${uuid}/${fc.args.filename}`;
-              const newFile: CodeFile = { name: fc.args.filename, path, language: getLanguageFromExt(fc.args.filename) as any, content: fc.args.content, loaded: true, isDirectory: false, isModified: false };
+              const path = `drive://${uuid}/${args.filename}`;
+              const newFile: CodeFile = { name: args.filename, path, language: getLanguageFromExt(args.filename) as any, content: args.content, loaded: true, isDirectory: false, isModified: false };
               activeCodeFilesMapRef.current.set(path, newFile);
               setInitialStudioFiles(prev => [...prev.filter(f => f.path !== path), newFile]);
-              service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Success: '${fc.args.filename}' created.` } }]);
+              service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Success: '${args.filename}' created.` } }]);
             }
           }
         }
@@ -474,8 +474,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         setSynthesisStep('Synthesizing Neural Feedback...');
         setSynthesisPercent(60);
         
-        // Fix: Explicitly cast process.env.API_KEY to string to resolve unknown type mismatch
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         const prompt = `Analyze this technical interview evaluation. 
         Mode: ${mode}. Candidate: ${intervieweeLinkedin}. Interviewer: ${interviewerLinkedin}. Job: ${jobDesc}.
         History: ${historyText}. Workspace: ${codeText}. 
@@ -498,9 +497,10 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
             config: { responseMimeType: 'application/json' } 
         });
         
-        const text = (response.text as string) || '';
+        // Fix: Use response.text and ensure it's a string before JSON parsing
+        const text = response.text;
         let reportData: MockInterviewReport | null = null;
-        if (text) {
+        if (typeof text === 'string') {
             try {
                 reportData = JSON.parse(text) as MockInterviewReport;
             } catch(e) {
@@ -582,7 +582,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
   };
 
   return (
-    <div className="h-full flex flex-col bg-slate-950 text-slate-100 overflow-hidden relative">
+    <div className="h-full w-full flex flex-col bg-slate-950 text-slate-100 overflow-hidden relative">
       <header className="h-16 border-b border-slate-800 bg-slate-900/50 flex items-center justify-between px-6 backdrop-blur-md shrink-0 z-40">
         <div className="flex items-center gap-4">
           <button onClick={() => view === 'hub' ? onBack() : setView('hub')} className="p-2 hover:bg-slate-800 rounded-lg text-slate-400"><ArrowLeft size={20} /></button>
@@ -705,8 +705,8 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         )}
 
         {view === 'interview' && (
-          <div className="h-full flex flex-col overflow-hidden relative">
-            <div className="flex-1 bg-slate-950 relative flex overflow-hidden">
+          <div className="h-full w-full flex flex-col overflow-hidden relative">
+            <div className="flex-1 bg-slate-950 relative flex overflow-hidden w-full h-full">
                 <CodeStudio onBack={() => {}} currentUser={currentUser} userProfile={userProfile} onSessionStart={() => {}} onSessionStop={() => {}} onStartLiveSession={onStartLiveSession as any} initialFiles={initialStudioFiles} externalChatContent={transcript.map(t => ({ role: t.role, text: t.text }))} onSendExternalMessage={handleSendTextMessage} isInterviewerMode={true} isAiThinking={isAiThinking} onFileChange={(f) => activeCodeFilesMapRef.current.set(f.path, f)}/>
             </div>
             

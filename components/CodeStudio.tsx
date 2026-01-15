@@ -1250,7 +1250,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
   }, [isInterviewerMode, project.files]);
 
   return (
-    <div className="flex h-full bg-slate-950 text-slate-100 overflow-hidden">
+    <div className="flex h-full w-full bg-slate-950 text-slate-100 overflow-hidden">
       <div className={`${isLeftOpen ? '' : 'hidden'} bg-slate-900 border-r border-slate-800 flex flex-col shrink-0 overflow-hidden`} style={{ width: `${leftWidth}px` }}>
           <div className="flex border-b border-slate-800 shrink-0">
               {isInterviewerMode && <button onClick={() => setActiveTab('session')} className={`flex-1 py-3 transition-colors ${activeTab === 'session' ? 'border-b-2 border-indigo-500 bg-slate-800' : ''}`}>
