@@ -1,11 +1,14 @@
+
 import React, { useState } from 'react';
-import { ArrowRight, Loader2, ShieldCheck, HardDrive, Share2, Sparkles } from 'lucide-react';
+import { ArrowRight, Loader2, ShieldCheck, HardDrive, Share2, Sparkles, AlertTriangle, Settings, Flame } from 'lucide-react';
 import { signInWithGoogle } from '../services/authService';
+import { auth, isFirebaseConfigured } from '../services/firebaseConfig';
 import { BrandLogo } from './BrandLogo';
 
 interface LoginPageProps {
   onPrivacyClick?: () => void;
   onMissionClick?: () => void;
+  onOpenSetup?: () => void;
 }
 
 const GoogleLogo = ({ size = 20 }: { size?: number }) => (
@@ -18,16 +21,28 @@ const GoogleLogo = ({ size = 20 }: { size?: number }) => (
   </svg>
 );
 
-export const LoginPage: React.FC<LoginPageProps> = ({ onPrivacyClick, onMissionClick }) => {
+export const LoginPage: React.FC<LoginPageProps> = ({ onPrivacyClick, onMissionClick, onOpenSetup }) => {
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleLogin = async () => {
+    if (!auth || !isFirebaseConfigured) {
+        setError("Firebase connection not established. Manual configuration required.");
+        return;
+    }
+
     setIsLoading(true);
+    setError(null);
     try {
-      await signInWithGoogle();
-      window.location.reload();
+      const user = await signInWithGoogle();
+      if (user) {
+        // Successful login should trigger re-render via App.tsx listener
+        // Reload is a fallback if state doesn't sync instantly
+        setTimeout(() => window.location.reload(), 500);
+      }
     } catch (e: any) {
       console.error(e);
+      setError(e.message || "Authenticaton failed. Check your network or browser settings.");
       setIsLoading(false);
     }
   };
@@ -63,33 +78,53 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onPrivacyClick, onMissionC
                       <p className="text-[10px] text-slate-500">20+ specialized tools for projects and growth.</p>
                   </div>
               </div>
-              <div className="flex items-center gap-3 bg-slate-800/30 p-3 rounded-xl border border-slate-700/50">
-                  <HardDrive className="text-purple-400" size={20}/>
-                  <div className="text-left">
-                      <p className="text-xs font-bold text-white uppercase">Personal Storage</p>
-                      <p className="text-[10px] text-slate-500">Archives save directly to your own Google Drive.</p>
-                  </div>
-              </div>
           </div>
 
-          <button
-            onClick={handleLogin}
-            disabled={isLoading}
-            className="group w-full bg-white hover:bg-slate-50 text-slate-900 font-black py-5 rounded-2xl shadow-2xl flex items-center justify-center gap-4 transition-all active:scale-[0.98]"
-          >
-            {isLoading ? (
-              <Loader2 size={24} className="animate-spin text-indigo-600" />
-            ) : (
-              <>
-                <GoogleLogo size={24} />
-                <span className="text-base uppercase tracking-wider">Continue with Google Account</span>
-              </>
-            )}
-          </button>
+          {!isFirebaseConfigured ? (
+              <div className="bg-amber-900/20 border border-amber-500/30 p-6 rounded-2xl space-y-4 mb-6 text-left">
+                  <div className="flex items-center gap-2 text-amber-500 font-bold text-sm uppercase tracking-wider">
+                      <AlertTriangle size={18}/> Configuration Missing
+                  </div>
+                  <p className="text-xs text-amber-200/80 leading-relaxed">
+                      To enable the platform spectrum, you must link your Firebase project credentials. This ensures your data remains under your control.
+                  </p>
+                  <button
+                    onClick={onOpenSetup}
+                    className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all"
+                  >
+                    <Settings size={18}/>
+                    <span>Setup Environment</span>
+                  </button>
+              </div>
+          ) : (
+              <button
+                onClick={handleLogin}
+                disabled={isLoading}
+                className="group w-full bg-white hover:bg-slate-50 text-slate-900 font-black py-5 rounded-2xl shadow-2xl flex items-center justify-center gap-4 transition-all active:scale-[0.98]"
+              >
+                {isLoading ? (
+                  <Loader2 size={24} className="animate-spin text-indigo-600" />
+                ) : (
+                  <>
+                    <GoogleLogo size={24} />
+                    <span className="text-base uppercase tracking-wider">Continue with Google Account</span>
+                  </>
+                )}
+              </button>
+          )}
+          
+          {error && (
+              <div className="mt-4 p-3 bg-red-900/20 border border-red-900/50 rounded-xl text-red-300 text-xs flex items-center justify-center gap-2 animate-pulse">
+                  <AlertTriangle size={14}/> {error}
+              </div>
+          )}
           
           <div className="mt-10 flex justify-center gap-8">
               <button onClick={onMissionClick} className="text-[10px] text-slate-500 hover:text-indigo-400 uppercase font-bold tracking-[0.2em] transition-colors">Vision</button>
               <button onClick={onPrivacyClick} className="text-[10px] text-slate-500 hover:text-indigo-400 uppercase font-bold tracking-[0.2em] transition-colors">Privacy</button>
+              {!isFirebaseConfigured && (
+                  <button onClick={onOpenSetup} className="text-[10px] text-amber-500 hover:text-amber-400 uppercase font-bold tracking-[0.2em] transition-colors">Developer Setup</button>
+              )}
           </div>
       </div>
     </div>

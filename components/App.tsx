@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, ErrorInfo, ReactNode, Component } 
 import { 
   Podcast, Search, LayoutGrid, RefreshCw, 
   Home, Video, User, ArrowLeft, Play, Gift, 
-  Calendar, Briefcase, Users, Disc, FileText, Code, Wand2, PenTool, Rss, Loader2, MessageSquare, AppWindow, Square, Menu, X, Shield, Plus, Rocket, Book, AlertTriangle, Terminal, Trash2, LogOut, Truck, Maximize2, Minimize2, Wallet, Sparkles, Coins, Cloud, ChevronDown, Command, Activity
+  Calendar, Briefcase, Users, Disc, FileText, Code, Wand2, PenTool, Rss, Loader2, MessageSquare, AppWindow, Square, Menu, X, Shield, Plus, Rocket, Book, AlertTriangle, Terminal, Trash2, LogOut, Truck, Maximize2, Minimize2, Wallet, Sparkles, Coins, Cloud, ChevronDown, Command, Activity, Flame
 } from 'lucide-react';
 
 import { Channel, UserProfile, ViewState, TranscriptItem, CodeFile } from '../types';
@@ -24,7 +24,6 @@ import { DocumentList } from './DocumentList';
 import { CalendarView } from './CalendarView';
 import { PodcastFeed } from './PodcastFeed'; 
 import { MissionManifesto } from './MissionManifesto';
-// Fixed: correctly importing CodeStudio
 import { CodeStudio } from './CodeStudio';
 import { Whiteboard } from './Whiteboard';
 import { BlogView } from './BlogView';
@@ -46,9 +45,10 @@ import { BrandLogo } from './BrandLogo';
 import { CoinWallet } from './CoinWallet';
 import { MockInterview } from './MockInterview';
 import { GraphStudio } from './GraphStudio';
+import { FirebaseConfigModal } from './FirebaseConfigModal';
 
 import { getCurrentUser, getDriveToken } from '../services/authService';
-import { auth, db } from '../services/firebaseConfig';
+import { auth, db, isFirebaseConfigured } from '../services/firebaseConfig';
 import { onAuthStateChanged } from '@firebase/auth';
 import { onSnapshot, doc } from '@firebase/firestore';
 import { ensureCodeStudioFolder, loadAppStateFromDrive, saveAppStateToDrive } from '../services/googleDriveService';
@@ -221,6 +221,7 @@ const App: React.FC = () => {
   const [isPrivacyOpen, setIsPrivacyOpen] = useState(false);
   const [isUserGuideOpen, setIsUserGuideOpen] = useState(false);
   const [isPricingModalOpen, setIsPricingModalOpen] = useState(false);
+  const [isFirebaseConfigModalOpen, setIsFirebaseConfigModalOpen] = useState(false);
   const [globalVoice, setGlobalVoice] = useState('Auto');
   const [channelToComment, setChannelToComment] = useState<Channel | null>(null);
   const [channelToEdit, setChannelToEdit] = useState<Channel | null>(null);
@@ -292,7 +293,9 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const activeAuth = auth;
-    if (!activeAuth) {
+    
+    // Safety check: if Firebase is not configured, we must not hang the loader.
+    if (!activeAuth || !isFirebaseConfigured) {
         setAuthLoading(false);
         return;
     }
@@ -315,6 +318,9 @@ const App: React.FC = () => {
             setCurrentUser(null);
             setUserProfile(null);
         }
+        setAuthLoading(false);
+    }, (error) => {
+        console.error("Auth error:", error);
         setAuthLoading(false);
     });
 
@@ -346,8 +352,10 @@ const App: React.FC = () => {
     const initializeChannels = async () => {
         const localChannels = await getUserChannels();
         setUserChannels(localChannels);
-        const maybeUnsub = await subscribeToPublicChannels((channels) => { setPublicChannels(channels); });
-        if (typeof maybeUnsub === 'function') unsub = maybeUnsub;
+        if (isFirebaseConfigured) {
+            const maybeUnsub = await subscribeToPublicChannels((channels) => { setPublicChannels(channels); });
+            if (typeof maybeUnsub === 'function') unsub = maybeUnsub;
+        }
     };
     initializeChannels();
     return () => { if (unsub) unsub(); };
@@ -415,10 +423,16 @@ const App: React.FC = () => {
       );
   }
 
-  const isPublicView = ['mission', 'careers', 'user_guide', 'card_workshop', 'card_viewer', 'icon_viewer', 'shipping_viewer', 'check_viewer'].includes(viewState as string);
+  const isPublicView = ['mission', 'careers', 'docs', 'card_workshop', 'card_viewer', 'icon_viewer', 'shipping_viewer', 'check_viewer'].includes(viewState as string);
 
   if (!currentUser && !isPublicView) {
-      return <LoginPage onMissionClick={() => handleSetViewState('mission')} onPrivacyClick={() => setIsPrivacyOpen(true)} />;
+      return (
+          <LoginPage 
+            onMissionClick={() => handleSetViewState('mission')} 
+            onPrivacyClick={() => setIsPrivacyOpen(true)} 
+            onOpenSetup={() => setIsFirebaseConfigModalOpen(true)}
+          />
+      );
   }
 
   const activeChannel = allChannels.find(c => c.id === activeChannelId);
@@ -460,8 +474,9 @@ const App: React.FC = () => {
                           </button>
                         ))}
                       </div>
-                      <div className="p-3 bg-slate-950 border-t border-slate-800 flex justify-center">
+                      <div className="p-3 bg-slate-950 border-t border-slate-800 flex justify-center items-center gap-4">
                         <p className="text-[8px] font-black text-slate-600 uppercase tracking-[0.2em]">Neural Prism v4.5.1</p>
+                        <button onClick={() => setIsFirebaseConfigModalOpen(true)} className="flex items-center gap-1 text-[8px] font-black text-amber-500 uppercase hover:text-amber-400 transition-colors"><Flame size={10}/> Config Status</button>
                       </div>
                     </div>
                   </>
@@ -563,6 +578,7 @@ const App: React.FC = () => {
 
         <CreateChannelModal isOpen={isCreateModalOpen} onClose={() => { setIsCreateModalOpen(false); setCreateModalInitialDate(null); }} onCreate={handleCreateChannel} currentUser={currentUser} initialDate={createModalInitialDate} />
         <VoiceCreateModal isOpen={isVoiceCreateOpen} onClose={() => setIsVoiceCreateOpen(false)} onCreate={handleCreateChannel} />
+        <FirebaseConfigModal isOpen={isFirebaseConfigModalOpen} onClose={() => setIsFirebaseConfigModalOpen(false)} onConfigUpdate={() => window.location.reload()} />
         {currentUser && ( <SettingsModal isOpen={isSettingsModalOpen} onClose={() => setIsSettingsModalOpen(false)} user={userProfile || { uid: currentUser.uid, email: currentUser.email, displayName: currentUser.displayName, photoURL: currentUser.photoURL, groups: [], coinBalance: 0, createdAt: Date.now(), lastLogin: Date.now(), subscriptionTier: 'free', apiUsageCount: 0 } as UserProfile} onUpdateProfile={setUserProfile} onUpgradeClick={() => setIsPricingModalOpen(true)} /> )}
         {channelToComment && ( <CommentsModal isOpen={true} onClose={() => setChannelToComment(null)} channel={channelToComment} onAddComment={handleAddComment} onDeleteComment={(cid) => deleteCommentFromChannel(channelToComment.id, cid)} onEditComment={(cid, txt, att) => updateCommentInChannel(channelToComment.id, { id: cid, userId: currentUser.uid, user: currentUser.displayName || 'Anonymous', text: txt, timestamp: Date.now(), attachments: att })} currentUser={currentUser} /> )}
         {channelToEdit && ( <ChannelSettingsModal isOpen={true} onClose={() => setChannelToEdit(null)} channel={channelToEdit} onUpdate={handleUpdateChannel} /> )}
