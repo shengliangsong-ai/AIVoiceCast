@@ -55,7 +55,7 @@ Create software or write documents with an AI pair-partner.
 Neural Prism is built to grow. As a member, you can contribute new tools and activities to the hub, helping us expand the spectrum of human potential.
 
 ---
-**Platform Version:** v4.5.0-SYN
+**Platform Version:** v5.0.0-SYN
 `;
 
 export const UserManual: React.FC<UserManualProps> = ({ onBack }) => {
@@ -66,7 +66,7 @@ export const UserManual: React.FC<UserManualProps> = ({ onBack }) => {
           <ArrowLeft size={24} />
         </button>
         <h1 className="text-xl font-bold tracking-widest uppercase text-slate-400 flex items-center gap-2">
-            <Book size="20" className="text-indigo-400"/> Activity Manual
+            < Book size="20" className="text-indigo-400"/> Activity Manual
         </h1>
       </div>
 

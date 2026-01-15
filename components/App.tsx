@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, ErrorInfo, ReactNode, Component } from 'react';
 import { 
   Podcast, Search, LayoutGrid, RefreshCw, 
@@ -90,10 +91,10 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
             </div>
             <h1 className="text-2xl font-bold text-white mb-2">Application Crash Detected</h1>
             <p className="text-slate-400 mb-6">A runtime error occurred in the UI component tree.</p>
-            <div className="bg-black/50 rounded-xl p-4 mb-8 font-mono text-xs text-red-300 overflow-x-auto border border-slate-800">
+            <div className="bg-black/50 rounded-xl p-4 font-mono text-xs text-red-300 overflow-x-auto border border-slate-800">
               {this.state.error?.toString()}
             </div>
-            <div className="flex gap-4">
+            <div className="flex gap-4 mt-8">
               <button onClick={() => window.location.reload()} className="flex-1 bg-white text-slate-950 font-bold py-3 rounded-xl hover:bg-slate-200 transition-colors">Reload Application</button>
               <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="flex-1 bg-slate-800 text-white font-bold py-3 rounded-xl hover:bg-slate-700 transition-colors">Clear Cache & Reset</button>
             </div>
@@ -459,7 +460,7 @@ const App: React.FC = () => {
                         ))}
                       </div>
                       <div className="p-3 bg-slate-950 border-t border-slate-800 flex justify-center">
-                        <p className="text-[8px] font-black text-slate-600 uppercase tracking-[0.2em]">Neural Prism v4.5.0</p>
+                        <p className="text-[8px] font-black text-slate-600 uppercase tracking-[0.2em]">Neural Prism v5.0.0</p>
                       </div>
                     </div>
                   </>

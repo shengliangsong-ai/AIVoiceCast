@@ -1,10 +1,8 @@
-
 import React, { useState, useEffect, useMemo, ErrorInfo, ReactNode, Component } from 'react';
-// Fixed redundant imports of Video/VideoIcon and duplicate Maximize2/Minimize2
 import { 
   Podcast, Search, LayoutGrid, RefreshCw, 
-  Home, Video, User, ArrowLeft, Play, Gift, 
-  Calendar, Briefcase, Users, Disc, FileText, Code, Wand2, PenTool, Rss, Loader2, MessageSquare, AppWindow, Square, Menu, X, Shield, Plus, Rocket, Book, AlertTriangle, Terminal, Trash2, LogOut, Truck, Maximize2, Minimize2, Wallet, Sparkles, Coins, Cloud, ChevronDown, Command, Activity
+  Video, User, ArrowLeft, Gift, 
+  Calendar, Briefcase, Users, Disc, FileText, Code, Wand2, PenTool, Rss, Loader2, MessageSquare, AppWindow, Square, X, Shield, Plus, Rocket, Book, AlertTriangle, Terminal, Trash2, LogOut, Truck, Maximize2, Minimize2, Wallet, Sparkles, Coins, Cloud, ChevronDown, Command, Activity
 } from 'lucide-react';
 
 import { Channel, UserProfile, ViewState, TranscriptItem, CodeFile } from './types';
@@ -37,7 +35,6 @@ import { UserManual } from './components/UserManual';
 import { PrivacyPolicy } from './components/PrivacyPolicy';
 import { NotebookViewer } from './components/NotebookViewer'; 
 import { CardWorkshop } from './components/CardWorkshop';
-import { CardExplorer } from './components/CardExplorer';
 import { IconGenerator } from './components/IconGenerator';
 import { ShippingLabelApp } from './components/ShippingLabelApp';
 import { CheckDesigner } from './components/CheckDesigner';
@@ -49,15 +46,13 @@ import { GraphStudio } from './components/GraphStudio';
 
 import { getCurrentUser, getDriveToken } from './services/authService';
 import { auth, db } from './services/firebaseConfig';
-// FIXED: Using @firebase/ scoped packages for more reliable resolution of modular exports
 import { onAuthStateChanged } from '@firebase/auth';
 import { onSnapshot, doc } from '@firebase/firestore';
 import { ensureCodeStudioFolder, loadAppStateFromDrive, saveAppStateToDrive } from './services/googleDriveService';
 import { getUserChannels, saveUserChannel } from './utils/db';
 import { HANDCRAFTED_CHANNELS } from './utils/initialData';
 import { stopAllPlatformAudio } from './utils/audioUtils';
-// Fixed: Consolidated publishChannelToFirestore into a single import
-import { subscribeToPublicChannels, voteChannel, addCommentToChannel, deleteCommentFromChannel, updateCommentInChannel, getUserProfile, claimCoinCheck, syncUserProfile, publishChannelToFirestore } from './services/firestoreService';
+import { subscribeToPublicChannels, voteChannel, addCommentToChannel, deleteCommentFromChannel, updateCommentInChannel, claimCoinCheck, syncUserProfile, publishChannelToFirestore } from './services/firestoreService';
 
 interface ErrorBoundaryProps {
   children?: ReactNode;
@@ -70,7 +65,6 @@ interface ErrorBoundaryState {
 
 class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   state: ErrorBoundaryState = { hasError: false, error: null };
-  declare props: ErrorBoundaryProps;
 
   constructor(props: ErrorBoundaryProps) {
     super(props);
@@ -93,11 +87,11 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
               <AlertTriangle className="text-red-500" size={32} />
             </div>
             <h1 className="text-2xl font-bold text-white mb-2">Application Crash Detected</h1>
-            <p className="text-slate-400 mb-6">A runtime error occurred in the UI component tree. This is often caused by missing data or a browser incompatibility.</p>
-            <div className="bg-black/50 rounded-xl p-4 mb-8 font-mono text-xs text-red-300 overflow-x-auto border border-slate-800">
+            <p className="text-slate-400 mb-6">A runtime error occurred in the UI component tree.</p>
+            <div className="bg-black/50 rounded-xl p-4 font-mono text-xs text-red-300 overflow-x-auto border border-slate-800">
               {this.state.error?.toString()}
             </div>
-            <div className="flex gap-4">
+            <div className="flex gap-4 mt-8">
               <button onClick={() => window.location.reload()} className="flex-1 bg-white text-slate-950 font-bold py-3 rounded-xl hover:bg-slate-200 transition-colors">Reload Application</button>
               <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="flex-1 bg-slate-800 text-white font-bold py-3 rounded-xl hover:bg-slate-700 transition-colors">Clear Cache & Reset</button>
             </div>
@@ -164,7 +158,7 @@ const UI_TEXT = {
     docs: "文档空间",
     lectures: "引导式学习",
     podcasts: "知识中心",
-    mission: "愿愿景与棱镜",
+    mission: "愿景与棱镜",
     code: "构建者工作室",
     whiteboard: "视觉画布",
     blog: "社区声音",
@@ -278,7 +272,6 @@ const App: React.FC = () => {
     window.history.replaceState({}, '', url.toString());
   };
 
-  // Consistently handled start live session
   const handleStartLiveSession = (channel: Channel, context?: string, recordingEnabled?: boolean, bookingId?: string, videoEnabled?: boolean, cameraEnabled?: boolean, activeSegment?: { index: number, lectureId: string }, initialTranscript?: TranscriptItem[], existingDiscussionId?: string) => {
     setLiveSessionParams({ channel, context, recordingEnabled, videoEnabled, cameraEnabled, bookingId, activeSegment, initialTranscript, existingDiscussionId, returnTo: viewState });
     handleSetViewState('live_session');
@@ -295,7 +288,10 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const activeAuth = auth;
-    if (!activeAuth) return;
+    if (!activeAuth) {
+        setAuthLoading(false);
+        return;
+    }
 
     const unsubscribe = onAuthStateChanged(activeAuth, async (user) => {
         if (user) {
@@ -415,7 +411,7 @@ const App: React.FC = () => {
       );
   }
 
-  const isPublicView = ['mission', 'careers', 'user_guide', 'card_workshop', 'icon_viewer', 'shipping_viewer', 'check_viewer'].includes(viewState as string);
+  const isPublicView = ['mission', 'careers', 'user_guide', 'card_workshop', 'card_viewer', 'icon_viewer', 'shipping_viewer', 'check_viewer'].includes(viewState as string);
 
   if (!currentUser && !isPublicView) {
       return <LoginPage onMissionClick={() => handleSetViewState('mission')} onPrivacyClick={() => setIsPrivacyOpen(true)} />;
@@ -461,7 +457,7 @@ const App: React.FC = () => {
                         ))}
                       </div>
                       <div className="p-3 bg-slate-950 border-t border-slate-800 flex justify-center">
-                        <p className="text-[8px] font-black text-slate-600 uppercase tracking-[0.2em]">Neural Prism v4.4.0</p>
+                        <p className="text-[8px] font-black text-slate-600 uppercase tracking-[0.2em]">Neural Prism v5.0.0</p>
                       </div>
                     </div>
                   </>
