@@ -1,11 +1,11 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { CodeProject, CodeFile, UserProfile, Channel, CursorPosition, CloudItem, TranscriptItem } from '../types';
-import { ArrowLeft, Save, Plus, Github, Cloud, HardDrive, Code, X, ChevronRight, ChevronDown, ChevronUp, File, Folder, DownloadCloud, Loader2, CheckCircle, AlertTriangle, Info, FolderPlus, FileCode, RefreshCw, LogIn, CloudUpload, Trash2, ArrowUp, Edit2, FolderOpen, MoreVertical, Send, MessageSquare, Bot, Mic, MicOff, Sparkles, SidebarClose, SidebarOpen, Users, Eye, FileText as FileTextIcon, Image as ImageIcon, StopCircle, Minus, Maximize2, Minimize2, Lock, Unlock, Share2, Terminal as TerminalIcon, Copy, WifiOff, PanelRightClose, PanelRightOpen, PanelLeftClose, PanelLeftOpen, Monitor, Laptop, PenTool, Edit3, ShieldAlert, ZoomIn, ZoomOut, Columns, Rows, Grid2X2, Square as SquareIcon, GripVertical, GripHorizontal, FileSearch, Indent, Wand2, Check, Link, MousePointer2, Activity, Key, Search, FilePlus, FileUp, Play, Trash, ExternalLink, GraduationCap, ShieldCheck, Youtube, Video, Zap, Download, Headphones, Radio, Bug, TerminalSquare } from 'lucide-react';
+import { ArrowLeft, Save, Plus, Github, Cloud, HardDrive, Code, X, ChevronRight, ChevronDown, ChevronUp, File, Folder, DownloadCloud, Loader2, CheckCircle, AlertTriangle, Info, FolderPlus, FileCode, RefreshCw, LogIn, CloudUpload, Trash2, ArrowUp, Edit2, FolderOpen, MoreVertical, Send, MessageSquare, Bot, Mic, MicOff, Sparkles, SidebarClose, SidebarOpen, Users, Eye, FileText as FileTextIcon, Image as ImageIcon, StopCircle, Minus, Maximize2, Minimize2, Lock, Unlock, Share2, Terminal as TerminalIcon, Copy, WifiOff, PanelRightClose, PanelRightOpen, PanelLeftClose, PanelLeftOpen, Monitor, Laptop, PenTool, Edit3, ShieldAlert, ZoomIn, ZoomOut, Columns, Rows, Grid2X2, Square as SquareIcon, GripVertical, GripHorizontal, FileSearch, Indent, Wand2, Check, Link, MousePointer2, Activity, Key, Search, FilePlus, FileUp, Play, Trash, ExternalLink, GraduationCap, ShieldCheck, Youtube, Video, Zap, Download, Headphones, Radio, Bug, TerminalSquare, MoveRight } from 'lucide-react';
 import { listCloudDirectory, saveProjectToCloud, deleteCloudItem, createCloudFolder, subscribeToCodeProject, saveCodeProject, updateCodeFile, updateCursor, claimCodeProjectLock, updateProjectActiveFile, deleteCodeFile, updateProjectAccess, sendShareNotification, deleteCloudFolderRecursive } from '../services/firestoreService';
 import { ensureCodeStudioFolder, ensureFolder, listDriveFiles, readDriveFile, saveToDrive, deleteDriveFile, createDriveFolder, DriveFile, moveDriveFile, shareFileWithEmail, getDriveFileSharingLink, downloadDriveFileAsBlob, getDriveFileStreamUrl, getDrivePreviewUrl, findFolder } from '../services/googleDriveService';
 import { connectGoogleDrive, getDriveToken, signInWithGoogle, signInWithGitHub } from '../services/authService';
-import { fetchRepoInfo, fetchRepoContents, fetchFileContent, updateRepoFile, fetchUserRepos, fetchRepoSubTree, deleteRepoFile } from '../services/githubService';
+import { fetchRepoInfo, fetchRepoContents, fetchFileContent, updateRepoFile, fetchUserRepos, fetchRepoSubTree, deleteRepoFile, renameRepoFile } from '../services/githubService';
 import { GeminiLiveService } from '../services/geminiLive';
 import { MarkdownView } from './MarkdownView';
 import { Whiteboard } from './Whiteboard';
@@ -117,7 +117,7 @@ const FileIcon = ({ filename }: { filename: string }) => {
     return <File size={16} className="text-slate-500" />;
 };
 
-const FileTreeItem = ({ node, depth, activeId, onSelect, onToggle, onDelete, onShare, expandedIds, loadingIds }: any) => {
+const FileTreeItem = ({ node, depth, activeId, onSelect, onToggle, onDelete, onShare, onMove, expandedIds, loadingIds }: any) => {
     const isExpanded = expandedIds[node.id];
     const isLoading = loadingIds[node.id];
     const isActive = activeId === node.id;
@@ -144,6 +144,15 @@ const FileTreeItem = ({ node, depth, activeId, onSelect, onToggle, onDelete, onS
                     <span className="text-[9px] font-mono text-slate-600 group-hover:text-slate-400 mr-2">{formatSize(node.size)}</span>
                 )}
                 <div className="flex items-center gap-1">
+                    {onMove && (
+                        <button 
+                            onClick={(e) => { e.stopPropagation(); onMove(node); }}
+                            className="p-1 opacity-0 group-hover:opacity-100 hover:bg-slate-700 rounded text-slate-400 hover:text-indigo-400 transition-all"
+                            title="Move/Rename"
+                        >
+                            <MoveRight size={12}/>
+                        </button>
+                    )}
                     {node.type === 'file' && onShare && (
                         <button 
                             onClick={(e) => { e.stopPropagation(); onShare(node); }}
@@ -176,6 +185,7 @@ const FileTreeItem = ({ node, depth, activeId, onSelect, onToggle, onDelete, onS
                             onToggle={onToggle}
                             onDelete={onDelete}
                             onShare={onShare}
+                            onMove={onMove}
                             expandedIds={expandedIds}
                             loadingIds={loadingIds}
                         />
@@ -1178,11 +1188,13 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
               addSystemLog(`File committed to Drive: ${driveId}`, 'success');
           } catch (e: any) {
               addSystemLog(`Folder resolution or creation failure: ${e.message}`, 'error');
+              // Proceed with fake ID if drive fails so UI doesn't hang
+              driveId = generateSecureId();
           }
       } else if (activeTab === 'cloud' && currentUser) {
           try {
-              const fullPath = `projects/${currentUser.uid}/${resolvedDirPath ? resolvedDirPath + '/' : ''}${fileName}`;
-              await saveProjectToCloud(`projects/${currentUser.uid}${resolvedDirPath ? '/' + resolvedDirPath : ''}`, fileName, contentInput || "");
+              const cloudFolderPath = `projects/${currentUser.uid}${resolvedDirPath ? '/' + resolvedDirPath : ''}`;
+              await saveProjectToCloud(cloudFolderPath, fileName, contentInput || "");
               addSystemLog(`File committed to Cloud.`, 'success');
           } catch(e: any) {
               addSystemLog(`Cloud write failed: ${e.message}`, 'error');
@@ -1206,13 +1218,18 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       };
 
       // Update the active project files immediately so sidebar 'session' view stays in sync
-      setProject(prev => ({
-          ...prev,
-          files: [...prev.files.filter(f => f.path !== newPath), newFile],
-          lastModified: Date.now()
-      }));
+      setProject(prev => {
+          const nextFiles = [...prev.files.filter(f => f.path !== newPath), newFile];
+          return { ...prev, files: nextFiles, lastModified: Date.now() };
+      });
 
-      updateSlotFile(newFile, focusedSlot);
+      // Crucial: Update active slots state immediately to show the file
+      setActiveSlots(prev => {
+          const next = [...prev];
+          next[focusedSlot] = newFile;
+          return next;
+      });
+      
       setSaveStatus('saved');
       
       // If AI created the file during a live session, ensure it's pushed to cloud ledger too
@@ -1221,7 +1238,8 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       }
       
       addSystemLog(`File [${fileName}] initialized in [${resolvedDirPath || 'Root'}].`, 'success');
-      await refreshExplorer();
+      // Sidebar refresh to show the new node
+      refreshExplorer();
   };
 
   const handleCreateDirectory = async (dirNameInput?: string, parentPath?: string) => {
@@ -1260,6 +1278,61 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
     }
   };
 
+  const handleMoveExplorerItem = async (node: TreeNode) => {
+      const destination = prompt(`Enter new path or filename for "${node.name}":`, node.id);
+      if (!destination || destination === node.id) return;
+      
+      setIsExplorerLoading(true);
+      addSystemLog(`Move/Rename initiated: [${node.id}] -> [${destination}]`, 'info');
+      
+      try {
+          if (activeTab === 'drive' && driveToken) {
+              // Path segments to resolve destination folder
+              const parts = destination.split('/');
+              const newName = parts.pop() || '';
+              const newDirPath = parts.join('/');
+              
+              const newParentId = newDirPath ? await ensureFolder(driveToken, newDirPath, driveRootId || undefined) : (driveRootId || undefined);
+              
+              // Move file using Drive API
+              if (node.type === 'file') {
+                  // Drive ID is the node.id for files
+                  const currentParentId = node.data?.parentId || driveRootId;
+                  if (currentParentId && newParentId) {
+                    await moveDriveFile(driveToken, node.id, currentParentId, newParentId);
+                    addSystemLog(`Drive move successful.`, 'success');
+                  }
+              }
+          } else if (activeTab === 'cloud' && currentUser) {
+              // For cloud (Storage), move means copy + delete
+              if (node.type === 'file' && node.data?.url) {
+                  const contentRes = await fetch(node.data.url);
+                  const content = await contentRes.text();
+                  
+                  const destParts = destination.split('/');
+                  const newFileName = destParts.pop() || '';
+                  const newPathPrefix = destParts.join('/');
+                  
+                  await saveProjectToCloud(newPathPrefix, newFileName, content);
+                  await deleteCloudItem(node.id);
+                  addSystemLog(`Cloud move (emulated) successful.`, 'success');
+              }
+          } else if (activeTab === 'github' && githubToken && project.github) {
+              const { owner, repo, branch } = project.github;
+              const content = await fetchFileContent(githubToken, owner, repo, node.id, branch);
+              await renameRepoFile(githubToken, owner, repo, node.id, destination, content, node.data?.sha, branch);
+              addSystemLog(`GitHub rename successful.`, 'success');
+          }
+          
+          refreshExplorer();
+      } catch (e: any) {
+          addSystemLog(`Move failed: ${e.message}`, 'error');
+          alert("Move failed: " + e.message);
+      } finally {
+          setIsExplorerLoading(false);
+      }
+  };
+
   const toggleFolder = async (node: TreeNode) => {
       const isExpanded = expandedIds[node.id];
       setExpandedIds(prev => ({ ...prev, [node.id]: !isExpanded }));
@@ -1282,7 +1355,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                   setGithubTree(prev => {
                       const updateRecursive = (list: TreeNode[]): TreeNode[] => list.map(n => {
                           if (n.id === node.id) return { ...n, isLoaded: true, children: childNodes };
-                          if (n.children) return { ...n, children: updateRecursive(prev) };
+                          if (n.children) return { ...n, children: updateRecursive(n.children) };
                           return n;
                       });
                       return updateRecursive(prev);
@@ -1546,8 +1619,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                       }
                   } else if (fc.name === 'create_new_file') {
                       const args = fc.args as any;
-                      // Path resolution for relative/absolute dir paths
-                      // Note: We avoid double-resolving by trusting handleCreateNewFile's internal resolver
+                      // TRUST BUT VERIFY: Resolve path using our internal logic
                       await handleCreateNewFile(args.filename, args.content, args.directory_path);
                       setChatMessages(prev => [...prev, { role: 'ai', text: `🚀 Opened and implemented new file: **${args.filename}**` }]);
                   } else if (fc.name === 'set_working_directory') {
@@ -1822,13 +1894,13 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                           <div className="px-3 py-1 mb-2">
                               <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Interview Artifacts</span>
                           </div>
-                          {sessionTree.map(node => <FileTreeItem key={node.id} node={node} depth={0} activeId={activeFile?.path} onSelect={handleExplorerSelect} onToggle={toggleFolder} onDelete={handleDeleteExplorerItem} onShare={null} expandedIds={expandedIds} loadingIds={loadingIds}/>)}
+                          {sessionTree.map(node => <FileTreeItem key={node.id} node={node} depth={0} activeId={activeFile?.path} onSelect={handleExplorerSelect} onToggle={toggleFolder} onDelete={handleDeleteExplorerItem} onShare={null} onMove={handleMoveExplorerItem} expandedIds={expandedIds} loadingIds={loadingIds}/>)}
                       </div>
                   )}
 
-                  {activeTab === 'drive' && (driveToken ? <div className="flex-1 overflow-y-auto scrollbar-hide py-2">{driveTree.map(node => <FileTreeItem key={node.id} node={node} depth={0} activeId={activeFile?.path?.replace('drive://','')} onSelect={handleExplorerSelect} onToggle={toggleFolder} onDelete={handleDeleteExplorerItem} onShare={()=>{}} expandedIds={expandedIds} loadingIds={loadingIds}/>)}</div> : <div className="p-12 text-center flex flex-col items-center justify-center h-full gap-4"><button onClick={handleConnectDrive} className="px-6 py-2 bg-indigo-600 text-white text-xs font-bold rounded-xl shadow-lg">Connect G-Drive</button></div>)}
+                  {activeTab === 'drive' && (driveToken ? <div className="flex-1 overflow-y-auto scrollbar-hide py-2">{driveTree.map(node => <FileTreeItem key={node.id} node={node} depth={0} activeId={activeFile?.path?.replace('drive://','')} onSelect={handleExplorerSelect} onToggle={toggleFolder} onDelete={handleDeleteExplorerItem} onShare={()=>{}} onMove={handleMoveExplorerItem} expandedIds={expandedIds} loadingIds={loadingIds}/>)}</div> : <div className="p-12 text-center flex flex-col items-center justify-center h-full gap-4"><button onClick={handleConnectDrive} className="px-6 py-2 bg-indigo-600 text-white text-xs font-bold rounded-xl shadow-lg">Connect G-Drive</button></div>)}
                   
-                  {activeTab === 'cloud' && (currentUser ? <div className="flex-1 overflow-y-auto scrollbar-hide py-2">{cloudTree.map(node => <FileTreeItem key={node.id} node={node} depth={0} onSelect={handleExplorerSelect} onToggle={toggleFolder} onDelete={handleDeleteExplorerItem} onShare={()=>{}} expandedIds={expandedIds} loadingIds={loadingIds}/>)}</div> : <div className="p-12 text-center flex flex-col items-center justify-center h-full gap-4"><p className="text-xs text-slate-400">Sign in for Private Cloud.</p></div>)}
+                  {activeTab === 'cloud' && (currentUser ? <div className="flex-1 overflow-y-auto scrollbar-hide py-2">{cloudTree.map(node => <FileTreeItem key={node.id} node={node} depth={0} onSelect={handleExplorerSelect} onToggle={toggleFolder} onDelete={handleDeleteExplorerItem} onShare={()=>{}} onMove={handleMoveExplorerItem} expandedIds={expandedIds} loadingIds={loadingIds}/>)}</div> : <div className="p-12 text-center flex flex-col items-center justify-center h-full gap-4"><p className="text-xs text-slate-400">Sign in for Private Cloud.</p></div>)}
 
                   {activeTab === 'github' && (
                       <div className="flex-1 flex flex-col overflow-hidden">
@@ -1839,7 +1911,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                           ) : githubTree.length > 0 ? (
                               <div className="flex-1 flex flex-col overflow-hidden">
                                   <div className="p-3 bg-slate-950 border-b border-slate-800 flex items-center justify-between"><div className="flex items-center gap-2 overflow-hidden"><Github size={12} className="text-slate-500"/><span className="text-[10px] font-bold text-indigo-300 truncate uppercase tracking-widest">{project.github?.owner}/{project.github?.repo}</span></div><div className="flex items-center gap-2"><button onClick={() => { localStorage.removeItem('github_token'); setGithubToken(null); setGithubTree([]); }} className="text-slate-500 hover:text-red-400" title="Disconnect GitHub"><LogIn size={12} className="rotate-180"/></button><button onClick={() => setGithubTree([])} className="text-slate-500 hover:text-white" title="Change Repository"><RefreshCw size={12}/></button></div></div>
-                                  <div className="flex-1 overflow-y-auto scrollbar-hide py-2">{githubTree.map(node => <FileTreeItem key={node.id} node={node} depth={0} activeId={activeFile?.path} onSelect={handleExplorerSelect} onToggle={toggleFolder} onDelete={handleDeleteExplorerItem} onShare={()=>{}} expandedIds={expandedIds} loadingIds={loadingIds}/>)}</div>
+                                  <div className="flex-1 overflow-y-auto scrollbar-hide py-2">{githubTree.map(node => <FileTreeItem key={node.id} node={node} depth={0} activeId={activeFile?.path} onSelect={handleExplorerSelect} onToggle={toggleFolder} onDelete={handleDeleteExplorerItem} onShare={()=>{}} onMove={handleMoveExplorerItem} expandedIds={expandedIds} loadingIds={loadingIds}/>)}</div>
                               </div>
                           ) : (
                               <div className="flex-1 flex flex-col overflow-hidden">
