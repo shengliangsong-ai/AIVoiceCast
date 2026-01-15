@@ -1269,9 +1269,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
   const handleMoveExplorerItem = async (node: TreeNode) => {
       let currentDisplayPath = node.name;
       if (activeTab === 'drive') {
-          currentDisplayPath = getPathForNode(node.id, driveTree).substring(1);
-          if (currentDisplayPath.endsWith('/')) currentDisplayPath = currentDisplayPath.slice(0, -1);
-          currentDisplayPath = currentDisplayPath ? `${currentDisplayPath}/${node.name}` : node.name;
+          currentDisplayPath = getPathForNode(node.id, driveTree).substring(1) || node.name;
       } else if (activeTab === 'cloud') {
           const parts = node.id.split('/');
           currentDisplayPath = parts.length > 2 ? parts.slice(2).join('/') : node.name;
@@ -1807,12 +1805,12 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
               <div className={`absolute bottom-0 left-0 right-0 border-t border-slate-800 bg-slate-900 transition-all duration-300 flex flex-col ${showSystemLogs ? 'h-1/2' : 'h-10'} z-50`}>
                   <button onClick={() => setShowSystemLogs(!showSystemLogs)} className="h-10 flex items-center justify-between px-4 bg-slate-950/80 hover:bg-slate-800 transition-colors shrink-0">
                       <div className="flex items-center gap-2"><TerminalSquare size={14} className="text-indigo-400"/><span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Neural Execution Console</span><div className="h-4 w-px bg-slate-800 mx-1"></div><span className="text-[9px] font-mono text-indigo-500 uppercase tracking-tighter">CWD: {workingDirectory}</span>{systemLogs.some(l => l.type === 'error') && <AlertTriangle size={12} className="text-red-500 animate-pulse ml-2"/>}</div>
-                      <div className="flex items-center gap-2"><button onClick={(e) => { e.stopPropagation(); setSystemLogs([]); }} className="p-1 hover:bg-slate-700 rounded text-slate-500"><Trash2 size={12}/></button>{showSystemLogs ? <ChevronDown size={14}/> : <ChevronUp size={14}/>}</div>
+                      <div className="flex items-center gap-2"><button onClick={(e) => { e.stopPropagation(); setSystemLogs([]); }} className="p-1 hover:bg-slate-700 rounded text-slate-500"><Trash2 size={12}/></button>{showSystemLogs ? <ChevronDown size={14} /> : <ChevronUp size={14} />}</div>
                   </button>
                   {showSystemLogs && (
                       <div className="flex-1 overflow-y-auto p-3 font-mono text-[11px] space-y-1.5 scrollbar-hide bg-black/40">
                           {systemLogs.length === 0 ? (<p className="text-slate-700 italic">No events recorded in this session.</p>) : systemLogs.map((log) => (
-                              <div key={log.id} className="flex gap-3 leading-relaxed group"><span className="text-slate-600 shrink-0 select-none">[{log.time}]</span><div className="flex flex-col min-w-0"><div className="flex items-center gap-2"><span className={`font-bold ${log.type === 'error' ? 'text-red-400' : log.type === 'success' ? 'text-emerald-400' : log.type === 'tool' ? 'text-indigo-400' : log.type === 'warn' ? 'text-amber-400' : 'text-slate-400'}`}>{log.type === 'tool' && <Zap size={10} className="inline mr-1"/>}{log.message}</span></div>{log.details && (<pre className="mt-1 p-2 bg-slate-950 rounded border border-slate-800 text-[10px] text-slate-500 overflow-x-auto whitespace-pre-wrap max-h-40">{JSON.stringify(log.details, null, 2)}</pre>)}</div></div>
+                              <div key={log.id} className="flex gap-3 leading-relaxed group"><span className="text-slate-600 shrink-0 select-none">[{log.time}]</span><div className="flex flex-col min-w-0"><div className="flex items-center gap-2"><span className={`font-bold ${log.type === 'error' ? 'text-red-400' : log.type === 'success' ? 'text-emerald-400' : log.type === 'tool' ? 'text-indigo-400' : log.type === 'warn' ? 'text-amber-400' : 'text-slate-400'}`}>{log.type === 'tool' && <Zap size={10} className="inline mr-1 mb-0.5"/>}{log.message}</span></div>{log.details && (<pre className="mt-1 p-2 bg-slate-950 rounded border border-slate-800 text-[10px] text-slate-500 overflow-x-auto whitespace-pre-wrap max-h-40">{JSON.stringify(log.details, null, 2)}</pre>)}</div></div>
                           ))}
                       </div>
                   )}
