@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { CodeProject, CodeFile, UserProfile, Channel, CursorPosition, CloudItem, TranscriptItem } from '../types';
-import { ArrowLeft, Save, Plus, Github, Cloud, HardDrive, Code, X, ChevronRight, ChevronDown, File, Folder, DownloadCloud, Loader2, CheckCircle, AlertTriangle, Info, FolderPlus, FileCode, RefreshCw, LogIn, CloudUpload, Trash2, ArrowUp, Edit2, FolderOpen, MoreVertical, Send, MessageSquare, Bot, Mic, MicOff, Sparkles, SidebarClose, SidebarOpen, Users, Eye, FileText as FileTextIcon, Image as ImageIcon, StopCircle, Minus, Maximize2, Minimize2, Lock, Unlock, Share2, Terminal as TerminalIcon, Copy, WifiOff, PanelRightClose, PanelRightOpen, PanelLeftClose, PanelLeftOpen, Monitor, Laptop, PenTool, Edit3, ShieldAlert, ZoomIn, ZoomOut, Columns, Rows, Grid2X2, Square as SquareIcon, GripVertical, GripHorizontal, FileSearch, Indent, Wand2, Check, Link, MousePointer2, Activity, Key, Search, FilePlus, FileUp, Play, Trash, ExternalLink, GraduationCap, ShieldCheck, Youtube, Video, Zap, Download, Headphones, Radio, Activity as ActivityIcon, Wifi, Database } from 'lucide-react';
+import { ArrowLeft, Save, Plus, Github, Cloud, HardDrive, Code, X, ChevronRight, ChevronDown, File, Folder, DownloadCloud, Loader2, CheckCircle, AlertTriangle, Info, FolderPlus, FileCode, RefreshCw, LogIn, CloudUpload, Trash2, ArrowUp, Edit2, FolderOpen, MoreVertical, Send, MessageSquare, Bot, Mic, MicOff, Sparkles, SidebarClose, SidebarOpen, Users, Eye, FileText as FileTextIcon, Image as ImageIcon, StopCircle, Minus, Maximize2, Minimize2, Lock, Unlock, Share2, Terminal as TerminalIcon, Copy, WifiOff, PanelRightClose, PanelRightOpen, PanelLeftClose, PanelLeftOpen, Monitor, Laptop, PenTool, Edit3, ShieldAlert, ZoomIn, ZoomOut, Columns, Rows, Grid2X2, Square as SquareIcon, GripVertical, GripHorizontal, FileSearch, Indent, Wand2, Check, Link, MousePointer2, Activity, Key, Search, FilePlus, FileUp, Play, Trash, ExternalLink, GraduationCap, ShieldCheck, Youtube, Video, Zap, Download, Headphones, Radio } from 'lucide-react';
 import { listCloudDirectory, saveProjectToCloud, deleteCloudItem, createCloudFolder, subscribeToCodeProject, saveCodeProject, updateCodeFile, updateCursor, claimCodeProjectLock, updateProjectActiveFile, deleteCodeFile, updateProjectAccess, sendShareNotification, deleteCloudFolderRecursive } from '../services/firestoreService';
 import { ensureCodeStudioFolder, listDriveFiles, readDriveFile, saveToDrive, deleteDriveFile, createDriveFolder, DriveFile, moveDriveFile, shareFileWithEmail, getDriveFileSharingLink, downloadDriveFileAsBlob, getDriveFileStreamUrl, getDrivePreviewUrl } from '../services/googleDriveService';
 import { connectGoogleDrive, getDriveToken, signInWithGoogle, signInWithGitHub } from '../services/authService';
@@ -231,7 +231,7 @@ const RichCodeEditor = ({ code, onChange, onCursorMove, language, readOnly, font
     );
 };
 
-const AIChatPanel = ({ isOpen, onClose, messages, onSendMessage, isThinking, currentInput, onInputChange, isInterviewerMode, isLiveMode, liveStatus, onToggleLive }: any) => {
+const AIChatPanel = ({ isOpen, onClose, messages, onSendMessage, isThinking, currentInput, onInputChange, isInterviewerMode, isLiveMode, onToggleLive }: any) => {
     const scrollRef = useRef<HTMLDivElement>(null);
     const [showLocalPaste, setShowLocalPaste] = useState(false);
     const [pasteBuffer, setPasteBuffer] = useState('');
@@ -284,8 +284,8 @@ const AIChatPanel = ({ isOpen, onClose, messages, onSendMessage, isThinking, cur
 
     return (
         <div className="flex flex-col h-full bg-slate-950 border-l border-slate-800 relative">
-            <div className="p-3 border-b border-slate-800 flex flex-col bg-slate-900 shrink-0">
-                <div className="flex justify-between items-center mb-2">
+            <div className="p-3 border-b border-slate-800 flex justify-between items-center bg-slate-900 shrink-0">
+                <div className="flex items-center gap-3">
                     <span className="font-bold text-slate-300 text-sm flex items-center gap-2">
                         {isInterviewerMode ? (
                             <><GraduationCap size={16} className="text-red-500"/> AI Interviewer</>
@@ -293,28 +293,25 @@ const AIChatPanel = ({ isOpen, onClose, messages, onSendMessage, isThinking, cur
                             <><Bot size={16} className="text-indigo-400"/> AI Assistant</>
                         )}
                     </span>
-                    <div className="flex items-center gap-2">
-                        {!isInterviewerMode && (
-                            <button 
-                                onClick={onToggleLive} 
-                                className={`p-1.5 rounded-lg transition-all ${isLiveMode ? 'bg-red-600 text-white shadow-lg' : 'text-slate-500 hover:text-white hover:bg-slate-800'}`}
-                                title={isLiveMode ? "End Live Connection" : "Start Live Voice Link"}
-                            >
-                                {isLiveMode ? <MicOff size={16}/> : <Mic size={16}/>}
-                            </button>
-                        )}
-                        <button onClick={onClose} title="Minimize AI Panel"><PanelRightClose size={16} className="text-slate-500 hover:text-white"/></button>
-                    </div>
+                    {isLiveMode && (
+                        <div className="flex items-center gap-1.5 px-2 py-0.5 bg-red-900/30 text-red-400 rounded-full border border-red-500/20 text-[10px] font-black uppercase tracking-widest animate-pulse">
+                            <Radio size={10} fill="currentColor"/> Live
+                        </div>
+                    )}
                 </div>
-                
-                {isLiveMode && (
-                    <div className={`flex items-center gap-2 px-3 py-1 rounded-lg border text-[9px] font-black uppercase tracking-[0.2em] transition-all duration-500 ${liveStatus === 'syncing' ? 'bg-amber-900/20 border-amber-500/30 text-amber-400 animate-pulse' : 'bg-indigo-900/20 border-indigo-500/30 text-indigo-300'}`}>
-                        {liveStatus === 'syncing' ? <RefreshCw size={10} className="animate-spin" /> : <Wifi size={10} />}
-                        <span>Neural Link: {liveStatus === 'syncing' ? 'STITCHING FABRIC...' : 'FABRIC SYNCED'}</span>
-                    </div>
-                )}
+                <div className="flex items-center gap-2">
+                    {!isInterviewerMode && (
+                        <button 
+                            onClick={onToggleLive} 
+                            className={`p-1.5 rounded-lg transition-all ${isLiveMode ? 'bg-red-600 text-white shadow-lg' : 'text-slate-500 hover:text-white hover:bg-slate-800'}`}
+                            title={isLiveMode ? "End Live Connection" : "Start Live Voice Link"}
+                        >
+                            {isLiveMode ? <MicOff size={16}/> : <Mic size={16}/>}
+                        </button>
+                    )}
+                    <button onClick={onClose} title="Minimize AI Panel"><PanelRightClose size={16} className="text-slate-500 hover:text-white"/></button>
+                </div>
             </div>
-            
             <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide">
                 {messages.length === 0 && (
                     <div className="flex flex-col items-center justify-center h-full text-slate-600 text-center p-4">
@@ -790,7 +787,6 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
   const [isChatThinking, setIsChatThinking] = useState(false);
   const [isFormattingSlots, setIsFormattingSlots] = useState<Record<number, boolean>>({});
   const [isLiveChatActive, setIsLiveChatActive] = useState(false);
-  const [liveHealthStatus, setLiveHealthStatus] = useState<'idle' | 'syncing' | 'healthy'>('idle');
   const liveChatServiceRef = useRef<GeminiLiveService | null>(null);
   
   const [showShareModal, setShowShareModal] = useState(false);
@@ -1464,12 +1460,10 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
         liveChatServiceRef.current?.disconnect();
         liveChatServiceRef.current = null;
         setIsLiveChatActive(false);
-        setLiveHealthStatus('idle');
         setChatMessages(prev => [...prev, { role: 'ai', text: "*[System]: Live connection terminated.*" }]);
         return;
     }
 
-    setLiveHealthStatus('syncing');
     const fileList = project.files.map(f => f.name).join(', ');
     const sysInstruction = `You are a world-class pair-programming assistant with full filesystem agency.
     You have direct access to the user's current code and directory structure via tool calling.
@@ -1478,9 +1472,6 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
     - Use 'create_new_file' for new implementations.
     - Use 'create_directory' to organize folders.
     - Use 'move_file' to rename or reorganize components.
-    
-    [STRICT RECONNECT PROTOCOL]: If you are starting a new session, your first priority is to check 'list_directory' to see what has been done. Do not attempt to recreate files that already exist in the [WORKSPACE_MAP].
-    
     Explain your technical choices verbally while executing tools. Keep spoken responses concise.`;
 
     setIsLiveChatActive(true);
@@ -1490,18 +1481,10 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
     try {
         await service.connect('Fenrir', sysInstruction, {
             onOpen: () => {
-                setLiveHealthStatus('healthy');
-                setChatMessages(prev => [...prev, { role: 'ai', text: "*[System]: Live neural link established. Workspace synchronized.*" }]);
+                setChatMessages(prev => [...prev, { role: 'ai', text: "*[System]: Live neural link established. I can hear your voice and manage your filesystem.*" }]);
             },
-            onClose: () => {
-                setLiveHealthStatus('idle');
-                setIsLiveChatActive(false);
-            },
-            onError: (err) => { 
-                setLiveHealthStatus('idle');
-                alert(err); 
-                setIsLiveChatActive(false); 
-            },
+            onClose: () => setIsLiveChatActive(false),
+            onError: (err) => { alert(err); setIsLiveChatActive(false); },
             onVolumeUpdate: () => {},
             onTranscript: (text, isUser) => {
                 const role = isUser ? 'user' : 'ai';
@@ -1541,7 +1524,6 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
         }, [{ functionDeclarations: ALL_AI_TOOLS }]);
     } catch (e) {
         setIsLiveChatActive(false);
-        setLiveHealthStatus('idle');
     }
   };
 
@@ -1648,7 +1630,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
           <div className={`${isLeftOpen ? '' : 'hidden'} bg-slate-900 border-r border-slate-800 flex flex-col shrink-0 overflow-hidden`} style={{ width: `${leftWidth}px` }}>
               <div className="flex border-b border-slate-800 shrink-0">
                   {isInterviewerMode && (
-                      <button onClick={() => setActiveTab('session')} className={`flex-1 py-3 flex justify-center border-b-2 transition-colors ${activeTab === 'session' ? 'border-indigo-500 text-white bg-slate-800' : 'border-transparent text-slate-500 hover:text-slate-300'}`} title="Interview Session"><ActivityIcon size={18}/></button>
+                      <button onClick={() => setActiveTab('session')} className={`flex-1 py-3 flex justify-center border-b-2 transition-colors ${activeTab === 'session' ? 'border-indigo-500 text-white bg-slate-800' : 'border-transparent text-slate-500 hover:text-slate-300'}`} title="Interview Session"><Activity size={18}/></button>
                   )}
                   <button onClick={() => setActiveTab('drive')} className={`flex-1 py-3 flex justify-center border-b-2 transition-colors ${activeTab === 'drive' ? 'border-indigo-500 text-white bg-slate-800' : 'border-transparent text-slate-500 hover:text-slate-300'}`} title="Google Drive"><HardDrive size={18}/></button>
                   <button onClick={() => setActiveTab('cloud')} className={`flex-1 py-3 flex justify-center border-b-2 transition-colors ${activeTab === 'cloud' ? 'border-indigo-500 text-white bg-slate-800' : 'border-transparent text-slate-500 hover:text-slate-300'}`} title="Private Cloud"><Cloud size={18}/></button>
@@ -1713,7 +1695,6 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                 onInputChange={setChatInput} 
                 isInterviewerMode={isInterviewerMode}
                 isLiveMode={isLiveChatActive}
-                liveStatus={liveHealthStatus}
                 onToggleLive={toggleLiveChat}
               />
           </div>
