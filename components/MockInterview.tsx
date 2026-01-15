@@ -293,7 +293,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
     if (!driveToken) return alert("Please connect to Google Drive first.");
     setIsStarting(true); isEndingRef.current = false;
     const uuid = generateSecureId();
-    const prefix = generateSecureId().substring(0, 5).toLowerCase();
     setCurrentSessionId(uuid);
 
     let camStream: MediaStream | null = null;
@@ -314,13 +313,18 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       activeStreamRef.current = camStream; 
       activeScreenStreamRef.current = screenStream;
 
-      const ext = language.toLowerCase() === 'python' ? 'py' : (language.toLowerCase().includes('java') ? 'java' : 'cpp');
-      const initialFilename = `${prefix}_problem1.${ext}`;
-      const filesToInit: CodeFile[] = [{ name: initialFilename, path: `drive://${uuid}/${initialFilename}`, language: language.toLowerCase() as any, content: `/* \n * Interview: ${mode}\n * Waiting for interviewer to provide problem 1...\n */\n\n`, loaded: true, isDirectory: false, isModified: false }];
+      // 1. Create a "Waiting" placeholder. Real files will be created by the AI via tool calls.
+      const initialFilename = `READ_ME_FIRST.md`;
+      const filesToInit: CodeFile[] = [{ 
+          name: initialFilename, 
+          path: `drive://${uuid}/${initialFilename}`, 
+          language: 'markdown', 
+          content: `# Session Active\n\nPlease wait while your interviewer sets up the workspace...`, 
+          loaded: true, isDirectory: false, isModified: false 
+      }];
       filesToInit.forEach(f => activeCodeFilesMapRef.current.set(f.path, f));
       setInitialStudioFiles(filesToInit);
       setActiveFilePath(filesToInit[0].path);
-      await saveCodeProject({ id: uuid, name: `Interview_${mode}_${new Date().toLocaleDateString()}`, files: filesToInit, lastModified: Date.now(), accessLevel: 'restricted', allowedUserIds: currentUser ? [currentUser.uid] : [] });
 
       const canvas = document.createElement('canvas'); canvas.width = 1280; canvas.height = 720;
       const drawCtx = canvas.getContext('2d', { alpha: false })!;
@@ -352,7 +356,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       
       const recorder = new MediaRecorder(combinedStream, { 
           mimeType: 'video/webm;codecs=vp8,opus', 
-          videoBitsPerSecond: 2500000 
+          videoBitsToSecond: 2500000 
       });
       
       mediaRecorderRef.current = recorder;
@@ -394,14 +398,36 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
 
       const service = new GeminiLiveService();
       activeServiceIdRef.current = service.id; liveServiceRef.current = service;
-      const sysPrompt = `Role: Senior Interviewer. Mode: ${mode.toUpperCase()}. Duration: ${durationMinutes}m. Candidate: ${currentUser?.displayName}. 
-      RESUME_TEXT: "${resumeText}". CANDIDATE_LINKEDIN: "${intervieweeLinkedin}". INTERVIEWER_LINKEDIN: "${interviewerLinkedin}". TARGET_JOB_SPEC: "${jobDesc}".
-      STRICT ANTI-SPOILING RULE: DO NOT AUTO-GENERATE SOLUTIONS. Present problem first. 
-      BEHAVIORAL RULE: If mode is behavioral, ask scenario-based questions and identify 'STAR' stories (Situation, Task, Action, Result).`;
+      
+      const sysPrompt = `
+        Role: Senior Interviewer. 
+        Mode: ${mode.toUpperCase()}. 
+        Preferred Language: ${language}.
+        Target Duration: ${durationMinutes} minutes. 
+        Candidate: ${currentUser?.displayName}. 
+        Session Directory Hash: ${uuid}.
+
+        RESUME_TEXT: "${resumeText}". 
+        CANDIDATE_LINKEDIN: "${intervieweeLinkedin}". 
+        INTERVIEWER_LINKEDIN: "${interviewerLinkedin}". 
+        TARGET_JOB_SPEC: "${jobDesc}".
+
+        CRITICAL WORKFLOW:
+        1. As soon as the session starts, use the 'create_interview_file' tool to generate a problem file. 
+        2. All files MUST be created in the session directory using path: "drive://${uuid}/filename".
+        3. Do NOT provide the solution. Provide a clear problem statement and a starting template.
+        4. Greet the candidate via voice AND start the technical evaluation immediately after the greeting.
+        5. Use 'get_current_code' periodically to see their progress without asking them to copy-paste.
+        
+        BEHAVIORAL RULE: If mode is behavioral, use markdown files to list key scenarios if helpful, otherwise focus on voice dialogue and identifying 'STAR' stories.
+      `;
       
       await service.connect(mode === 'behavioral' ? 'Zephyr' : 'Software Interview Voice', sysPrompt, {
         onOpen: () => {
           setIsAiConnected(true);
+          // Force an immediate proactive "waking" text to trigger the AI to act
+          service.sendText("Hello. The candidate is ready. Please initialize the workspace and begin the interview.");
+          
           if (timerRef.current) clearInterval(timerRef.current);
           timerRef.current = setInterval(() => { setTimeLeft(prev => { if (prev <= 1) { handleEndInterview(); return 0; } return prev - 1; }); }, 1000);
         },
@@ -434,11 +460,21 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                 service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Success: Updated ${targetFile.name}.` } }]);
               }
             } else if (fc.name === 'create_interview_file') {
-              const path = `drive://${uuid}/${args.filename}`;
-              const newFile: CodeFile = { name: args.filename, path, language: getLanguageFromExt(args.filename) as any, content: args.content, loaded: true, isDirectory: false, isModified: false };
+              // Ensure path is consistent with the session uuid
+              const path = args.filename.startsWith('drive://') ? args.filename : `drive://${uuid}/${args.filename}`;
+              const newFile: CodeFile = { 
+                  name: args.filename.split('/').pop() || args.filename, 
+                  path, 
+                  language: getLanguageFromExt(args.filename) as any, 
+                  content: args.content, 
+                  loaded: true, 
+                  isDirectory: false, 
+                  isModified: false 
+              };
               activeCodeFilesMapRef.current.set(path, newFile);
               setInitialStudioFiles(prev => [...prev.filter(f => f.path !== path), newFile]);
-              service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Success: '${args.filename}' created.` } }]);
+              setActiveFilePath(path);
+              service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Success: '${args.filename}' created in session workspace.` } }]);
             }
           }
         }
@@ -452,7 +488,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
     isEndingRef.current = true;
     setIsEnding(true);
     
-    // 1. Immediate Clean-up
     if (timerRef.current) clearInterval(timerRef.current);
     if (liveServiceRef.current) { liveServiceRef.current.disconnect(); setIsAiConnected(false); }
     
@@ -465,7 +500,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         const currentFiles = Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[];
         const latestTranscript = transcriptRef.current;
         
-        // 2. Final code push
         await saveCodeProject({ 
             id: interviewId, 
             name: `Interview_${mode}_${new Date().toLocaleDateString()}`, 
@@ -475,7 +509,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
             allowedUserIds: currentUser ? [currentUser.uid] : [] 
         });
 
-        // 3. AI Report Synthesis (Fault Tolerant)
         let reportData: MockInterviewReport | null = null;
         try {
             setSynthesisStep('Synthesizing Neural Feedback...');
@@ -509,7 +542,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
             const rawText = response.text || "";
             const cleanJson = rawText.replace(/^```json/i, '').replace(/```$/i, '').trim();
             reportData = JSON.parse(cleanJson) as MockInterviewReport;
-        // Fix: Explicitly type reportErr as any to avoid access issues on unknown type
         } catch (reportErr: any) {
             console.warn("AI Report synthesis failed, using fallback.", reportErr);
             reportData = {
@@ -521,7 +553,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         }
         setReport(reportData);
         
-        // 4. GUARANTEED METADATA SAVE
         setSynthesisStep('Archiving Interview Assets...');
         setSynthesisPercent(60);
         
@@ -542,10 +573,8 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
             visibility 
         };
 
-        // 5. Video Processing (Async, but awaited for status)
         if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
             mediaRecorderRef.current.stop();
-            // Wait for dataavailable and onstop triggers to populate videoChunksRef
             await new Promise(resolve => setTimeout(resolve, 1500)); 
         }
 
@@ -554,12 +583,12 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
             setSynthesisPercent(80);
             
             const token = getDriveToken();
-            if (token && videoChunksRef.current.length > 0) {
-                // Fix: Cast token as string to satisfy parameter type 'string' and avoid unknown property access in nested catch
+            // CHECK FRESH TOKEN - Satisfies potential type error by ensuring token exists and is string
+            if (token && typeof token === 'string' && videoChunksRef.current.length > 0) {
                 try {
                     const videoBlob = new Blob(videoChunksRef.current, { type: 'video/webm' });
-                    const folderId = await ensureCodeStudioFolder(token as string);
-                    const driveFileId = await uploadToDrive(token as string, await ensureFolder(token as string, 'Interviews', folderId), `Interview_${interviewId}.webm`, videoBlob);
+                    const folderId = await ensureCodeStudioFolder(token);
+                    const driveFileId = await uploadToDrive(token, await ensureFolder(token, 'Interviews', folderId), `Interview_${interviewId}.webm`, videoBlob);
                     recording.videoUrl = `drive://${driveFileId}`;
                 } catch(e: any) {
                     console.error("Video sync failed, saving metadata anyway.", e);
