@@ -396,7 +396,7 @@ const AIChatPanel = ({ isOpen, onClose, messages, onSendMessage, isThinking, cur
                         <button 
                             type="button" 
                             onClick={isLiveMode ? onToggleLive : toggleVoiceInput} 
-                            className={`p-1.5 rounded-full transition-all ${isLiveMode || isListening ? 'text-red-500 bg-red-500/20 animate-pulse' : 'text-slate-500 hover:text-white'}`}
+                            className={`p-1.5 rounded-full transition-all ${isLiveMode || isListening ? 'text-red-500 bg-red-500/20 animate-pulse' : 'text-slate-400 hover:text-white'}`}
                             title={isLiveMode ? "End Live Session" : "Voice Input"}
                         >
                             {isLiveMode || isListening ? <MicOff size={18}/> : <Mic size={18}/>}
@@ -982,10 +982,11 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       }
   };
 
-  const handleSetManualToken = () => {
-      if (manualToken.trim()) {
-          setGithubToken(manualToken.trim());
-          localStorage.setItem('github_token', manualToken.trim());
+  const handleSetManualToken = (val: string) => {
+      if (val.trim()) {
+          setGithubToken(val.trim());
+          setManualToken(val.trim());
+          localStorage.setItem('github_token', val.trim());
           setShowManualToken(false);
           setGithubLinkingError(null);
           refreshExplorer();
@@ -1279,11 +1280,11 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
   };
 
   const handleMoveExplorerItem = async (node: TreeNode) => {
-      const destination = prompt(`Enter new path or filename for "${node.name}":`, node.id);
-      if (!destination || destination === node.id) return;
+      const destination = prompt(`Enter new path or filename for "${node.name}":`, node.name);
+      if (!destination || destination === node.name) return;
       
       setIsExplorerLoading(true);
-      addSystemLog(`Move/Rename initiated: [${node.id}] -> [${destination}]`, 'info');
+      addSystemLog(`Move/Rename initiated: [${node.name}] -> [${destination}]`, 'info');
       
       try {
           if (activeTab === 'drive' && driveToken) {
@@ -1299,8 +1300,8 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                   // Drive ID is the node.id for files
                   const currentParentId = node.data?.parentId || driveRootId;
                   if (currentParentId && newParentId) {
-                    await moveDriveFile(driveToken, node.id, currentParentId, newParentId);
-                    addSystemLog(`Drive move successful.`, 'success');
+                    await moveDriveFile(driveToken, node.id, currentParentId, newParentId, newName);
+                    addSystemLog(`Drive move/rename successful.`, 'success');
                   }
               }
           } else if (activeTab === 'cloud' && currentUser) {
@@ -2009,7 +2010,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
               <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-sm p-6 shadow-2xl animate-fade-in-up">
                   <div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-white flex items-center gap-2"><Key className="text-indigo-400" size={18}/> Manual Token Fallback</h3><button onClick={() => setShowManualToken(false)} className="text-slate-500 hover:text-white"><X size={20}/></button></div>
-                  <div className="space-y-4"><div className="p-3 bg-amber-900/20 border border-amber-500/30 rounded-xl flex items-start gap-3"><AlertTriangle className="text-amber-500 shrink-0 mt-0.5" size={16}/><div className="space-y-2"><p className="text-[10px] text-amber-200 leading-relaxed font-bold">CONFLICT DETECTED:</p><p className="text-[10px] text-amber-200 leading-relaxed">{githubLinkingError || "OAuth linking failed because your GitHub is already linked to another account."}</p><p className="text-[10px] text-amber-200 leading-relaxed italic">Use a Personal Access Token (PAT) to bypass this conflict.</p></div></div><div className="space-y-2"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">GitHub Access Token</label><input type="password" value={manualToken} onChange={e => setManualToken(e.target.value)} placeholder="ghp_..." className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-sm text-indigo-200 outline-none focus:border-indigo-500 font-mono"/></div><div className="flex flex-col gap-2"><button onClick={handleSetManualToken} disabled={!manualToken.trim()} className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold text-xs uppercase tracking-widest shadow-lg disabled:opacity-50 transition-all active:scale-95">Save & Connect</button><a href="https://github.com/settings/tokens" target="_blank" rel="noreferrer" className="text-[10px] text-slate-500 hover:text-indigo-400 flex items-center justify-center gap-1 mt-1 transition-colors">How to generate a token? <ExternalLink size={10}/></a></div></div>
+                  <div className="space-y-4"><div className="p-3 bg-amber-900/20 border border-amber-500/30 rounded-xl flex items-start gap-3"><AlertTriangle className="text-amber-500 shrink-0 mt-0.5" size={16}/><div className="space-y-2"><p className="text-[10px] text-amber-200 leading-relaxed font-bold">CONFLICT DETECTED:</p><p className="text-[10px] text-amber-200 leading-relaxed">{githubLinkingError || "OAuth linking failed because your GitHub is already linked to another account."}</p><p className="text-[10px] text-amber-200 leading-relaxed italic">Use a Personal Access Token (PAT) to bypass this conflict.</p></div></div><div className="space-y-2"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">GitHub Access Token</label><input type="password" value={manualToken} onChange={e => handleSetManualToken(e.target.value)} placeholder="ghp_..." className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-sm text-indigo-200 outline-none focus:border-indigo-500 font-mono"/></div><div className="flex flex-col gap-2"><button onClick={() => handleSetManualToken(manualToken)} disabled={!manualToken.trim()} className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold text-xs uppercase tracking-widest shadow-lg disabled:opacity-50 transition-all active:scale-95">Save & Connect</button><a href="https://github.com/settings/tokens" target="_blank" rel="noreferrer" className="text-[10px] text-slate-500 hover:text-indigo-400 flex items-center justify-center gap-1 mt-1 transition-colors">How to generate a token? <ExternalLink size={10}/></a></div></div>
               </div>
           </div>
       )}

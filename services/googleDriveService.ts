@@ -53,6 +53,8 @@ export async function findFolder(accessToken: string, name: string, parentId?: s
  * Ensures a folder path exists (e.g., "src/components") by creating segments as needed.
  */
 export async function ensureFolder(accessToken: string, path: string, parentId?: string): Promise<string> {
+  if (!path || path === '/' || path === '.') return parentId || 'root';
+  
   const segments = path.split('/').filter(Boolean);
   let currentParentId = parentId;
 
@@ -334,14 +336,36 @@ export async function createDriveFolder(accessToken: string, name: string, paren
         const err = await res.json().catch(() => ({}));
         throw new Error(`Drive folder creation failed: ${err.error?.message || res.statusText}`);
     }
-    const folder = await res.json();
+    const folder = await createDriveFolderJson(res);
     return folder.id;
 }
 
-export async function moveDriveFile(accessToken: string, fileId: string, currentParentId: string, newParentId: string): Promise<void> {
-    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?addParents=${newParentId}&removeParents=${currentParentId}`, {
+async function createDriveFolderJson(res: Response) {
+    return await res.json();
+}
+
+/**
+ * Moves a Drive file by changing its parent and optionally renaming it.
+ */
+export async function moveDriveFile(accessToken: string, fileId: string, currentParentId: string, newParentId: string, newName?: string): Promise<void> {
+    const params = new URLSearchParams();
+    params.append('addParents', newParentId);
+    params.append('removeParents', currentParentId);
+    
+    const url = `https://www.googleapis.com/drive/v3/files/${fileId}?${params.toString()}`;
+    const body = newName ? JSON.stringify({ name: newName }) : undefined;
+
+    const res = await fetch(url, {
         method: 'PATCH',
-        headers: { Authorization: `Bearer ${accessToken}` }
+        headers: { 
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+        },
+        body
     });
-    if (!res.ok) throw new Error("Failed to move Drive file");
+    
+    if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(`Drive move failed (${res.status}): ${errData.error?.message || res.statusText}`);
+    }
 }
