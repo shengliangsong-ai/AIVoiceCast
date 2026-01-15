@@ -14,7 +14,7 @@ import {
   SidebarClose, Code, MessageSquare, Sparkles, Languages, Clock, Camera, Bot, CloudUpload, 
   Trophy, BarChart3, ClipboardCheck, Star, Upload, FileUp, Linkedin, FileCheck, Edit3, 
   BookOpen, Lightbulb, Target, ListChecks, MessageCircleCode, GraduationCap, Lock, Globe, 
-  ExternalLink, PlayCircle, RefreshCcw, FileDown, Briefcase, Package, Code2, StopCircle, 
+  ExternalLink, PlayCircle, RefreshCw, FileDown, Briefcase, Package, Code2, StopCircle, 
   Youtube, AlertCircle, Eye, EyeOff, SaveAll, Wifi, WifiOff, Activity, ShieldAlert, 
   Timer, FastForward, ClipboardList, Layers, Bug, Flag, Minus, Fingerprint, FileSearch, 
   RefreshCcw, HeartHandshake, Speech, Send, History, Compass, Square, CheckSquare, 
@@ -474,8 +474,8 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         setSynthesisStep('Synthesizing Neural Feedback...');
         setSynthesisPercent(60);
         
-        /* Fix line 578: Explicitly cast process.env.API_KEY to any to resolve unknown type mismatch */
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as any });
+        // Fix: Explicitly cast process.env.API_KEY to string to resolve unknown type mismatch
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
         const prompt = `Analyze this technical interview evaluation. 
         Mode: ${mode}. Candidate: ${intervieweeLinkedin}. Interviewer: ${interviewerLinkedin}. Job: ${jobDesc}.
         History: ${historyText}. Workspace: ${codeText}. 
@@ -498,7 +498,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
             config: { responseMimeType: 'application/json' } 
         });
         
-        /* Fix: Cast text response to avoid unknown type error */
         const text = (response.text as string) || '';
         let reportData: MockInterviewReport | null = null;
         if (text) {
@@ -758,7 +757,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
             <div className="w-32 h-32 border-4 border-indigo-500/10 rounded-full"></div>
             <div className="absolute inset-0 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"/>
             <Activity className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-indigo-400" size={40}/>
-            <div className="absolute -bottom-10 left-1/2 -translate-x-1/2 text-3xl font-black text-white">{Math.round(synthesisPercent)}%</div>
+            <div className="absolute -bottom-10 left-1/2 -translate-x-1/2 text-3xl font-black text-white">{Math.round(synthesisPercent)}</div>
           </div>
           <div className="text-center space-y-2">
             <h3 className="text-xl font-black text-white uppercase tracking-widest">{synthesisStep || (isUploadingRecording ? 'Archiving Video...' : 'Neural Synthesis...')}</h3>
