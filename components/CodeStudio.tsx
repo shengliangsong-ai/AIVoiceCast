@@ -824,6 +824,8 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
   const [isLive, setIsLive] = useState(false);
   const [lockStatus, setLockStatus] = useState<'free' | 'busy' | 'mine'>('free');
 
+  // --- AI Tool Definitions ---
+
   const updateFileTool: FunctionDeclaration = {
     name: "update_active_file",
     description: "Updates the content of the currently focused file in the editor.",
@@ -839,7 +841,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
 
   const createNewFileTool: FunctionDeclaration = {
     name: "create_new_file",
-    description: "Creates a new file in the workspace and switches focus to it. Use this for starting new implementations or interview questions.",
+    description: "Creates a new file in the workspace and switches focus to it.",
     parameters: {
       type: Type.OBJECT,
       properties: {
@@ -849,6 +851,45 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       required: ["filename", "content"]
     }
   };
+
+  const createDirectoryTool: FunctionDeclaration = {
+    name: "create_directory",
+    description: "Creates a new folder in the current workspace to organize project files.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        path: { type: Type.STRING, description: "The path of the new directory (e.g. 'src', 'components', 'utils/math')." }
+      },
+      required: ["path"]
+    }
+  };
+
+  const listDirectoryTool: FunctionDeclaration = {
+    name: "list_directory",
+    description: "Lists all files and folders in a specific directory to understand the project structure.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        path: { type: Type.STRING, description: "The directory path to list. Use '.' for the root directory." }
+      },
+      required: ["path"]
+    }
+  };
+
+  const moveFileTool: FunctionDeclaration = {
+    name: "move_file",
+    description: "Renames or moves a file or directory to a new location in the workspace.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        source_path: { type: Type.STRING, description: "The current path of the file or folder." },
+        destination_path: { type: Type.STRING, description: "The target path or new name." }
+      },
+      required: ["source_path", "destination_path"]
+    }
+  };
+
+  const ALL_AI_TOOLS = [updateFileTool, createNewFileTool, createDirectoryTool, listDirectoryTool, moveFileTool];
 
   const toggleSlotViewMode = (idx: number) => {
       setSlotViewModes(prev => ({
@@ -1067,15 +1108,88 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       await updateProjectAccess(project.id, isPublic ? 'public' : 'restricted', uids);
   };
 
-  const handleCreateNewFile = (fileNameInput?: string, contentInput?: string) => {
+  const handleCreateNewFile = async (fileNameInput?: string, contentInput?: string) => {
       const fileName = fileNameInput || prompt("Enter filename (with extension):", "NewFile.ts");
       if (!fileName) return;
+
+      const newPath = activeTab === 'drive' ? `drive://${generateSecureId()}` : 
+                     activeTab === 'cloud' ? `projects/${currentUser?.uid}/${fileName}` : 
+                     fileName;
+
       const newFile: CodeFile = {
-          name: fileName, path: activeTab === 'drive' ? `drive://${fileName}` : fileName,
-          content: contentInput || "", language: getLanguageFromExt(fileName), loaded: true, isDirectory: false, isModified: true
+          name: fileName, 
+          path: newPath,
+          content: contentInput || "", 
+          language: getLanguageFromExt(fileName), 
+          loaded: true, 
+          isDirectory: false, 
+          isModified: true
       };
+
+      // Update local state immediately
+      setProject(prev => ({
+          ...prev,
+          files: [...prev.files.filter(f => f.path !== newPath), newFile],
+          lastModified: Date.now()
+      }));
+
       updateSlotFile(newFile, focusedSlot);
       setSaveStatus('modified');
+      
+      if (isLive && lockStatus === 'mine') {
+          await updateCodeFile(project.id, newFile);
+      }
+      await refreshExplorer();
+  };
+
+  // --- Directory Handlers for AI ---
+
+  const handleCreateDirectory = async (dirPath: string) => {
+      if (!dirPath) return;
+      try {
+          if (activeTab === 'drive' && driveToken && driveRootId) {
+              await createDriveFolder(driveToken, dirPath, driveRootId);
+          } else if (activeTab === 'cloud' && currentUser) {
+              await createCloudFolder(`projects/${currentUser.uid}`, dirPath);
+          }
+          await refreshExplorer();
+      } catch (e: any) {
+          console.error("Directory creation failed", e);
+      }
+  };
+
+  const handleMoveOrRename = async (source: string, destination: string) => {
+      if (!source || !destination) return;
+      try {
+          if (activeTab === 'drive' && driveToken) {
+              // Note: Drive move requires IDs. This is a best-effort implementation for AI.
+              // We simulate by finding the file ID first.
+              const fileToMove = driveItems.find(item => item.name === source || item.id === source);
+              if (fileToMove) {
+                  await moveDriveFile(driveToken, fileToMove.id, fileToMove.parentId || driveRootId!, driveRootId!);
+              }
+          }
+          // For session-based, we'd update the project file path
+          if (isLive && lockStatus === 'mine') {
+              const file = project.files.find(f => f.path === source);
+              if (file) {
+                  const updatedFile = { ...file, path: destination, name: destination.split('/').pop()! };
+                  await deleteCodeFile(project.id, source);
+                  await updateCodeFile(project.id, updatedFile);
+              }
+          }
+          await refreshExplorer();
+      } catch (e: any) {
+          console.error("Move failed", e);
+      }
+  };
+
+  const handleListDirectory = async (dirPath: string) => {
+      // In a real VFS, this would browse subdirectories. 
+      // For now, we return the cached view to the AI.
+      if (activeTab === 'drive') return driveItems.map(f => `${f.name} (${f.mimeType})`).join(', ');
+      if (activeTab === 'cloud') return cloudItems.map(f => `${f.name} (Folder: ${f.isFolder})`).join(', ');
+      return project.files.map(f => f.name).join(', ');
   };
 
   const toggleFolder = async (node: TreeNode) => {
@@ -1160,7 +1274,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                   const text = await fetchFileContent(githubToken, owner, repo, node.id, branch);
                   fileData = { name: node.name, path: node.id, content: text, language: getLanguageFromExt(node.name), size: node.size, loaded: true, isDirectory: false, isModified: false, sha: node.data?.sha };
               } else if (activeTab === 'session') {
-                  const match = initialFiles?.find(f => f.path === node.id);
+                  const match = project.files.find(f => f.path === node.id);
                   if (match) fileData = match;
               }
               if (fileData) updateSlotFile(fileData, focusedSlot);
@@ -1191,7 +1305,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
             await deleteRepoFile(githubToken, owner, repo, node.id, node.data.sha, `Delete ${node.name}`, branch);
         } else if (activeTab === 'cloud') {
             await deleteCloudItem(node.id);
-        } else if (activeTab === 'session' && isLive) {
+        } else if (activeTab === 'session') {
             await deleteCodeFile(project.id, node.id);
         }
         
@@ -1294,33 +1408,46 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const history = chatMessages.map(m => ({ role: (m.role === 'ai' ? 'model' : 'user') as 'model' | 'user', parts: [{ text: m.text }] }));
-      let contextualMessage = text;
-      if (activeFile) contextualMessage = `CONTEXT: Focused File "${activeFile.name}" content:\n\`\`\`${activeFile.language}\n${activeFile.content}\n\`\`\`\n\nUSER REQUEST: ${text}`;
+      
+      const fileList = project.files.map(f => f.name).join(', ');
+      let contextualMessage = `[WORKSPACE_STRUCTURE]: All current files: [${fileList}]\n\n`;
+      if (activeFile) contextualMessage += `CONTEXT: Focused File "${activeFile.name}" content:\n\`\`\`${activeFile.language}\n${activeFile.content}\n\`\`\`\n\n`;
+      contextualMessage += `USER REQUEST: ${text}`;
       
       const response = await ai.models.generateContent({ 
           model: 'gemini-3-pro-preview', 
           contents: [ ...history, { role: 'user', parts: [{ text: contextualMessage }] } ], 
           config: { 
-              systemInstruction: "Expert pair programmer. You can modify files or create new ones.", 
-              tools: [{ functionDeclarations: [updateFileTool, createNewFileTool] }] 
+              systemInstruction: "You are a world-class pair-programming assistant with full filesystem agency. You can modify files, create directories, and reorganize projects. Use tool calling to execute actions.", 
+              tools: [{ functionDeclarations: ALL_AI_TOOLS }] 
           } 
       });
 
-      if (response.functionCalls?.[0]) {
-          const fc = response.functionCalls[0];
-          if (fc.name === 'update_active_file') {
-              const args = fc.args as any;
-              if (args.new_content) { 
-                  handleCodeChangeInSlot(args.new_content, focusedSlot); 
-                  setChatMessages(prev => [...prev, { role: 'ai', text: `✅ Updated focused file. ${args.summary || ''}` }]); 
-                  if (onFileChange && activeSlots[focusedSlot]) {
-                    onFileChange({ ...activeSlots[focusedSlot]!, content: args.new_content });
+      if (response.functionCalls) {
+          for (const fc of response.functionCalls) {
+              if (fc.name === 'update_active_file') {
+                  const args = fc.args as any;
+                  if (args.new_content) { 
+                      handleCodeChangeInSlot(args.new_content, focusedSlot); 
+                      setChatMessages(prev => [...prev, { role: 'ai', text: `✅ Updated focused file. ${args.summary || ''}` }]); 
                   }
+              } else if (fc.name === 'create_new_file') {
+                  const args = fc.args as any;
+                  await handleCreateNewFile(args.filename, args.content);
+                  setChatMessages(prev => [...prev, { role: 'ai', text: `🚀 Created and focused file: **${args.filename}**` }]);
+              } else if (fc.name === 'create_directory') {
+                  const args = fc.args as any;
+                  await handleCreateDirectory(args.path);
+                  setChatMessages(prev => [...prev, { role: 'ai', text: `📁 Created directory: **${args.path}**` }]);
+              } else if (fc.name === 'move_file') {
+                  const args = fc.args as any;
+                  await handleMoveOrRename(args.source_path, args.destination_path);
+                  setChatMessages(prev => [...prev, { role: 'ai', text: `🚚 Moved **${args.source_path}** to **${args.destination_path}**` }]);
+              } else if (fc.name === 'list_directory') {
+                  const args = fc.args as any;
+                  const contents = await handleListDirectory(args.path);
+                  setChatMessages(prev => [...prev, { role: 'ai', text: `🔍 Listing **${args.path}**:\n${contents}` }]);
               }
-          } else if (fc.name === 'create_new_file') {
-              const args = fc.args as any;
-              handleCreateNewFile(args.filename, args.content);
-              setChatMessages(prev => [...prev, { role: 'ai', text: `🚀 Opened and implemented new file: **${args.filename}**` }]);
           }
       } else { 
           setChatMessages(prev => [...prev, { role: 'ai', text: response.text || "No response." }]); 
@@ -1337,12 +1464,15 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
         return;
     }
 
-    const sysInstruction = `You are a world-class pair-programming assistant. 
-    You have direct access to the user's current code via tool calling.
-    - When asked to write code, modify a file, or fix a bug in the CURRENT file, use 'update_active_file'.
-    - When asked to start a NEW problem, solve an interview question, or 'open a new file', use 'create_new_file'.
-    Always implement the solution fully and explain your thought process verbally.
-    Keep your spoken responses concise and helpful.`;
+    const fileList = project.files.map(f => f.name).join(', ');
+    const sysInstruction = `You are a world-class pair-programming assistant with full filesystem agency.
+    You have direct access to the user's current code and directory structure via tool calling.
+    - [WORKSPACE_MAP]: Current files in root: [${fileList}].
+    - Use 'update_active_file' for current file edits.
+    - Use 'create_new_file' for new implementations.
+    - Use 'create_directory' to organize folders.
+    - Use 'move_file' to rename or reorganize components.
+    Explain your technical choices verbally while executing tools. Keep spoken responses concise.`;
 
     setIsLiveChatActive(true);
     const service = new GeminiLiveService();
@@ -1351,7 +1481,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
     try {
         await service.connect('Fenrir', sysInstruction, {
             onOpen: () => {
-                setChatMessages(prev => [...prev, { role: 'ai', text: "*[System]: Live neural link established. I can hear your voice and see your workspace.*" }]);
+                setChatMessages(prev => [...prev, { role: 'ai', text: "*[System]: Live neural link established. I can hear your voice and manage your filesystem.*" }]);
             },
             onClose: () => setIsLiveChatActive(false),
             onError: (err) => { alert(err); setIsLiveChatActive(false); },
@@ -1367,21 +1497,31 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                 });
             },
             onToolCall: async (toolCall) => {
+                const responses = [];
                 for (const fc of toolCall.functionCalls) {
                     if (fc.name === 'update_active_file') {
                         const { new_content, summary } = fc.args as any;
                         handleCodeChangeInSlot(new_content, focusedSlot);
-                        setChatMessages(prev => [...prev, { role: 'ai', text: `*[System]: Injected code changes via Voice Command. ${summary || ''}*` }]);
-                        service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: "Success: Workspace updated." } }]);
+                        responses.push({ id: fc.id, name: fc.name, response: { result: "Success: File updated." } });
                     } else if (fc.name === 'create_new_file') {
                         const { filename, content } = fc.args as any;
-                        handleCreateNewFile(filename, content);
-                        setChatMessages(prev => [...prev, { role: 'ai', text: `*[System]: Opened and implemented new file '${filename}' via Voice Command.*` }]);
-                        service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Success: '${filename}' created and focused.` } }]);
+                        await handleCreateNewFile(filename, content);
+                        responses.push({ id: fc.id, name: fc.name, response: { result: `Success: '${filename}' created.` } });
+                    } else if (fc.name === 'create_directory') {
+                        await handleCreateDirectory((fc.args as any).path);
+                        responses.push({ id: fc.id, name: fc.name, response: { result: "Success: Directory created." } });
+                    } else if (fc.name === 'move_file') {
+                        const { source_path, destination_path } = fc.args as any;
+                        await handleMoveOrRename(source_path, destination_path);
+                        responses.push({ id: fc.id, name: fc.name, response: { result: "Success: Reorganized." } });
+                    } else if (fc.name === 'list_directory') {
+                        const contents = await handleListDirectory((fc.args as any).path);
+                        responses.push({ id: fc.id, name: fc.name, response: { result: contents } });
                     }
                 }
+                service.sendToolResponse(responses);
             }
-        }, [{ functionDeclarations: [updateFileTool, createNewFileTool] }]);
+        }, [{ functionDeclarations: ALL_AI_TOOLS }]);
     } catch (e) {
         setIsLiveChatActive(false);
     }
@@ -1422,8 +1562,8 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
   useEffect(() => { refreshExplorer(); }, [activeTab, driveToken, githubToken, currentUser]);
 
   const sessionTree = useMemo(() => {
-      if (!isInterviewerMode || !initialFiles) return [];
-      return initialFiles.map(f => ({
+      if (!isInterviewerMode) return [];
+      return project.files.map(f => ({
           id: f.path,
           name: f.name,
           type: 'file' as const,
@@ -1431,7 +1571,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
           size: f.size,
           data: f
       }));
-  }, [isInterviewerMode, initialFiles]);
+  }, [isInterviewerMode, project.files]);
 
   const driveTree = useMemo(() => {
       const root: TreeNode[] = [];

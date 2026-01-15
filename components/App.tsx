@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, ErrorInfo, ReactNode, Component } from 'react';
 import { 
   Podcast, Search, LayoutGrid, RefreshCw, 
@@ -23,6 +24,7 @@ import { DocumentList } from './DocumentList';
 import { CalendarView } from './CalendarView';
 import { PodcastFeed } from './PodcastFeed'; 
 import { MissionManifesto } from './MissionManifesto';
+// Fixed: correctly importing CodeStudio
 import { CodeStudio } from './CodeStudio';
 import { Whiteboard } from './Whiteboard';
 import { BlogView } from './BlogView';
