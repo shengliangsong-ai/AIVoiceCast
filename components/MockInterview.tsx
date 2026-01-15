@@ -21,12 +21,11 @@ import {
   RefreshCcw, HeartHandshake, Speech, Send, History, Compass, Square, CheckSquare, 
   Cloud, Award, Terminal, CodeSquare, Quote, ImageIcon, Sparkle, LayoutPanelTop, 
   TerminalSquare, FolderOpen, HardDrive, Shield, Database, Link as LinkIcon, UserCircle, 
-  Calendar, Palette, Award as AwardIcon, CheckCircle2, AlertTriangle, TrendingUp, Presentation, Rocket, Flame, ShieldOff
+  Calendar, Palette, Award as AwardIcon, CheckCircle2, AlertTriangle, TrendingUp, Presentation, Rocket, Flame, ShieldOff, RefreshCw as RefreshIcon
 } from 'lucide-react';
 import { getGlobalAudioContext, getGlobalMediaStreamDest, warmUpAudioContext, stopAllPlatformAudio } from '../utils/audioUtils';
 import { getDriveToken, signInWithGoogle, connectGoogleDrive } from '../services/authService';
 import { ensureFolder, uploadToDrive, downloadDriveFileAsBlob, deleteDriveFile, ensureCodeStudioFolder } from '../services/googleDriveService';
-import { saveLocalRecording } from '../utils/db';
 
 interface OptimizedStarStory {
   title: string;
@@ -229,8 +228,8 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
 
-  const [isRecording, setIsRecording] = useState(false);
   const [isAiConnected, setIsAiConnected] = useState(false);
+  const [isReconnecting, setIsReconnecting] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   const [isAiThinking, setIsAiThinking] = useState(false);
   const [driveToken, setDriveToken] = useState<string | null>(getDriveToken());
@@ -242,9 +241,9 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
   const [isEnding, setIsEnding] = useState(false);
   const [showRetentionChoice, setShowRetentionChoice] = useState(false);
 
-  const [apiLogs, setApiLogs] = useState<{time: string, msg: string, type: 'info' | 'error' | 'warn'}[]>([]);
   const activeServiceIdRef = useRef<string | null>(null);
   const isEndingRef = useRef(false);
+  const retryAttemptsRef = useRef(0);
 
   const [synthesisStep, setSynthesisStep] = useState<string>('');
   const [synthesisPercent, setSynthesisPercent] = useState(0);
@@ -289,9 +288,138 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       }
   }, [view, isAiConnected]);
 
+  const connectNeuralLink = useCallback(async (isRecovery = false) => {
+    if (isEndingRef.current) return;
+    
+    if (isRecovery) {
+        setIsReconnecting(true);
+        if (liveServiceRef.current) {
+            await liveServiceRef.current.disconnect();
+        }
+    }
+
+    const service = new GeminiLiveService();
+    activeServiceIdRef.current = service.id; 
+    liveServiceRef.current = service;
+    
+    const uuid = currentSessionId;
+    const historyText = transcriptRef.current.slice(-20).map(t => `${t.role.toUpperCase()}: ${t.text}`).join('\n');
+
+    const sysPrompt = `
+      Role: Senior Interviewer. 
+      Mode: ${mode.toUpperCase()}. 
+      Preferred Language: ${language}.
+      Target Duration: ${durationMinutes} minutes. 
+      Candidate: ${currentUser?.displayName}. 
+      Session Directory Hash: ${uuid}.
+
+      RESUME_TEXT: "${resumeText}". 
+      CANDIDATE_LINKEDIN: "${intervieweeLinkedin}". 
+      INTERVIEWER_LINKEDIN: "${interviewerLinkedin}". 
+      TARGET_JOB_SPEC: "${jobDesc}".
+
+      CRITICAL WORKFLOW:
+      1. As soon as the session starts, use the 'create_interview_file' tool to generate a problem file if not already present.
+      2. If this is a RECOVERY (Link restored), acknowledge it briefly via voice and continue the session seamlessly.
+      3. All files MUST be created in the session directory using path: "drive://${uuid}/filename".
+      4. Do NOT provide the solution. Provide a clear problem statement and a starting template.
+      5. Greet the candidate via voice AND start the technical evaluation immediately after the greeting.
+      6. You are encouraged to use 'get_current_code' frequently to track progress without interrupting.
+      
+      BEHAVIORAL RULE: If mode is behavioral, focus on voice dialogue and identifying 'STAR' stories.
+      
+      RECOVERY_CONTEXT:
+      ${isRecovery ? `RECENT_CONVERSATION_HISTORY:\n${historyText}\n\nRECOVERY STATUS: ACTIVE. Resume from the last point above.` : 'INITIAL START'}
+    `;
+
+    try {
+        await service.connect(mode === 'behavioral' ? 'Zephyr' : 'Software Interview Voice', sysPrompt, {
+            onOpen: () => {
+                setIsAiConnected(true);
+                setIsReconnecting(false);
+                retryAttemptsRef.current = 0;
+                if (!isRecovery) {
+                    service.sendText("Hello. The candidate is ready. Please initialize the workspace and begin the interview.");
+                    if (timerRef.current) clearInterval(timerRef.current);
+                    timerRef.current = setInterval(() => { setTimeLeft(prev => { if (prev <= 1) { handleEndInterview(); return 0; } return prev - 1; }); }, 1000);
+                } else {
+                    service.sendText("System link restored. I am back. Please acknowledge the recovery and continue our session.");
+                }
+            },
+            onClose: () => { 
+                if (activeServiceIdRef.current === service.id && !isEndingRef.current) {
+                    setIsAiConnected(false);
+                    if (retryAttemptsRef.current < 5) {
+                        retryAttemptsRef.current++;
+                        setTimeout(() => connectNeuralLink(true), 2000);
+                    }
+                }
+            },
+            onError: () => {
+                if (activeServiceIdRef.current === service.id && !isEndingRef.current) {
+                    setIsAiConnected(false);
+                    setIsReconnecting(false);
+                }
+            },
+            onVolumeUpdate: setAiVolume,
+            onTranscript: (text, isUser) => {
+                if (activeServiceIdRef.current !== service.id) return;
+                if (!isUser) setIsAiThinking(false);
+                const role = isUser ? 'user' : 'ai';
+                setTranscript((prev: TranscriptItem[]) => {
+                    if (prev.length > 0 && prev[prev.length - 1].role === role) return [...prev.slice(0, -1), { ...prev[prev.length - 1], text: prev[prev.length - 1].text + text }];
+                    return [...prev, { role, text, timestamp: Date.now() }];
+                });
+            },
+            onTurnComplete: () => {
+                if (activeServiceIdRef.current === service.id) setIsAiThinking(false);
+            },
+            onToolCall: async (toolCall: any) => {
+                for (const fc of toolCall.functionCalls) {
+                    const args = fc.args as any;
+                    if (fc.name === 'get_current_code') {
+                        const allFiles = Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[];
+                        let targetFile = allFiles.find(f => f.path === activeFilePath) || allFiles[0];
+                        service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: targetFile?.content || "// No code." } }]);
+                    } else if (fc.name === 'update_active_file') {
+                        const allFiles = Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[];
+                        const targetFile = allFiles.find(f => f.path === activeFilePath) || allFiles[0];
+                        if (targetFile) {
+                            const updated = { ...targetFile, content: args.new_content };
+                            activeCodeFilesMapRef.current.set(updated.path, updated);
+                            setInitialStudioFiles(prev => prev.map(f => f.path === updated.path ? updated : f));
+                            service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Success: Updated ${targetFile.name}.` } }]);
+                        }
+                    } else if (fc.name === 'create_interview_file') {
+                        const path = args.filename.startsWith('drive://') ? args.filename : `drive://${uuid}/${args.filename}`;
+                        const newFile: CodeFile = { 
+                            name: args.filename.split('/').pop() || args.filename, 
+                            path, 
+                            language: getLanguageFromExt(args.filename) as any, 
+                            content: args.content, 
+                            loaded: true, 
+                            isDirectory: false, 
+                            isModified: false 
+                        };
+                        activeCodeFilesMapRef.current.set(path, newFile);
+                        setInitialStudioFiles(prev => [...prev.filter(f => f.path !== path), newFile]);
+                        setActiveFilePath(path);
+                        service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Success: '${args.filename}' created in session workspace.` } }]);
+                    }
+                }
+            }
+        }, [{ functionDeclarations: [getCodeTool, updateActiveFileTool, createInterviewFileTool] }]);
+    } catch (e) {
+        console.error("Neural link handshake failed", e);
+        setIsReconnecting(false);
+    }
+  }, [currentSessionId, mode, language, durationMinutes, currentUser, resumeText, intervieweeLinkedin, interviewerLinkedin, jobDesc]);
+
   const handleStartInterview = async () => {
     if (!driveToken) return alert("Please connect to Google Drive first.");
-    setIsStarting(true); isEndingRef.current = false;
+    setIsStarting(true); 
+    isEndingRef.current = false;
+    retryAttemptsRef.current = 0;
     const uuid = generateSecureId();
     setCurrentSessionId(uuid);
 
@@ -302,7 +430,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
 
     const audioCtx = getGlobalAudioContext();
     await warmUpAudioContext(audioCtx);
-    setTranscript([]); setReport(null); setApiLogs([]); videoChunksRef.current = []; activeCodeFilesMapRef.current.clear();
+    setTranscript([]); setReport(null); videoChunksRef.current = []; activeCodeFilesMapRef.current.clear();
     setTimeLeft(durationMinutes * 60);
 
     try {
@@ -313,7 +441,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       activeStreamRef.current = camStream; 
       activeScreenStreamRef.current = screenStream;
 
-      // 1. Create a "Waiting" placeholder. Real files will be created by the AI via tool calls.
       const initialFilename = `READ_ME_FIRST.md`;
       const filesToInit: CodeFile[] = [{ 
           name: initialFilename, 
@@ -362,100 +489,9 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       mediaRecorderRef.current = recorder;
       videoChunksRef.current = []; 
       recorder.ondataavailable = (e) => { if (e.data.size > 0) videoChunksRef.current.push(e.data); };
-      
-      recorder.onstop = async () => {
-          // This recorder stop callback is triggered ONLY if we decide to preserve.
-          // Discarding simply halts the tracks and wipes videoChunksRef without triggering this upload flow.
-      };
-      
       recorder.start(1000);
 
-      const service = new GeminiLiveService();
-      activeServiceIdRef.current = service.id; liveServiceRef.current = service;
-      
-      const sysPrompt = `
-        Role: Senior Interviewer. 
-        Mode: ${mode.toUpperCase()}. 
-        Preferred Language: ${language}.
-        Target Duration: ${durationMinutes} minutes. 
-        Candidate: ${currentUser?.displayName}. 
-        Session Directory Hash: ${uuid}.
-
-        RESUME_TEXT: "${resumeText}". 
-        CANDIDATE_LINKEDIN: "${intervieweeLinkedin}". 
-        INTERVIEWER_LINKEDIN: "${interviewerLinkedin}". 
-        TARGET_JOB_SPEC: "${jobDesc}".
-
-        CRITICAL WORKFLOW:
-        1. As soon as the session starts, use the 'create_interview_file' tool to generate a problem file. 
-        2. All files MUST be created in the session directory using path: "drive://${uuid}/filename".
-        3. Do NOT provide the solution. Provide a clear problem statement and a starting template.
-        4. Greet the candidate via voice AND start the technical evaluation immediately after the greeting.
-        5. You are encouraged to use 'get_current_code' frequently to track progress without interrupting.
-        
-        BEHAVIORAL RULE: If mode is behavioral, use markdown files to list key scenarios if helpful, otherwise focus on voice dialogue and identifying 'STAR' stories.
-      `;
-      
-      await service.connect(mode === 'behavioral' ? 'Zephyr' : 'Software Interview Voice', sysPrompt, {
-        onOpen: () => {
-          setIsAiConnected(true);
-          // Force an immediate proactive "waking" text to trigger the AI to act
-          service.sendText("Hello. The candidate is ready. Please initialize the workspace and begin the interview.");
-          
-          if (timerRef.current) clearInterval(timerRef.current);
-          timerRef.current = setInterval(() => { setTimeLeft(prev => { if (prev <= 1) { handleEndInterview(); return 0; } return prev - 1; }); }, 1000);
-        },
-        onClose: () => { if (activeServiceIdRef.current === service.id) setIsAiConnected(false); },
-        onError: () => {},
-        onVolumeUpdate: setAiVolume,
-        onTranscript: (text, isUser) => {
-          if (activeServiceIdRef.current !== service.id) return;
-          if (!isUser) setIsAiThinking(false);
-          const role = isUser ? 'user' : 'ai';
-          setTranscript((prev: TranscriptItem[]) => {
-            if (prev.length > 0 && prev[prev.length - 1].role === role) return [...prev.slice(0, -1), { ...prev[prev.length - 1], text: prev[prev.length - 1].text + text }];
-            return [...prev, { role, text, timestamp: Date.now() }];
-          });
-        },
-        onTurnComplete: () => {
-          if (activeServiceIdRef.current === service.id) setIsAiThinking(false);
-        },
-        onToolCall: async (toolCall: any) => {
-          for (const fc of toolCall.functionCalls) {
-            const args = fc.args as any;
-            if (fc.name === 'get_current_code') {
-              const allFiles = Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[];
-              let targetFile = allFiles.find(f => f.path === activeFilePath) || allFiles[0];
-              service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: targetFile?.content || "// No code." } }]);
-            } else if (fc.name === 'update_active_file') {
-              const allFiles = Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[];
-              const targetFile = allFiles.find(f => f.path === activeFilePath) || allFiles[0];
-              if (targetFile) {
-                const updated = { ...targetFile, content: args.new_content };
-                activeCodeFilesMapRef.current.set(updated.path, updated);
-                setInitialStudioFiles(prev => prev.map(f => f.path === updated.path ? updated : f));
-                service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Success: Updated ${targetFile.name}.` } }]);
-              }
-            } else if (fc.name === 'create_interview_file') {
-              // Ensure path is consistent with the session uuid
-              const path = args.filename.startsWith('drive://') ? args.filename : `drive://${uuid}/${args.filename}`;
-              const newFile: CodeFile = { 
-                  name: args.filename.split('/').pop() || args.filename, 
-                  path, 
-                  language: getLanguageFromExt(args.filename) as any, 
-                  content: args.content, 
-                  loaded: true, 
-                  isDirectory: false, 
-                  isModified: false 
-              };
-              activeCodeFilesMapRef.current.set(path, newFile);
-              setInitialStudioFiles(prev => [...prev.filter(f => f.path !== path), newFile]);
-              setActiveFilePath(path);
-              service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Success: '${args.filename}' created in session workspace.` } }]);
-            }
-          }
-        }
-      }, [{ functionDeclarations: [getCodeTool, updateActiveFileTool, createInterviewFileTool] }]);
+      await connectNeuralLink();
       setView('interview');
     } catch (e: any) { alert("Startup failed."); setView('hub'); } finally { setIsStarting(false); }
   };
@@ -463,7 +499,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
   const handleEndInterview = async () => {
     if (isEndingRef.current) return;
     
-    // Halt all streams and link first
     if (timerRef.current) clearInterval(timerRef.current);
     if (liveServiceRef.current) { liveServiceRef.current.disconnect(); setIsAiConnected(false); }
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
@@ -590,17 +625,16 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
             setSynthesisPercent(80);
             
             const token = getDriveToken();
-            // Added check to ensure token is typed as a string for use in GDrive functions
             if (token && typeof token === 'string' && videoChunksRef.current.length > 0) {
                 try {
-                    const videoBlob = new Blob(videoChunksRef.current, { type: 'video/webm' });
-                    // Explicitly treat token as string after type check
-                    const driveTokenString: string = token;
-                    const folderId: string = await ensureCodeStudioFolder(driveTokenString);
-                    const interviewsFolderId: string = await ensureFolder(driveTokenString, 'Interviews', folderId);
-                    const driveVideoId: string = await uploadToDrive(driveTokenString, interviewsFolderId, `Interview_${interviewId}.webm`, videoBlob);
+                    const videoBlob = new Blob(videoChunksRef.current as BlobPart[], { type: 'video/webm' });
+                    // Explicitly cast to string to fix TS unknown type errors
+                    const driveTokenString = token as string;
+                    const folderId = await ensureCodeStudioFolder(driveTokenString) as string;
+                    const interviewsFolderId = await ensureFolder(driveTokenString, 'Interviews', folderId) as string;
+                    const driveVideoId = await uploadToDrive(driveTokenString, interviewsFolderId, `Interview_${interviewId}.webm`, videoBlob) as string;
                     const driveVideoUrl = `drive://${driveVideoId}`;
-                    const tFileId: string = await uploadToDrive(driveTokenString, folderId, `${recId}_transcript.txt`, transcriptBlob);
+                    const tFileId = await uploadToDrive(driveTokenString, folderId, `${recId}_transcript.txt`, transcriptBlob) as string;
                     
                     await saveRecordingReference({
                         id: recId, userId: currentUser?.uid || 'guest', channelId: uuid, channelTitle, channelImage: 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=600&q=80', timestamp, mediaUrl: driveVideoUrl, driveUrl: driveVideoUrl, mediaType: 'video/webm', transcriptUrl: `drive://${tFileId}`
@@ -634,9 +668,10 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
     const allFiles = Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[];
     const currentFile = (allFiles.find(f => f.path === activeFilePath) || allFiles[0]) as CodeFile | undefined;
     
-    let messageToAi = text;
+    // Construct text with explicit response request for Live API
+    let messageToAi = `[USER_TEXT_PROMPT: Respond to this via voice] ${text}`;
     if (currentFile && currentFile.content.length > 0 && currentFile.content.length < 5000) {
-        messageToAi = `[USER_MESSAGE]: ${text}\n\n[NEURAL_GROUNDING (File: ${currentFile.name})]:\n${currentFile.content}`;
+        messageToAi = `[USER_TEXT_PROMPT: Respond to this via voice] ${text}\n\n[NEURAL_GROUNDING (File: ${currentFile.name})]:\n${currentFile.content}`;
     }
 
     setTranscript(prev => [...prev, { role: 'user', text, timestamp: Date.now() }]);
@@ -648,7 +683,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
     if (!liveServiceRef.current) return;
     setTranscript(prev => [...prev, { role: 'user', text: `*[System]: Synced code for ${file.name} to neural core.*`, timestamp: Date.now() }]);
     setIsAiThinking(true);
-    liveServiceRef.current.sendText(`The user has manually triggered a code sync. Current content of ${file.name}:\n\n\`\`\`\n${file.content}\n\`\`\``);
+    liveServiceRef.current.sendText(`[USER_TEXT_PROMPT: Acknowledge code sync] The user has manually triggered a code sync. Current content of ${file.name}:\n\n\`\`\`\n${file.content}\n\`\`\``);
   };
 
   const loadInterviewsInternal = async () => {
@@ -821,10 +856,21 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
             <div className={`absolute bottom-24 left-6 w-64 aspect-video rounded-3xl overflow-hidden border-4 ${isAiConnected ? 'border-indigo-500/50 shadow-indigo-500/20' : 'border-red-500/50 animate-pulse'} shadow-2xl z-[100] bg-black group`}>
                 <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover mirror" />
                 <div className="absolute inset-x-0 bottom-0 p-4 bg-gradient-to-t from-black/80 to-transparent flex items-center justify-between">
-                    <span className="text-[9px] font-black text-white uppercase tracking-widest flex items-center gap-2">
-                        <div className={`w-1.5 h-1.5 rounded-full ${isAiConnected ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`}></div>
-                        Neural Lens
-                    </span>
+                    <div className="flex flex-col gap-1">
+                        <span className="text-[9px] font-black text-white uppercase tracking-widest flex items-center gap-2">
+                            <div className={`w-1.5 h-1.5 rounded-full ${isAiConnected ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`}></div>
+                            {isReconnecting ? 'Restoring Link...' : 'Neural Lens'}
+                        </span>
+                        {isAiConnected && (
+                            <button 
+                                onClick={(e) => { e.stopPropagation(); connectNeuralLink(true); }} 
+                                className="flex items-center gap-1 text-[8px] font-bold text-slate-400 hover:text-white transition-colors uppercase tracking-tighter"
+                                title="Restart AI link if hanging"
+                            >
+                                <RefreshIcon size={8}/> Refresh Link
+                            </button>
+                        )}
+                    </div>
                     <div className="w-24 h-4 rounded-lg bg-black/40 border border-white/10 overflow-hidden flex items-center px-1">
                         <Visualizer volume={aiVolume} isActive={isAiConnected} color="#818cf8"/>
                     </div>
