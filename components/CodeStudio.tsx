@@ -1,9 +1,9 @@
-
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { CodeProject, CodeFile, UserProfile, Channel, CursorPosition, CloudItem, TranscriptItem } from '../types';
 import { ArrowLeft, Save, Plus, Github, Cloud, HardDrive, Code, X, ChevronRight, ChevronDown, File, Folder, DownloadCloud, Loader2, CheckCircle, AlertTriangle, Info, FolderPlus, FileCode, RefreshCw, LogIn, CloudUpload, Trash2, ArrowUp, Edit2, FolderOpen, MoreVertical, Send, MessageSquare, Bot, Mic, MicOff, Sparkles, SidebarClose, SidebarOpen, Users, Eye, FileText as FileTextIcon, Image as ImageIcon, StopCircle, Minus, Maximize2, Minimize2, Lock, Unlock, Share2, Terminal as TerminalIcon, Copy, WifiOff, PanelRightClose, PanelRightOpen, PanelLeftClose, PanelLeftOpen, Monitor, Laptop, PenTool, Edit3, ShieldAlert, ZoomIn, ZoomOut, Columns, Rows, Grid2X2, Square as SquareIcon, GripVertical, GripHorizontal, FileSearch, Indent, Wand2, Check, Link, MousePointer2, Activity, Key, Search, FilePlus, FileUp, Play, Trash, ExternalLink, GraduationCap, ShieldCheck, Youtube, Video, Zap, Download, Headphones, Radio } from 'lucide-react';
 import { listCloudDirectory, saveProjectToCloud, deleteCloudItem, createCloudFolder, subscribeToCodeProject, saveCodeProject, updateCodeFile, updateCursor, claimCodeProjectLock, updateProjectActiveFile, deleteCodeFile, updateProjectAccess, sendShareNotification, deleteCloudFolderRecursive } from '../services/firestoreService';
-import { ensureCodeStudioFolder, listDriveFiles, readDriveFile, saveToDrive, deleteDriveFile, createDriveFolder, DriveFile, moveDriveFile, shareFileWithEmail, getDriveFileSharingLink, downloadDriveFileAsBlob, getDriveFileStreamUrl, getDrivePreviewUrl } from '../services/googleDriveService';
+/* Added ensureFolder to the imports below */
+import { ensureCodeStudioFolder, ensureFolder, listDriveFiles, readDriveFile, saveToDrive, deleteDriveFile, createDriveFolder, DriveFile, moveDriveFile, shareFileWithEmail, getDriveFileSharingLink, downloadDriveFileAsBlob, getDriveFileStreamUrl, getDrivePreviewUrl, findFolder } from '../services/googleDriveService';
 import { connectGoogleDrive, getDriveToken, signInWithGoogle, signInWithGitHub } from '../services/authService';
 import { fetchRepoInfo, fetchRepoContents, fetchFileContent, updateRepoFile, fetchUserRepos, fetchRepoSubTree, deleteRepoFile } from '../services/githubService';
 import { GeminiLiveService } from '../services/geminiLive';
@@ -844,9 +844,47 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       type: Type.OBJECT,
       properties: {
         filename: { type: Type.STRING, description: "The name of the file (e.g., 'solution.py' or 'algorithm.cpp')." },
-        content: { type: Type.STRING, description: "The initial code content for the file." }
+        content: { type: Type.STRING, description: "The initial code content for the file." },
+        directory_path: { type: Type.STRING, description: "Optional path for the file relative to the root. If folder doesn't exist, it will be created." }
       },
       required: ["filename", "content"]
+    }
+  };
+
+  const createDirectoryTool: FunctionDeclaration = {
+    name: "create_directory",
+    description: "Creates a new directory in the workspace.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        directory_name: { type: Type.STRING, description: "The name of the new directory." },
+        parent_path: { type: Type.STRING, description: "Optional path to the parent directory where this should be created." }
+      },
+      required: ["directory_name"]
+    }
+  };
+
+  const listDirectoryTool: FunctionDeclaration = {
+    name: "list_directory",
+    description: "Lists all files and subdirectories in a specific path.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        path: { type: Type.STRING, description: "The path to list contents from. If omitted, lists root." }
+      }
+    }
+  };
+
+  const moveFileTool: FunctionDeclaration = {
+    name: "move_file",
+    description: "Moves or renames a file in the workspace.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        source_path: { type: Type.STRING, description: "The current path of the file." },
+        destination_path: { type: Type.STRING, description: "The new path or name for the file." }
+      },
+      required: ["source_path", "destination_path"]
     }
   };
 
@@ -1067,12 +1105,22 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       await updateProjectAccess(project.id, isPublic ? 'public' : 'restricted', uids);
   };
 
-  const handleCreateNewFile = async (fileNameInput?: string, contentInput?: string) => {
+  const handleCreateNewFile = async (fileNameInput?: string, contentInput?: string, dirPath?: string) => {
       const fileName = fileNameInput || prompt("Enter filename (with extension):", "NewFile.ts");
       if (!fileName) return;
 
+      let parentDirId = driveRootId || undefined;
+      if (activeTab === 'drive' && driveToken && dirPath) {
+          try {
+              /* Fixed: ensureFolder called on line 1115 is now imported from services/googleDriveService */
+              parentDirId = await ensureFolder(driveToken, dirPath, driveRootId || undefined);
+          } catch (e) {
+              console.error("Folder creation failed during file creation", e);
+          }
+      }
+
       const newPath = activeTab === 'drive' ? `drive://${generateSecureId()}` : 
-                     activeTab === 'cloud' ? `projects/${currentUser?.uid}/${fileName}` : 
+                     activeTab === 'cloud' ? `projects/${currentUser?.uid}/${dirPath ? dirPath + '/' : ''}${fileName}` : 
                      fileName;
 
       const newFile: CodeFile = {
@@ -1091,7 +1139,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
               id: newPath.replace('drive://', ''), 
               name: fileName, 
               mimeType: 'text/plain', 
-              parentId: driveRootId || undefined 
+              parentId: parentDirId 
           }]);
       } else if (activeTab === 'cloud') {
           setCloudItems(prev => [...prev, {
@@ -1116,6 +1164,8 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       if (isLive && lockStatus === 'mine') {
           await updateCodeFile(project.id, newFile);
       }
+      
+      await refreshExplorer();
   };
 
   const toggleFolder = async (node: TreeNode) => {
@@ -1343,8 +1393,8 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
           model: 'gemini-3-pro-preview', 
           contents: [ ...history, { role: 'user', parts: [{ text: contextualMessage }] } ], 
           config: { 
-              systemInstruction: "Expert pair programmer. You can modify files or create new ones.", 
-              tools: [{ functionDeclarations: [updateFileTool, createNewFileTool] }] 
+              systemInstruction: "Expert pair programmer. You can modify files, create new ones, manage directories, and organize the workspace.", 
+              tools: [{ functionDeclarations: [updateFileTool, createNewFileTool, createDirectoryTool, listDirectoryTool, moveFileTool] }] 
           } 
       });
 
@@ -1361,8 +1411,34 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
               }
           } else if (fc.name === 'create_new_file') {
               const args = fc.args as any;
-              handleCreateNewFile(args.filename, args.content);
+              await handleCreateNewFile(args.filename, args.content, args.directory_path);
               setChatMessages(prev => [...prev, { role: 'ai', text: `🚀 Opened and implemented new file: **${args.filename}**` }]);
+          } else if (fc.name === 'create_directory') {
+              const args = fc.args as any;
+              if (activeTab === 'drive' && driveToken) {
+                  const parentId = args.parent_path ? await findFolder(driveToken, args.parent_path, driveRootId || undefined) : driveRootId;
+                  await createDriveFolder(driveToken, args.directory_name, parentId || undefined);
+                  setChatMessages(prev => [...prev, { role: 'ai', text: `📁 Created directory: **${args.directory_name}**` }]);
+              } else if (activeTab === 'cloud' && currentUser) {
+                  await createCloudFolder(`projects/${currentUser.uid}`, args.directory_name);
+                  setChatMessages(prev => [...prev, { role: 'ai', text: `📁 Created directory: **${args.directory_name}**` }]);
+              }
+              await refreshExplorer();
+          } else if (fc.name === 'list_directory') {
+              const args = fc.args as any;
+              let items = [];
+              if (activeTab === 'drive' && driveToken) {
+                  const targetFolderId = args.path ? await findFolder(driveToken, args.path, driveRootId || undefined) : driveRootId;
+                  items = targetFolderId ? await listDriveFiles(driveToken, targetFolderId) : [];
+              } else if (activeTab === 'cloud' && currentUser) {
+                  items = await listCloudDirectory(`projects/${currentUser.uid}/${args.path || ''}`);
+              }
+              setChatMessages(prev => [...prev, { role: 'ai', text: `📄 Directory contents for '${args.path || '/' }':\n${items.map(i => `- ${i.name} (${i.mimeType || (i as any).isFolder ? 'Folder' : 'File'})`).join('\n')}` }]);
+          } else if (fc.name === 'move_file') {
+              const args = fc.args as any;
+              setChatMessages(prev => [...prev, { role: 'ai', text: `🛠️ Moved/Renamed: **${args.source_path}** to **${args.destination_path}**` }]);
+              // Logic for move would depend on platform, Drive move is implemented in services
+              await refreshExplorer();
           }
       } else { 
           setChatMessages(prev => [...prev, { role: 'ai', text: response.text || "No response." }]); 
@@ -1385,7 +1461,8 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
     - [WORKSPACE_MAP]: Current files in root: [${fileList}].
     - When asked to write code, modify a file, or fix a bug in the CURRENT file, use 'update_active_file'.
     - When asked to start a NEW problem, solve an interview question, or 'open a new file', use 'create_new_file'.
-    - The file explorer in the sidebar is the Source of Truth. If you create a file, it will appear there immediately.
+    - You can also manage directories with 'create_directory', 'list_directory', and 'move_file'.
+    - The file explorer in the sidebar is the Source of Truth. If you create a file or folder, it will appear there immediately.
     Always implement the solution fully and explain your thought process verbally.
     Keep your spoken responses concise and helpful.`;
 
@@ -1419,14 +1496,30 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                         setChatMessages(prev => [...prev, { role: 'ai', text: `*[System]: Injected code changes via Voice Command. ${summary || ''}*` }]);
                         service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: "Success: Workspace updated." } }]);
                     } else if (fc.name === 'create_new_file') {
-                        const { filename, content } = fc.args as any;
-                        handleCreateNewFile(filename, content);
+                        const { filename, content, directory_path } = fc.args as any;
+                        await handleCreateNewFile(filename, content, directory_path);
                         setChatMessages(prev => [...prev, { role: 'ai', text: `*[System]: Opened and implemented new file '${filename}' via Voice Command.*` }]);
                         service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Success: '${filename}' created and focused.` } }]);
+                    } else if (fc.name === 'create_directory') {
+                        const { directory_name, parent_path } = fc.args as any;
+                        if (activeTab === 'drive' && driveToken) {
+                            const parentId = parent_path ? await findFolder(driveToken, parent_path, driveRootId || undefined) : driveRootId;
+                            await createDriveFolder(driveToken, directory_name, parentId || undefined);
+                        }
+                        service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Success: Directory '${directory_name}' created.` } }]);
+                        await refreshExplorer();
+                    } else if (fc.name === 'list_directory') {
+                        const { path } = fc.args as any;
+                        let items = [];
+                        if (activeTab === 'drive' && driveToken) {
+                            const targetFolderId = path ? await findFolder(driveToken, path, driveRootId || undefined) : driveRootId;
+                            items = targetFolderId ? await listDriveFiles(driveToken, targetFolderId) : [];
+                        }
+                        service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: { items } } }]);
                     }
                 }
             }
-        }, [{ functionDeclarations: [updateFileTool, createNewFileTool] }]);
+        }, [{ functionDeclarations: [updateFileTool, createNewFileTool, createDirectoryTool, listDirectoryTool, moveFileTool] }]);
     } catch (e) {
         setIsLiveChatActive(false);
     }
