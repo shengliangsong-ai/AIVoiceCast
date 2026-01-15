@@ -575,7 +575,7 @@ const Slot: React.FC<SlotProps> = ({
                                       <button 
                                         onClick={onMediaDownloadClick}
                                         disabled={isDownloading}
-                                        className="px-10 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-black uppercase tracking-widest flex items-center gap-3 transition-all active:scale-95 shadow-xl shadow-indigo-900/30 disabled:opacity-50"
+                                        className="px-10 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-black uppercase tracking-widest flex items-center gap-3 transition-all active:scale-95 shadow-xl shadow-indigo-900/40 disabled:opacity-50"
                                       >
                                           {isDownloading ? <Loader2 size={18} className="animate-spin"/> : <Download size={18}/>}
                                           {isDownloading ? 'PULLING STREAM...' : 'Download & Play Local'}
@@ -849,6 +849,14 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
 
   const [isLive, setIsLive] = useState(false);
   const [lockStatus, setLockStatus] = useState<'free' | 'busy' | 'mine'>('free');
+
+  const resolvePath = useCallback((target: string | undefined, currentCwd: string) => {
+      if (!target) return currentCwd;
+      if (target.startsWith('/')) return target;
+      // Normalizing path joining
+      const prefix = currentCwd === '/' ? '/' : (currentCwd.endsWith('/') ? currentCwd : currentCwd + '/');
+      return prefix + target;
+  }, []);
 
   const updateFileTool: FunctionDeclaration = {
     name: "update_active_file",
@@ -1149,26 +1157,40 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       const fileName = fileNameInput || prompt("Enter filename (with extension):", "NewFile.ts");
       if (!fileName) return;
 
-      // Use the directory path if provided, otherwise fallback to current working directory
-      let dirPath = dirPathInput || (workingDirectory === '/' ? undefined : workingDirectory);
-      if (dirPath?.startsWith('/')) dirPath = dirPath.substring(1);
+      // Resolve relative path against CWD
+      let resolvedDirPath = resolvePath(dirPathInput, workingDirectory);
+      if (resolvedDirPath.startsWith('/')) resolvedDirPath = resolvedDirPath.substring(1);
 
-      addSystemLog(`AI/Manual Command: Create New File [${fileName}] in [${dirPath || 'Root'}]`, 'info');
+      addSystemLog(`AI/Manual Command: Create New File [${fileName}] in [${resolvedDirPath || 'Root'}]`, 'info');
 
       let parentDirId = driveRootId || undefined;
-      if (activeTab === 'drive' && driveToken && dirPath) {
+      let driveId: string | undefined = undefined;
+
+      // IMMEDIATE PERSISTENCE (Optional but highly recommended for subdirs to avoid "empty kvstore" syndrome)
+      if (activeTab === 'drive' && driveToken) {
           try {
-              addSystemLog(`Resolving directory hierarchy for path: ${dirPath}`, 'info');
-              parentDirId = await ensureFolder(driveToken, dirPath, driveRootId || undefined);
+              addSystemLog(`Resolving directory hierarchy for path: ${resolvedDirPath}`, 'info');
+              parentDirId = await ensureFolder(driveToken, resolvedDirPath || '', driveRootId || undefined);
               addSystemLog(`Target directory resolved: ${parentDirId}`, 'success');
+              
+              // Physically create the file so it appears in explorer immediately
+              driveId = await saveToDrive(driveToken, parentDirId, fileName, contentInput || "");
+              addSystemLog(`File committed to Drive: ${driveId}`, 'success');
           } catch (e: any) {
-              addSystemLog(`Folder resolution failure: ${e.message}`, 'error');
-              console.error("Folder creation failed during file creation", e);
+              addSystemLog(`Folder resolution or creation failure: ${e.message}`, 'error');
+          }
+      } else if (activeTab === 'cloud' && currentUser) {
+          try {
+              const fullPath = `projects/${currentUser.uid}/${resolvedDirPath ? resolvedDirPath + '/' : ''}${fileName}`;
+              await saveProjectToCloud(`projects/${currentUser.uid}${resolvedDirPath ? '/' + resolvedDirPath : ''}`, fileName, contentInput || "");
+              addSystemLog(`File committed to Cloud.`, 'success');
+          } catch(e: any) {
+              addSystemLog(`Cloud write failed: ${e.message}`, 'error');
           }
       }
 
-      const newPath = activeTab === 'drive' ? `drive://${generateSecureId()}` : 
-                     activeTab === 'cloud' ? `projects/${currentUser?.uid}/${dirPath ? dirPath + '/' : ''}${fileName}` : 
+      const newPath = activeTab === 'drive' ? `drive://${driveId || generateSecureId()}` : 
+                     activeTab === 'cloud' ? `projects/${currentUser?.uid}/${resolvedDirPath ? resolvedDirPath + '/' : ''}${fileName}` : 
                      fileName;
 
       const newFile: CodeFile = {
@@ -1178,27 +1200,11 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
           language: getLanguageFromExt(fileName), 
           loaded: true, 
           isDirectory: false, 
-          isModified: true,
-          parentId: parentDirId 
+          isModified: false, // Mark as NOT modified since we just persisted it
+          parentId: parentDirId,
+          driveId: driveId
       };
 
-      // Add to explorer backing state
-      if (activeTab === 'drive') {
-          setDriveItems(prev => [...prev, { 
-              id: newPath.replace('drive://', ''), 
-              name: fileName, 
-              mimeType: 'text/plain', 
-              parentId: parentDirId 
-          }]);
-      } else if (activeTab === 'cloud') {
-          setCloudItems(prev => [...prev, {
-              name: fileName,
-              fullPath: newPath,
-              isFolder: false,
-              size: 0
-          }]);
-      }
-      
       // Update the active project files immediately so sidebar 'session' view stays in sync
       setProject(prev => ({
           ...prev,
@@ -1207,14 +1213,14 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       }));
 
       updateSlotFile(newFile, focusedSlot);
-      setSaveStatus('modified');
+      setSaveStatus('saved');
       
-      // If AI created the file during a live session, ensure it's pushed to cloud
+      // If AI created the file during a live session, ensure it's pushed to cloud ledger too
       if (isLive && lockStatus === 'mine') {
           await updateCodeFile(project.id, newFile);
       }
       
-      addSystemLog(`File [${fileName}] initialized in [${dirPath || 'Root'}].`, 'success');
+      addSystemLog(`File [${fileName}] initialized in [${resolvedDirPath || 'Root'}].`, 'success');
       await refreshExplorer();
   };
 
@@ -1222,14 +1228,14 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
     const dirName = dirNameInput || prompt("Enter directory name:", "new-folder");
     if (!dirName) return;
 
-    addSystemLog(`AI/Manual Command: Create Directory [${dirName}] in [${parentPath || workingDirectory}]`, 'info');
+    // Resolve relative path against CWD
+    let resolvedParentPath = resolvePath(parentPath, workingDirectory);
+    if (resolvedParentPath.startsWith('/')) resolvedParentPath = resolvedParentPath.substring(1);
+
+    addSystemLog(`AI/Manual Command: Create Directory [${dirName}] in [${resolvedParentPath || 'Root'}]`, 'info');
     setIsExplorerLoading(true);
     try {
       if (activeTab === 'drive' && driveToken) {
-        // Resolve target parent path
-        let resolvedParentPath = parentPath || (workingDirectory === '/' ? undefined : workingDirectory);
-        if (resolvedParentPath?.startsWith('/')) resolvedParentPath = resolvedParentPath.substring(1);
-
         const parentId = resolvedParentPath ? await findFolder(driveToken, resolvedParentPath, driveRootId || undefined) : (driveRootId || undefined);
         
         addSystemLog(`Checking for existing directory [${dirName}] in parent [${parentId || 'Root'}]...`, 'info');
@@ -1242,7 +1248,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
             addSystemLog(`Directory [${dirName}] created on Drive.`, 'success');
         }
       } else if (activeTab === 'cloud' && currentUser) {
-        await createCloudFolder(`projects/${currentUser.uid}${parentPath ? '/' + parentPath : ''}`, dirName);
+        await createCloudFolder(`projects/${currentUser.uid}${resolvedParentPath ? '/' + resolvedParentPath : ''}`, dirName);
         addSystemLog(`Directory [${dirName}] created in Cloud.`, 'success');
       }
       await refreshExplorer();
@@ -1540,9 +1546,9 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                       }
                   } else if (fc.name === 'create_new_file') {
                       const args = fc.args as any;
-                      // Use localCwd to ensure it respects immediate 'cd' commands in the same batch
-                      const effectiveDirPath = args.directory_path || (localCwd === '/' ? undefined : localCwd);
-                      await handleCreateNewFile(args.filename, args.content, effectiveDirPath);
+                      // Path resolution for relative/absolute dir paths
+                      // Note: We avoid double-resolving by trusting handleCreateNewFile's internal resolver
+                      await handleCreateNewFile(args.filename, args.content, args.directory_path);
                       setChatMessages(prev => [...prev, { role: 'ai', text: `🚀 Opened and implemented new file: **${args.filename}**` }]);
                   } else if (fc.name === 'set_working_directory') {
                       const args = fc.args as any;
@@ -1557,9 +1563,11 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                   } else if (fc.name === 'list_directory') {
                       const args = fc.args as any;
                       let items = [];
-                      const targetPath = args.path || localCwd;
+                      const targetPath = resolvePath(args.path, localCwd);
                       if (activeTab === 'drive' && driveToken) {
-                          const targetFolderId = await findFolder(driveToken, targetPath, driveRootId || undefined);
+                          let cleanPath = targetPath;
+                          if (cleanPath.startsWith('/')) cleanPath = cleanPath.substring(1);
+                          const targetFolderId = await findFolder(driveToken, cleanPath, driveRootId || undefined);
                           items = targetFolderId ? await listDriveFiles(driveToken, targetFolderId) : [];
                       } else if (activeTab === 'cloud' && currentUser) {
                           items = await listCloudDirectory(`projects/${currentUser.uid}/${targetPath.startsWith('/') ? targetPath.substring(1) : targetPath}`);
@@ -1650,11 +1658,9 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                             addSystemLog(`Applied code patch from voice command.`, 'success');
                         } else if (fc.name === 'create_new_file') {
                             const { filename, content, directory_path } = fc.args as any;
-                            // Ensure batch relative CWD is respected
-                            const effectiveDirPath = directory_path || (localCwd === '/' ? undefined : localCwd);
-                            await handleCreateNewFile(filename, content, effectiveDirPath);
+                            await handleCreateNewFile(filename, content, directory_path);
                             setChatMessages(prev => [...prev, { role: 'ai', text: `*[System]: Opened and implemented new file '${filename}' via Voice Command.*` }]);
-                            service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Success: '${filename}' created and focused.` } }]);
+                            service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Success: '${filename}' created.` } }]);
                         } else if (fc.name === 'set_working_directory') {
                             const { path } = fc.args as any;
                             localCwd = path;
@@ -1668,9 +1674,11 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                         } else if (fc.name === 'list_directory') {
                             const { path } = fc.args as any;
                             let items = [];
-                            const targetPath = path || localCwd;
+                            const targetPath = resolvePath(path, localCwd);
                             if (activeTab === 'drive' && driveToken) {
-                                const targetFolderId = await findFolder(driveToken, targetPath, driveRootId || undefined);
+                                let cleanPath = targetPath;
+                                if (cleanPath.startsWith('/')) cleanPath = cleanPath.substring(1);
+                                const targetFolderId = await findFolder(driveToken, cleanPath, driveRootId || undefined);
                                 items = targetFolderId ? await listDriveFiles(driveToken, targetFolderId) : [];
                             }
                             service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: { items } } }]);
@@ -1927,7 +1935,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
 
       {showManualToken && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-              <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-sm p-6 shadow-2xl animate-fade-in-up">
+              <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-sm p-6 shadow-2xl animate-fade-in-up">
                   <div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-white flex items-center gap-2"><Key className="text-indigo-400" size={18}/> Manual Token Fallback</h3><button onClick={() => setShowManualToken(false)} className="text-slate-500 hover:text-white"><X size={20}/></button></div>
                   <div className="space-y-4"><div className="p-3 bg-amber-900/20 border border-amber-500/30 rounded-xl flex items-start gap-3"><AlertTriangle className="text-amber-500 shrink-0 mt-0.5" size={16}/><div className="space-y-2"><p className="text-[10px] text-amber-200 leading-relaxed font-bold">CONFLICT DETECTED:</p><p className="text-[10px] text-amber-200 leading-relaxed">{githubLinkingError || "OAuth linking failed because your GitHub is already linked to another account."}</p><p className="text-[10px] text-amber-200 leading-relaxed italic">Use a Personal Access Token (PAT) to bypass this conflict.</p></div></div><div className="space-y-2"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">GitHub Access Token</label><input type="password" value={manualToken} onChange={e => setManualToken(e.target.value)} placeholder="ghp_..." className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-sm text-indigo-200 outline-none focus:border-indigo-500 font-mono"/></div><div className="flex flex-col gap-2"><button onClick={handleSetManualToken} disabled={!manualToken.trim()} className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold text-xs uppercase tracking-widest shadow-lg disabled:opacity-50 transition-all active:scale-95">Save & Connect</button><a href="https://github.com/settings/tokens" target="_blank" rel="noreferrer" className="text-[10px] text-slate-500 hover:text-indigo-400 flex items-center justify-center gap-1 mt-1 transition-colors">How to generate a token? <ExternalLink size={10}/></a></div></div>
               </div>

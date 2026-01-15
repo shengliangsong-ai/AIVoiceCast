@@ -50,34 +50,45 @@ export async function findFolder(accessToken: string, name: string, parentId?: s
 }
 
 /**
- * Ensures a folder exists by searching first and creating if not found.
+ * Ensures a folder path exists (e.g., "src/components") by creating segments as needed.
  */
-export async function ensureFolder(accessToken: string, name: string, parentId?: string): Promise<string> {
-  const existingId = await findFolder(accessToken, name, parentId);
-  if (existingId) return existingId;
+export async function ensureFolder(accessToken: string, path: string, parentId?: string): Promise<string> {
+  const segments = path.split('/').filter(Boolean);
+  let currentParentId = parentId;
 
-  const metadata: any = {
-    name,
-    mimeType: 'application/vnd.google-apps.folder'
-  };
-  if (parentId) metadata.parents = [parentId];
-  
-  const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(metadata)
-  });
-  
-  if (!createRes.ok) {
-    const errData = await createRes.json().catch(() => ({}));
-    throw new Error(`Drive folder creation failed (${createRes.status}): ${errData.error?.message || createRes.statusText}`);
+  for (const segment of segments) {
+    const existingId = await findFolder(accessToken, segment, currentParentId);
+    if (existingId) {
+      currentParentId = existingId;
+    } else {
+      // Create segment
+      const metadata: any = {
+        name: segment,
+        mimeType: 'application/vnd.google-apps.folder'
+      };
+      if (currentParentId) metadata.parents = [currentParentId];
+      
+      const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(metadata)
+      });
+      
+      if (!createRes.ok) {
+        const errData = await createRes.json().catch(() => ({}));
+        throw new Error(`Drive folder creation failed (${createRes.status}): ${errData.error?.message || createRes.statusText}`);
+      }
+
+      const folder = await createRes.json();
+      currentParentId = folder.id;
+    }
   }
 
-  const folder = await createRes.json();
-  return folder.id;
+  if (!currentParentId) throw new Error("Could not resolve folder ID for path: " + path);
+  return currentParentId;
 }
 
 /**
