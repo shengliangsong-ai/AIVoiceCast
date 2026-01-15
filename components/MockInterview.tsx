@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { MockInterviewRecording, TranscriptItem, CodeFile, UserProfile, Channel, CodeProject, RecordingSession } from '../types';
 import { auth } from '../services/firebaseConfig';
@@ -418,7 +419,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         },
         onToolCall: async (toolCall: any) => {
           for (const fc of toolCall.functionCalls) {
-            // Fix: Cast args to any to handle 'unknown' properties from FunctionCall.args
             const args = fc.args as any;
             if (fc.name === 'get_current_code') {
               const allFiles = Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[];
@@ -451,12 +451,13 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
     if (isEndingRef.current) return;
     isEndingRef.current = true;
     setIsEnding(true);
+    
+    // 1. Immediate Clean-up
     if (timerRef.current) clearInterval(timerRef.current);
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') mediaRecorderRef.current.stop();
     if (liveServiceRef.current) { liveServiceRef.current.disconnect(); setIsAiConnected(false); }
     
     setIsGeneratingReport(true);
-    setSynthesisStep('Analyzing Neural Transcript...');
+    setSynthesisStep('Freezing Neural State...');
     setSynthesisPercent(10);
     
     try {
@@ -464,71 +465,118 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         const currentFiles = Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[];
         const latestTranscript = transcriptRef.current;
         
-        setSynthesisStep('Persisting Final Workspace...');
-        setSynthesisPercent(30);
-        await saveCodeProject({ id: interviewId, name: `Interview_${mode}_${new Date().toLocaleDateString()}`, files: currentFiles, lastModified: Date.now(), accessLevel: 'restricted', allowedUserIds: currentUser ? [currentUser.uid] : [] });
-
-        const historyText = latestTranscript.map(t => `${t.role.toUpperCase()}: ${t.text}`).join('\n');
-        const codeText = currentFiles.map(f => `FILE: ${f.name}\nCONTENT:\n${f.content}`).join('\n\n');
-
-        setSynthesisStep('Synthesizing Neural Feedback...');
-        setSynthesisPercent(60);
-        
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        const prompt = `Analyze this technical interview evaluation. 
-        Mode: ${mode}. Candidate: ${intervieweeLinkedin}. Interviewer: ${interviewerLinkedin}. Job: ${jobDesc}.
-        History: ${historyText}. Workspace: ${codeText}. 
-        Return JSON matching this schema: { 
-            "score": integer(0-100), 
-            "technicalSkills": "summary", 
-            "communication": "summary", 
-            "collaboration": "summary", 
-            "strengths": ["string"], 
-            "areasForImprovement": ["string"], 
-            "verdict": "string", 
-            "summary": "long text", 
-            "optimizedStarStories": [ { "title": "string", "situation": "string", "task": "string", "action": "string", "result": "string", "coachTip": "string" } ],
-            "learningMaterial": "Markdown" 
-        }`;
-
-        const response = await ai.models.generateContent({ 
-            model: 'gemini-3-flash-preview', 
-            contents: prompt, 
-            config: { responseMimeType: 'application/json' } 
+        // 2. Final code push
+        await saveCodeProject({ 
+            id: interviewId, 
+            name: `Interview_${mode}_${new Date().toLocaleDateString()}`, 
+            files: currentFiles, 
+            lastModified: Date.now(), 
+            accessLevel: 'restricted', 
+            allowedUserIds: currentUser ? [currentUser.uid] : [] 
         });
-        
-        // Fix: Use response.text and ensure it's a string before JSON parsing
-        const text = response.text;
+
+        // 3. AI Report Synthesis (Fault Tolerant)
         let reportData: MockInterviewReport | null = null;
-        if (typeof text === 'string') {
-            try {
-                reportData = JSON.parse(text) as MockInterviewReport;
-            } catch(e) {
-                console.error("JSON parse failed", e);
-            }
+        try {
+            setSynthesisStep('Synthesizing Neural Feedback...');
+            setSynthesisPercent(30);
+            const historyText = latestTranscript.map(t => `${t.role.toUpperCase()}: ${t.text}`).join('\n');
+            const codeText = currentFiles.map(f => `FILE: ${f.name}\nCONTENT:\n${f.content}`).join('\n\n');
+
+            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            const prompt = `Analyze this technical interview evaluation. 
+            Mode: ${mode}. Candidate: ${intervieweeLinkedin}. Interviewer: ${interviewerLinkedin}. Job: ${jobDesc}.
+            History: ${historyText}. Workspace: ${codeText}. 
+            Return JSON matching this schema: { 
+                "score": integer(0-100), 
+                "technicalSkills": "summary", 
+                "communication": "summary", 
+                "collaboration": "summary", 
+                "strengths": ["string"], 
+                "areasForImprovement": ["string"], 
+                "verdict": "string", 
+                "summary": "long text", 
+                "optimizedStarStories": [ { "title": "string", "situation": "string", "task": "string", "action": "string", "result": "string", "coachTip": "string" } ],
+                "learningMaterial": "Markdown" 
+            }`;
+
+            const response = await ai.models.generateContent({ 
+                model: 'gemini-3-flash-preview', 
+                contents: prompt, 
+                config: { responseMimeType: 'application/json' } 
+            });
+            
+            const rawText = response.text || "";
+            const cleanJson = rawText.replace(/^```json/i, '').replace(/```$/i, '').trim();
+            reportData = JSON.parse(cleanJson) as MockInterviewReport;
+        // Fix: Explicitly type reportErr as any to avoid access issues on unknown type
+        } catch (reportErr: any) {
+            console.warn("AI Report synthesis failed, using fallback.", reportErr);
+            reportData = {
+                score: 0, technicalSkills: "Incomplete", communication: "Incomplete", collaboration: "Incomplete",
+                strengths: ["Session ended"], areasForImprovement: ["Feedback synthesis interrupted"],
+                verdict: "Reject", summary: "The AI was unable to synthesize a detailed report for this session, but the raw transcript and code have been preserved.",
+                learningMaterial: "# Session Archive\nDetailed analysis failed."
+            };
         }
         setReport(reportData);
         
+        // 4. GUARANTEED METADATA SAVE
         setSynthesisStep('Archiving Interview Assets...');
-        setSynthesisPercent(85);
-        const videoBlob = new Blob(videoChunksRef.current, { type: 'video/webm' });
-        const recording: MockInterviewRecording = { id: interviewId, userId: currentUser?.uid || 'guest', userName: currentUser?.displayName || 'Guest', userPhoto: currentUser?.photoURL, mode, language, jobDescription: jobDesc, interviewerInfo: interviewerLinkedin, intervieweeInfo: intervieweeLinkedin, timestamp: Date.now(), videoUrl: '', transcript: latestTranscript, feedback: JSON.stringify(reportData || {}), visibility };
+        setSynthesisPercent(60);
+        
+        const recording: MockInterviewRecording = { 
+            id: interviewId, 
+            userId: currentUser?.uid || 'guest', 
+            userName: currentUser?.displayName || 'Guest', 
+            userPhoto: currentUser?.photoURL || undefined, 
+            mode, 
+            language, 
+            jobDescription: jobDesc, 
+            interviewerInfo: interviewerLinkedin, 
+            intervieweeInfo: intervieweeLinkedin, 
+            timestamp: Date.now(), 
+            videoUrl: '', 
+            transcript: latestTranscript, 
+            feedback: JSON.stringify(reportData || {}), 
+            visibility 
+        };
+
+        // 5. Video Processing (Async, but awaited for status)
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+            mediaRecorderRef.current.stop();
+            // Wait for dataavailable and onstop triggers to populate videoChunksRef
+            await new Promise(resolve => setTimeout(resolve, 1500)); 
+        }
 
         if (currentUser) {
+            setSynthesisStep('Syncing to Cloud Ledger...');
+            setSynthesisPercent(80);
+            
             const token = getDriveToken();
-            if (token) {
-                const folderId = await ensureFolder(token, 'CodeStudio');
-                const driveFileId = await uploadToDrive(token, await ensureFolder(token, 'Interviews', folderId), `Interview_${interviewId}.webm`, videoBlob);
-                recording.videoUrl = `drive://${driveFileId}`;
+            if (token && videoChunksRef.current.length > 0) {
+                // Fix: Cast token as string to satisfy parameter type 'string' and avoid unknown property access in nested catch
+                try {
+                    const videoBlob = new Blob(videoChunksRef.current, { type: 'video/webm' });
+                    const folderId = await ensureCodeStudioFolder(token as string);
+                    const driveFileId = await uploadToDrive(token as string, await ensureFolder(token as string, 'Interviews', folderId), `Interview_${interviewId}.webm`, videoBlob);
+                    recording.videoUrl = `drive://${driveFileId}`;
+                } catch(e: any) {
+                    console.error("Video sync failed, saving metadata anyway.", e);
+                }
             }
             await saveInterviewRecording(recording);
         }
 
         setSynthesisPercent(100);
         setSynthesisStep('Refraction Complete');
-        setTimeout(() => { setIsGeneratingReport(false); setView('report'); }, 800);
+        setTimeout(() => { 
+            setIsGeneratingReport(false); 
+            setView('report'); 
+        }, 800);
+
     } catch (e: any) { 
-        console.error("Report synthesis failed", e);
+        console.error("Critical failure during end-session pipeline", e);
         setIsGeneratingReport(false); 
         setView('hub'); 
     } finally {
