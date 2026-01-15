@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { CodeProject, CodeFile, UserProfile, Channel, CursorPosition, CloudItem, TranscriptItem } from '../types';
 import { listCloudDirectory, saveProjectToCloud, deleteCloudItem, createCloudFolder, subscribeToCodeProject, saveCodeProject, updateCodeFile, updateCursor, claimCodeProjectLock, updateProjectActiveFile, deleteCodeFile, updateProjectAccess } from '../services/firestoreService';
-// Added downloadDriveFileAsBlob to imports
 import { ensureCodeStudioFolder, ensureFolder, listDriveFiles, readDriveFile, saveToDrive, deleteDriveFile, createDriveFolder, DriveFile, moveDriveFile, getDriveFileStreamUrl, getDrivePreviewUrl, findFolder, downloadDriveFileAsBlob } from '../services/googleDriveService';
 import { connectGoogleDrive, getDriveToken, signInWithGoogle, signInWithGitHub } from '../services/authService';
 import { fetchRepoInfo, fetchRepoContents, fetchFileContent, updateRepoFile, fetchUserRepos, fetchRepoSubTree, deleteRepoFile, renameRepoFile } from '../services/githubService';
@@ -130,7 +129,7 @@ const FileTreeItem = ({ node, depth, activeId, onSelect, onToggle, onDelete, onS
         if (node.type === 'folder') {
             onToggle(node);
         } else {
-            onSelect(node);
+            if (onSelect) onSelect(node);
         }
     };
 
@@ -195,7 +194,7 @@ const FileTreeItem = ({ node, depth, activeId, onSelect, onToggle, onDelete, onS
                             node={child} 
                             depth={depth + 1} 
                             activeId={activeId} 
-                            onSelect={node.type === 'file' ? onSelect : undefined} 
+                            onSelect={onSelect} 
                             onToggle={onToggle}
                             onDelete={onDelete}
                             onShare={onShare}
@@ -883,10 +882,10 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
     name: "update_active_file",
     description: "Updates the content of the currently focused file in the editor.",
     parameters: {
-      type: GenType.OBJECT,
+      type: Type.OBJECT,
       properties: {
-        new_content: { type: GenType.STRING, description: "The complete new content of the file." },
-        summary: { type: GenType.STRING, description: "A brief summary of what you changed." }
+        new_content: { type: Type.STRING, description: "The complete new content of the file." },
+        summary: { type: Type.STRING, description: "A brief summary of what you changed." }
       },
       required: ["new_content"]
     }
@@ -896,11 +895,11 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
     name: "create_new_file",
     description: "Creates a new file in the workspace and switches focus to it.",
     parameters: {
-      type: GenType.OBJECT,
+      type: Type.OBJECT,
       properties: {
-        filename: { type: GenType.STRING, description: "The name of the file." },
-        content: { type: GenType.STRING, description: "The initial code content." },
-        directory_path: { type: GenType.STRING, description: "Optional path." }
+        filename: { type: Type.STRING, description: "The name of the file." },
+        content: { type: Type.STRING, description: "The initial code content." },
+        directory_path: { type: Type.STRING, description: "Optional path." }
       },
       required: ["filename", "content"]
     }
@@ -910,10 +909,10 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
     name: "create_directory",
     description: "Creates a new directory.",
     parameters: {
-      type: GenType.OBJECT,
+      type: Type.OBJECT,
       properties: {
-        directory_name: { type: GenType.STRING },
-        parent_path: { type: GenType.STRING }
+        directory_name: { type: Type.STRING },
+        parent_path: { type: Type.STRING }
       },
       required: ["directory_name"]
     }

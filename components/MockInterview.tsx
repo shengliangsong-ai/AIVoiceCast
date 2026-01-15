@@ -14,7 +14,7 @@ import {
   SidebarClose, Code, MessageSquare, Sparkles, Languages, Clock, Camera, Bot, CloudUpload, 
   Trophy, BarChart3, ClipboardCheck, Star, Upload, FileUp, Linkedin, FileCheck, Edit3, 
   BookOpen, Lightbulb, Target, ListChecks, MessageCircleCode, GraduationCap, Lock, Globe, 
-  ExternalLink, PlayCircle, RefreshCw, FileDown, Briefcase, Package, Code2, StopCircle, 
+  ExternalLink, PlayCircle, RefreshCcw, FileDown, Briefcase, Package, Code2, StopCircle, 
   Youtube, AlertCircle, Eye, EyeOff, SaveAll, Wifi, WifiOff, Activity, ShieldAlert, 
   Timer, FastForward, ClipboardList, Layers, Bug, Flag, Minus, Fingerprint, FileSearch, 
   RefreshCcw, HeartHandshake, Speech, Send, History, Compass, Square, CheckSquare, 
@@ -320,7 +320,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       const filesToInit: CodeFile[] = [{ name: initialFilename, path: `drive://${uuid}/${initialFilename}`, language: language.toLowerCase() as any, content: `/* \n * Interview: ${mode}\n * Waiting for interviewer to provide problem 1...\n */\n\n`, loaded: true, isDirectory: false, isModified: false }];
       filesToInit.forEach(f => activeCodeFilesMapRef.current.set(f.path, f));
       setInitialStudioFiles(filesToInit);
-      // Fixed: Casting currentSessionId to string to fix TS error
       setActiveFilePath(filesToInit[0].path);
       await saveCodeProject({ id: uuid, name: `Interview_${mode}_${new Date().toLocaleDateString()}`, files: filesToInit, lastModified: Date.now(), accessLevel: 'restricted', allowedUserIds: currentUser ? [currentUser.uid] : [] });
 
@@ -474,8 +473,9 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
 
         setSynthesisStep('Synthesizing Neural Feedback...');
         setSynthesisPercent(60);
-        // Fixed: Explicitly casting process.env.API_KEY to string to fix TS unknown error
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+        
+        /* Fix line 578: Explicitly cast process.env.API_KEY to any to resolve unknown type mismatch */
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as any });
         const prompt = `Analyze this technical interview evaluation. 
         Mode: ${mode}. Candidate: ${intervieweeLinkedin}. Interviewer: ${interviewerLinkedin}. Job: ${jobDesc}.
         History: ${historyText}. Workspace: ${codeText}. 
@@ -498,7 +498,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
             config: { responseMimeType: 'application/json' } 
         });
         
-        // Fixed: Casting text to string and providing fallback to prevent unknown error
+        /* Fix: Cast text response to avoid unknown type error */
         const text = (response.text as string) || '';
         let reportData: MockInterviewReport | null = null;
         if (text) {
