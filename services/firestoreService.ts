@@ -3,8 +3,8 @@ import {
   collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, addDoc, query, where, 
   orderBy, limit, onSnapshot, runTransaction, increment, arrayUnion, arrayRemove, 
   Timestamp, writeBatch, documentId
-} from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL, listAll, getMetadata, deleteObject } from 'firebase/storage';
+} from '@firebase/firestore';
+import { ref, uploadBytes, getDownloadURL, listAll, getMetadata, deleteObject } from '@firebase/storage';
 import { db, auth, storage } from './firebaseConfig';
 import { 
   UserProfile, Channel, ChannelStats, Comment, Attachment, Group, ChatChannel, RealTimeMessage, 
@@ -1022,7 +1022,7 @@ export async function getJobPostings(): Promise<JobPosting[]> {
 }
 
 export async function getJobPosting(id: string): Promise<JobPosting | null> {
-    if (!db) return null;
+    if (!db || !id) return null;
     const snap = await getDoc(doc(db, JOBS_COLLECTION, id));
     return snap.exists() ? ({ ...snap.data(), id: snap.id } as JobPosting) : null;
 }

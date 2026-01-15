@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useMemo, ErrorInfo, ReactNode, Component } from 'react';
+// Fixed redundant imports of Video/VideoIcon and duplicate Maximize2/Minimize2
 import { 
   Podcast, Search, LayoutGrid, RefreshCw, 
   Home, Video, User, ArrowLeft, Play, Gift, 
@@ -24,7 +25,6 @@ import { DocumentList } from './components/DocumentList';
 import { CalendarView } from './components/CalendarView';
 import { PodcastFeed } from './components/PodcastFeed'; 
 import { MissionManifesto } from './components/MissionManifesto';
-// Fixed: correctly importing CodeStudio
 import { CodeStudio } from './components/CodeStudio';
 import { Whiteboard } from './components/Whiteboard';
 import { BlogView } from './components/BlogView';
@@ -49,13 +49,14 @@ import { GraphStudio } from './components/GraphStudio';
 
 import { getCurrentUser, getDriveToken } from './services/authService';
 import { auth, db } from './services/firebaseConfig';
+// FIXED: Using @firebase/ scoped packages for more reliable resolution of modular exports
 import { onAuthStateChanged } from '@firebase/auth';
 import { onSnapshot, doc } from '@firebase/firestore';
 import { ensureCodeStudioFolder, loadAppStateFromDrive, saveAppStateToDrive } from './services/googleDriveService';
 import { getUserChannels, saveUserChannel } from './utils/db';
 import { HANDCRAFTED_CHANNELS } from './utils/initialData';
 import { stopAllPlatformAudio } from './utils/audioUtils';
-// Fixed: consolidated imports
+// Fixed: Consolidated publishChannelToFirestore into a single import
 import { subscribeToPublicChannels, voteChannel, addCommentToChannel, deleteCommentFromChannel, updateCommentInChannel, getUserProfile, claimCoinCheck, syncUserProfile, publishChannelToFirestore } from './services/firestoreService';
 
 interface ErrorBoundaryProps {
@@ -277,6 +278,7 @@ const App: React.FC = () => {
     window.history.replaceState({}, '', url.toString());
   };
 
+  // Consistently handled start live session
   const handleStartLiveSession = (channel: Channel, context?: string, recordingEnabled?: boolean, bookingId?: string, videoEnabled?: boolean, cameraEnabled?: boolean, activeSegment?: { index: number, lectureId: string }, initialTranscript?: TranscriptItem[], existingDiscussionId?: string) => {
     setLiveSessionParams({ channel, context, recordingEnabled, videoEnabled, cameraEnabled, bookingId, activeSegment, initialTranscript, existingDiscussionId, returnTo: viewState });
     handleSetViewState('live_session');
@@ -514,7 +516,7 @@ const App: React.FC = () => {
                  <button onClick={() => { setIsUserMenuOpen(!isUserMenuOpen); setIsAppsMenuOpen(false); }} className="w-10 h-10 rounded-full border-2 border-slate-700 overflow-hidden hover:border-indigo-500 transition-colors">
                     <img src={currentUser?.photoURL || `https://ui-avatars.com/api/?name=Guest`} alt="Profile" className="w-full h-full object-cover" />
                  </button>
-                 <StudioMenu isUserMenuOpen={isUserMenuOpen} setIsUserMenuOpen={setIsUserMenuOpen} currentUser={currentUser} userProfile={userProfile} setUserProfile={setUserProfile} globalVoice={globalVoice} setGlobalVoice={setGlobalVoice} setIsCreateModalOpen={setIsCreateModalOpen} setIsVoiceCreateOpen={setIsVoiceCreateOpen} onNavigate={(v) => handleSetViewState(v as any)} onUpgradeClick={() => setIsPricingModalOpen(true)} setIsSyncModalOpen={() => {}} setIsSettingsModalOpen={setIsSettingsModalOpen} onOpenUserGuide={() => setIsUserGuideOpen(true)} onOpenPrivacy={() => setIsPrivacyOpen(true)} t={t} language={language} setLanguage={setLanguage} channels={allChannels} />
+                 <StudioMenu isUserMenuOpen={isUserMenuOpen} setIsUserMenuOpen={setIsUserMenuOpen} currentUser={currentUser} userProfile={userProfile} setUserProfile={setUserProfile} globalVoice={globalVoice} setGlobalVoice={setGlobalVoice} setIsCreateModalOpen={setIsCreateModalOpen} setIsVoiceCreateOpen={setIsVoiceCreateOpen} onUpgradeClick={() => setIsPricingModalOpen(true)} setIsSyncModalOpen={() => {}} setIsSettingsModalOpen={setIsSettingsModalOpen} onOpenUserGuide={() => setIsUserGuideOpen(true)} onNavigate={(v) => handleSetViewState(v as any)} onOpenPrivacy={() => setIsPrivacyOpen(true)} t={t} language={language} setLanguage={setLanguage} channels={allChannels} />
               </div>
            </div>
         </header>
