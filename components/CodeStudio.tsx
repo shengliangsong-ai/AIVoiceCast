@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { CodeProject, CodeFile, UserProfile, Channel, CursorPosition, CloudItem, TranscriptItem } from '../types';
 import { ArrowLeft, Save, Plus, Github, Cloud, HardDrive, Code, X, ChevronRight, ChevronDown, File, Folder, DownloadCloud, Loader2, CheckCircle, AlertTriangle, Info, FolderPlus, FileCode, RefreshCw, LogIn, CloudUpload, Trash2, ArrowUp, Edit2, FolderOpen, MoreVertical, Send, MessageSquare, Bot, Mic, MicOff, Sparkles, SidebarClose, SidebarOpen, Users, Eye, FileText as FileTextIcon, Image as ImageIcon, StopCircle, Minus, Maximize2, Minimize2, Lock, Unlock, Share2, Terminal as TerminalIcon, Copy, WifiOff, PanelRightClose, PanelRightOpen, PanelLeftClose, PanelLeftOpen, Monitor, Laptop, PenTool, Edit3, ShieldAlert, ZoomIn, ZoomOut, Columns, Rows, Grid2X2, Square as SquareIcon, GripVertical, GripHorizontal, FileSearch, Indent, Wand2, Check, Link, MousePointer2, Activity, Key, Search, FilePlus, FileUp, Play, Trash, ExternalLink, GraduationCap, ShieldCheck, Youtube, Video, Zap, Download, Headphones, Radio } from 'lucide-react';
 import { listCloudDirectory, saveProjectToCloud, deleteCloudItem, createCloudFolder, subscribeToCodeProject, saveCodeProject, updateCodeFile, updateCursor, claimCodeProjectLock, updateProjectActiveFile, deleteCodeFile, updateProjectAccess, sendShareNotification, deleteCloudFolderRecursive } from '../services/firestoreService';
-/* Added ensureFolder to the imports below */
 import { ensureCodeStudioFolder, ensureFolder, listDriveFiles, readDriveFile, saveToDrive, deleteDriveFile, createDriveFolder, DriveFile, moveDriveFile, shareFileWithEmail, getDriveFileSharingLink, downloadDriveFileAsBlob, getDriveFileStreamUrl, getDrivePreviewUrl, findFolder } from '../services/googleDriveService';
 import { connectGoogleDrive, getDriveToken, signInWithGoogle, signInWithGitHub } from '../services/authService';
 import { fetchRepoInfo, fetchRepoContents, fetchFileContent, updateRepoFile, fetchUserRepos, fetchRepoSubTree, deleteRepoFile } from '../services/githubService';
@@ -1112,7 +1111,6 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       let parentDirId = driveRootId || undefined;
       if (activeTab === 'drive' && driveToken && dirPath) {
           try {
-              /* Fixed: ensureFolder called on line 1115 is now imported from services/googleDriveService */
               parentDirId = await ensureFolder(driveToken, dirPath, driveRootId || undefined);
           } catch (e) {
               console.error("Folder creation failed during file creation", e);
@@ -1166,6 +1164,26 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       }
       
       await refreshExplorer();
+  };
+
+  const handleCreateDirectory = async (dirNameInput?: string, parentPath?: string) => {
+    const dirName = dirNameInput || prompt("Enter directory name:", "new-folder");
+    if (!dirName) return;
+
+    setIsExplorerLoading(true);
+    try {
+      if (activeTab === 'drive' && driveToken) {
+        const parentId = parentPath ? await findFolder(driveToken, parentPath, driveRootId || undefined) : (driveRootId || undefined);
+        await createDriveFolder(driveToken, dirName, parentId || undefined);
+      } else if (activeTab === 'cloud' && currentUser) {
+        await createCloudFolder(`projects/${currentUser.uid}${parentPath ? '/' + parentPath : ''}`, dirName);
+      }
+      await refreshExplorer();
+    } catch (e: any) {
+      alert("Failed to create directory: " + e.message);
+    } finally {
+      setIsExplorerLoading(false);
+    }
   };
 
   const toggleFolder = async (node: TreeNode) => {
@@ -1638,7 +1656,12 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
               <div className="flex-1 flex flex-col overflow-hidden">
                   <div className="p-3 border-b border-slate-800 flex gap-1.5 shrink-0 bg-slate-900/50">
                       <button onClick={refreshExplorer} disabled={isExplorerLoading} className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700 transition-colors" title="Refresh Explorer">{isExplorerLoading ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}</button>
-                      {!isSharedViewOnly && <button onClick={() => handleCreateNewFile()} className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white py-1.5 rounded-lg text-[10px] font-black uppercase flex items-center justify-center gap-1.5 shadow-lg transition-all active:scale-95"><FilePlus size={14}/> New File</button>}
+                      {!isSharedViewOnly && (
+                        <div className="flex-1 flex gap-1">
+                          <button onClick={() => handleCreateNewFile()} className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white py-1.5 rounded-lg text-[10px] font-black uppercase flex items-center justify-center gap-1.5 shadow-lg transition-all active:scale-95" title="New File"><FilePlus size={14}/> File</button>
+                          <button onClick={() => handleCreateDirectory()} className="flex-1 bg-slate-800 hover:bg-slate-700 text-indigo-400 py-1.5 rounded-lg text-[10px] font-black uppercase flex items-center justify-center gap-1.5 border border-slate-700 shadow-lg transition-all active:scale-95" title="New Directory"><FolderPlus size={14}/> Dir</button>
+                        </div>
+                      )}
                   </div>
                   
                   {activeTab === 'session' && (
