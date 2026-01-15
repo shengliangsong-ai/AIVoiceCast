@@ -14,17 +14,6 @@ import { generateSecureId } from '../utils/idUtils';
 import { GoogleGenAI, FunctionDeclaration, Type } from '@google/genai';
 import Editor from '@monaco-editor/react';
 
-/**
- * NEURAL PRISM CODE STUDIO v4.5.1
- * 
- * STATE MANAGEMENT DOCS:
- * 1. The workspace is a Virtual File System (VFS) mapped to Google Drive or Cloud.
- * 2. AI Agency: The assistant uses tool calling for create_directory, list_directory, and move_file.
- * 3. Resiliency: On reconnect, we bypass stale session memory by injecting a 
- *    'Workspace Map' into the System Instruction. This allows the AI to "Check Reality"
- *    and recognize previously created artifacts (files/folders) without manual re-prompting.
- */
-
 interface TreeNode {
   id: string;
   name: string;
