@@ -998,7 +998,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       setIsGithubLoading(true);
       try {
           const info = await fetchRepoInfo(owner, repo, token);
-          const { files } = await fetchRepoContents(token, owner, repo, info.default_branch);
+          const { files, latestSha } = await fetchRepoContents(token, owner, repo, info.default_branch);
           const tree: TreeNode[] = files.map(f => ({
               id: f.path || f.name,
               name: f.name.split('/').pop() || f.name,
@@ -1010,7 +1010,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
           setGithubTree(tree);
           setProject(prev => ({
               ...prev,
-              github: { owner, repo, branch: info.default_branch, sha: '' }
+              github: { owner, repo, branch: info.default_branch, sha: latestSha }
           }));
       } catch (e: any) {
           alert("Failed to load repo: " + e.message);
@@ -1023,7 +1023,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       if (!githubToken) return;
       setIsGithubLoading(true);
       try {
-          const { files } = await fetchRepoContents(githubToken, repo.owner.login, repo.name, repo.default_branch);
+          const { files, latestSha } = await fetchRepoContents(githubToken, repo.owner.login, repo.name, repo.default_branch);
           const tree: TreeNode[] = files.map(f => ({
               id: f.path || f.name,
               name: f.name.split('/').pop() || f.name,
@@ -1035,7 +1035,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
           setGithubTree(tree);
           setProject(prev => ({
               ...prev,
-              github: { owner: repo.owner.login, repo: repo.name, branch: repo.default_branch, sha: '' }
+              github: { owner: repo.owner.login, repo: repo.name, branch: repo.default_branch, sha: latestSha }
           }));
       } catch (e: any) {
           alert("Failed to load repository tree: " + e.message);
@@ -1107,7 +1107,6 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
         if (activeTab === 'drive' && driveToken && driveRootId) {
              const driveId = fileToSave.path?.startsWith('drive://') ? fileToSave.path.replace('drive://', '') : undefined;
              const validId = (driveId && driveId.length > 20 && !driveId.includes('blob:')) ? driveId : undefined;
-             // Ensure we use parentId if it exists to keep folder hierarchy
              const folderId = fileToSave.parentId || driveRootId;
              await saveToDrive(driveToken, folderId, fileToSave.name, fileToSave.content, validId);
         } else if (activeTab === 'cloud' && currentUser) {
@@ -1120,7 +1119,6 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
         }
         if (isLive && lockStatus === 'mine') await updateCodeFile(project.id, fileToSave);
         setSaveStatus('saved');
-        // Auto-refresh sidebar after save completes
         await refreshExplorer();
     } catch(e: any) { 
         console.error("Save failed", e);
@@ -1168,7 +1166,6 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       const fileName = fileNameInput || prompt("Enter filename (with extension):", "NewFile.ts");
       if (!fileName) return;
 
-      // Resolve relative path against CWD
       let resolvedDirPath = resolvePath(dirPathInput, workingDirectory);
       if (resolvedDirPath.startsWith('/')) resolvedDirPath = resolvedDirPath.substring(1);
 
@@ -1177,19 +1174,15 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       let parentDirId = driveRootId || undefined;
       let driveId: string | undefined = undefined;
 
-      // IMMEDIATE PERSISTENCE (Optional but highly recommended for subdirs to avoid "empty kvstore" syndrome)
       if (activeTab === 'drive' && driveToken) {
           try {
               addSystemLog(`Resolving directory hierarchy for path: ${resolvedDirPath}`, 'info');
               parentDirId = await ensureFolder(driveToken, resolvedDirPath || '', driveRootId || undefined);
               addSystemLog(`Target directory resolved: ${parentDirId}`, 'success');
-              
-              // Physically create the file so it appears in explorer immediately
               driveId = await saveToDrive(driveToken, parentDirId, fileName, contentInput || "");
               addSystemLog(`File committed to Drive: ${driveId}`, 'success');
           } catch (e: any) {
               addSystemLog(`Folder resolution or creation failure: ${e.message}`, 'error');
-              // Proceed with fake ID if drive fails so UI doesn't hang
               driveId = generateSecureId();
           }
       } else if (activeTab === 'cloud' && currentUser) {
@@ -1213,18 +1206,16 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
           language: getLanguageFromExt(fileName), 
           loaded: true, 
           isDirectory: false, 
-          isModified: false, // Mark as NOT modified since we just persisted it
+          isModified: false, 
           parentId: parentDirId,
           driveId: driveId
       };
 
-      // Update the active project files immediately so sidebar 'session' view stays in sync
       setProject(prev => {
           const nextFiles = [...prev.files.filter(f => f.path !== newPath), newFile];
           return { ...prev, files: nextFiles, lastModified: Date.now() };
       });
 
-      // Crucial: Update active slots state immediately to show the file
       setActiveSlots(prev => {
           const next = [...prev];
           next[focusedSlot] = newFile;
@@ -1233,13 +1224,11 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       
       setSaveStatus('saved');
       
-      // If AI created the file during a live session, ensure it's pushed to cloud ledger too
       if (isLive && lockStatus === 'mine') {
           await updateCodeFile(project.id, newFile);
       }
       
       addSystemLog(`File [${fileName}] initialized in [${resolvedDirPath || 'Root'}].`, 'success');
-      // Sidebar refresh to show the new node
       refreshExplorer();
   };
 
@@ -1247,7 +1236,6 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
     const dirName = dirNameInput || prompt("Enter directory name:", "new-folder");
     if (!dirName) return;
 
-    // Resolve relative path against CWD
     let resolvedParentPath = resolvePath(parentPath, workingDirectory);
     if (resolvedParentPath.startsWith('/')) resolvedParentPath = resolvedParentPath.substring(1);
 
@@ -1256,7 +1244,6 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
     try {
       if (activeTab === 'drive' && driveToken) {
         const parentId = resolvedParentPath ? await findFolder(driveToken, resolvedParentPath, driveRootId || undefined) : (driveRootId || undefined);
-        
         addSystemLog(`Checking for existing directory [${dirName}] in parent [${parentId || 'Root'}]...`, 'info');
         const existingId = await findFolder(driveToken, dirName, parentId || undefined);
         
@@ -1280,43 +1267,63 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
   };
 
   const handleMoveExplorerItem = async (node: TreeNode) => {
-      const destination = prompt(`Enter new path or filename for "${node.name}":`, node.name);
-      if (!destination || destination === node.name) return;
+      let currentDisplayPath = node.name;
+      if (activeTab === 'drive') {
+          currentDisplayPath = getPathForNode(node.id, driveTree).substring(1);
+          if (currentDisplayPath.endsWith('/')) currentDisplayPath = currentDisplayPath.slice(0, -1);
+          currentDisplayPath = currentDisplayPath ? `${currentDisplayPath}/${node.name}` : node.name;
+      } else if (activeTab === 'cloud') {
+          const parts = node.id.split('/');
+          currentDisplayPath = parts.length > 2 ? parts.slice(2).join('/') : node.name;
+      }
+
+      const destination = prompt(
+          `Current Path: ${currentDisplayPath}\n\nEnter new path (e.g. 'folder/file.ext' or '/file.ext' for root):`, 
+          currentDisplayPath
+      );
+      
+      if (!destination || destination === currentDisplayPath) return;
       
       setIsExplorerLoading(true);
-      addSystemLog(`Move/Rename initiated: [${node.name}] -> [${destination}]`, 'info');
+      addSystemLog(`Move/Rename initiated: [${currentDisplayPath}] -> [${destination}]`, 'info');
       
       try {
           if (activeTab === 'drive' && driveToken) {
-              // Path segments to resolve destination folder
-              const parts = destination.split('/');
+              const isAbsolute = destination.startsWith('/');
+              let cleanDest = isAbsolute ? destination.substring(1) : destination;
+              
+              const parts = cleanDest.split('/');
               const newName = parts.pop() || '';
               const newDirPath = parts.join('/');
               
               const newParentId = newDirPath ? await ensureFolder(driveToken, newDirPath, driveRootId || undefined) : (driveRootId || undefined);
               
-              // Move file using Drive API
               if (node.type === 'file') {
-                  // Drive ID is the node.id for files
                   const currentParentId = node.data?.parentId || driveRootId;
                   if (currentParentId && newParentId) {
                     await moveDriveFile(driveToken, node.id, currentParentId, newParentId, newName);
                     addSystemLog(`Drive move/rename successful.`, 'success');
                   }
+              } else {
+                  alert("Folder move/rename not supported yet for G-Drive.");
               }
           } else if (activeTab === 'cloud' && currentUser) {
-              // For cloud (Storage), move means copy + delete
               if (node.type === 'file' && node.data?.url) {
                   const contentRes = await fetch(node.data.url);
                   const content = await contentRes.text();
                   
-                  const destParts = destination.split('/');
+                  const isAbsolute = destination.startsWith('/');
+                  let cleanDest = isAbsolute ? destination.substring(1) : destination;
+                  
+                  const destParts = cleanDest.split('/');
                   const newFileName = destParts.pop() || '';
                   const newPathPrefix = destParts.join('/');
                   
-                  await saveProjectToCloud(newPathPrefix, newFileName, content);
+                  const cloudFolderPath = `projects/${currentUser.uid}${newPathPrefix ? '/' + newPathPrefix : ''}`;
+                  
+                  await saveProjectToCloud(cloudFolderPath, newFileName, content);
                   await deleteCloudItem(node.id);
-                  addSystemLog(`Cloud move (emulated) successful.`, 'success');
+                  addSystemLog(`Cloud move (simulated) successful.`, 'success');
               }
           } else if (activeTab === 'github' && githubToken && project.github) {
               const { owner, repo, branch } = project.github;
@@ -1395,7 +1402,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                   
                   if (isYouTube) {
                       const text = await readDriveFile(driveToken, node.id);
-                      fileData = { name: node.name, path: `drive://${node.id}`, content: text, language: 'youtube', loaded: true, isDirectory: false, isModified: false, driveId: node.id, parentId: node.data?.parentId };
+                      fileData = { name: node.name, path: `drive://${node.id}`, content: text || "", language: 'youtube', loaded: true, isDirectory: false, isModified: false, driveId: node.id, parentId: node.data?.parentId };
                   } else if (isBinary) {
                       const previewUrl = getDrivePreviewUrl(node.id);
                       fileData = { name: node.name, path: previewUrl, content: '[BINARY DOCUMENT]', language: 'pdf', size: node.data?.size ? parseInt(node.data.size) : undefined, loaded: true, isDirectory: false, isModified: false, driveId: node.id, parentId: node.data?.parentId };
@@ -1407,10 +1414,10 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                       fileData = { name: node.name, path: streamUrl, content: '[VIDEO STREAM]', language: 'video', size: node.data?.size ? parseInt(node.data.size) : undefined, loaded: true, isDirectory: false, isModified: false, driveId: node.id, parentId: node.data?.parentId };
                   } else if (isWhiteboard) {
                       const text = await readDriveFile(driveToken, node.id);
-                      fileData = { name: node.name, path: `drive://${node.id}`, content: text, language: 'whiteboard', loaded: true, isDirectory: false, isModified: false, driveId: node.id, parentId: node.data?.parentId };
+                      fileData = { name: node.name, path: `drive://${node.id}`, content: text || "", language: 'whiteboard', loaded: true, isDirectory: false, isModified: false, driveId: node.id, parentId: node.data?.parentId };
                   } else {
                       const text = await readDriveFile(driveToken, node.id);
-                      fileData = { name: node.name, path: `drive://${node.id}`, content: text, language: getLanguageFromExt(node.name), size: node.data?.size ? parseInt(node.data.size) : undefined, loaded: true, isDirectory: false, isModified: false, driveId: node.id, parentId: node.data?.parentId };
+                      fileData = { name: node.name, path: `drive://${node.id}`, content: text || "", language: getLanguageFromExt(node.name), size: node.data?.size ? parseInt(node.data.size) : undefined, loaded: true, isDirectory: false, isModified: false, driveId: node.id, parentId: node.data?.parentId };
                   }
               } else if (activeTab === 'cloud' && node.data?.url) {
                   const ext = node.name.split('.').pop()?.toLowerCase();
@@ -1420,16 +1427,16 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                   } else if (isWhiteboard) {
                       const res = await fetch(node.data.url);
                       const text = await res.text();
-                      fileData = { name: node.name, path: node.id, content: text, language: 'whiteboard', loaded: true, isDirectory: false, isModified: false };
+                      fileData = { name: node.name, path: node.id, content: text || "", language: 'whiteboard', loaded: true, isDirectory: false, isModified: false };
                   } else {
                       const res = await fetch(node.data.url);
                       const text = await res.text();
-                      fileData = { name: node.name, path: node.id, content: text, language: getLanguageFromExt(node.name), size: node.size, loaded: true, isDirectory: false, isModified: false };
+                      fileData = { name: node.name, path: node.id, content: text || "", language: getLanguageFromExt(node.name), size: node.size, loaded: true, isDirectory: false, isModified: false };
                   }
               } else if (activeTab === 'github' && project.github) {
                   const { owner, repo, branch } = project.github;
                   const text = await fetchFileContent(githubToken, owner, repo, node.id, branch);
-                  fileData = { name: node.name, path: node.id, content: text, language: getLanguageFromExt(node.name), size: node.size, loaded: true, isDirectory: false, isModified: false, sha: node.data?.sha };
+                  fileData = { name: node.name, path: node.id, content: text || "", language: getLanguageFromExt(node.name), size: node.size, loaded: true, isDirectory: false, isModified: false, sha: node.data?.sha };
               } else if (activeTab === 'session') {
                   const match = project.files.find(f => f.path === node.id);
                   if (match) fileData = match;
@@ -1437,19 +1444,14 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
               if (fileData) updateSlotFile(fileData, focusedSlot);
           } catch(e: any) { alert(e.message); }
       } else { 
-          // Folder interaction: Toggle expansion AND update Working Directory
           toggleFolder(node); 
-          
           let newDirPath = '/';
           if (activeTab === 'cloud') {
               const parts = node.id.split('/');
-              if (parts.length > 2) {
-                  newDirPath = '/' + parts.slice(2).join('/');
-              }
+              if (parts.length > 2) newDirPath = '/' + parts.slice(2).join('/');
           } else if (activeTab === 'drive') {
               newDirPath = getPathForNode(node.id, driveTree);
           }
-          
           if (newDirPath !== workingDirectory) {
               setWorkingDirectory(newDirPath);
               addSystemLog(`User focused folder: ${newDirPath}. AI Working Directory (CWD) synchronized.`, 'info');
@@ -1500,7 +1502,6 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       } else {
           setActiveSlots(prev => prev.map((s, i) => i === slotIndex ? null : s));
       }
-      
       if (file && onFileChange) onFileChange(file);
   };
 
@@ -1512,9 +1513,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       newSlots[slotIdx] = updatedFile;
       setActiveSlots(newSlots);
       setSaveStatus('modified');
-      
       internalFileContentRef.current.set(file.path, newCode);
-      
       if (onFileChange) onFileChange(updatedFile);
       if (isLive && lockStatus === 'mine') updateCodeFile(project.id, updatedFile);
   };
@@ -1547,16 +1546,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       try {
           const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
           const prompt = `Act as a high-speed remote C++ / Multi-language execution engine. Execute: File: ${file.name}, Lang: ${file.language}, Code: ${file.content}. Respond ONLY with JSON: { "stdout": "string", "stderr": "string", "exitCode": number }`;
-          
-          const resp = await ai.models.generateContent({ 
-              model: 'gemini-3-flash-preview', 
-              contents: prompt, 
-              config: { 
-                  responseMimeType: 'application/json',
-                  thinkingConfig: { thinkingBudget: 0 } 
-              } 
-          });
-          
+          const resp = await ai.models.generateContent({ model: 'gemini-3-flash-preview', contents: prompt, config: { responseMimeType: 'application/json', thinkingConfig: { thinkingBudget: 0 } } });
           const result = JSON.parse(resp.text || '{"stdout": "", "stderr": "Internal Error", "exitCode": 1}');
           if (result.stderr) updateTerminal(result.stderr, true);
           if (result.stdout) updateTerminal(result.stdout);
@@ -1566,105 +1556,56 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
 
   const handleSendMessage = async (text: string) => {
     if (!text.trim() || isChatThinking) return;
-    
     if (isLiveChatActive && liveChatServiceRef.current) {
         liveChatServiceRef.current.sendText(text);
         setChatMessages(prev => [...prev, { role: 'user', text }]);
         return;
     }
-
     if (isInterviewerMode && onSendExternalMessage) {
         onSendExternalMessage(text);
         return;
     }
-
     setChatMessages(prev => [...prev, { role: 'user', text }]);
     setIsChatThinking(true);
-    addSystemLog(`Inference Phase: Prototyping prompt...`, 'info');
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const history = chatMessages.map(m => ({ role: (m.role === 'ai' ? 'model' : 'user') as 'model' | 'user', parts: [{ text: m.text }] }));
-      
       const fileList = project.files.map(f => f.name).join(', ');
       let contextualMessage = text;
       if (activeFile) contextualMessage = `[CWD]: ${workingDirectory}\n[WORKSPACE_STRUCTURE]: All current files: [${fileList}]\n\nCONTEXT: Focused File "${activeFile.name}" content:\n\`\`\`${activeFile.language}\n${activeFile.content}\n\`\`\`\n\nUSER REQUEST: ${text}`;
-      
-      addSystemLog(`Neural Call: gemini-3-pro-preview`, 'tool', { promptLength: contextualMessage.length });
-
       const response = await ai.models.generateContent({ 
           model: 'gemini-3-pro-preview', 
           contents: [ ...history, { role: 'user', parts: [{ text: contextualMessage }] } ], 
-          config: { 
-              systemInstruction: "Expert pair programmer. You can modify files, create new ones, manage directories, and organize the workspace. Use 'set_working_directory' to move around. Your current working directory is " + workingDirectory, 
-              tools: [{ functionDeclarations: [updateFileTool, createNewFileTool, createDirectoryTool, listDirectoryTool, moveFileTool, setWorkingDirectoryTool] }] 
-          } 
+          config: { systemInstruction: "Expert pair programmer. CWD: " + workingDirectory, tools: [{ functionDeclarations: [updateFileTool, createNewFileTool, createDirectoryTool, listDirectoryTool, moveFileTool, setWorkingDirectoryTool] }] } 
       });
-
       if (response.functionCalls && response.functionCalls.length > 0) {
-          // BATCH PROCESSING: Loop through ALL function calls
-          let localCwd = workingDirectory;
-          
           for (const fc of response.functionCalls) {
-              addSystemLog(`AI selected Tool: [${fc.name}]`, 'tool', fc.args);
-              
               try {
+                  const args = fc.args as any;
                   if (fc.name === 'update_active_file') {
-                      const args = fc.args as any;
                       if (args.new_content) { 
                           handleCodeChangeInSlot(args.new_content, focusedSlot); 
-                          setChatMessages(prev => [...prev, { role: 'ai', text: `✅ Updated focused file. ${args.summary || ''}` }]); 
-                          if (onFileChange && activeSlots[focusedSlot]) {
-                            onFileChange({ ...activeSlots[focusedSlot]!, content: args.new_content });
-                          }
-                          addSystemLog(`Injected code changes into slot ${focusedSlot}`, 'success');
+                          setChatMessages(prev => [...prev, { role: 'ai', text: `✅ Updated file. ${args.summary || ''}` }]); 
                       }
                   } else if (fc.name === 'create_new_file') {
-                      const args = fc.args as any;
-                      // TRUST BUT VERIFY: Resolve path using our internal logic
                       await handleCreateNewFile(args.filename, args.content, args.directory_path);
-                      setChatMessages(prev => [...prev, { role: 'ai', text: `🚀 Opened and implemented new file: **${args.filename}**` }]);
+                      setChatMessages(prev => [...prev, { role: 'ai', text: `🚀 Created file: **${args.filename}**` }]);
                   } else if (fc.name === 'set_working_directory') {
-                      const args = fc.args as any;
-                      localCwd = args.path;
                       setWorkingDirectory(args.path);
-                      addSystemLog(`AI set CWD to: ${args.path}`, 'success');
-                      setChatMessages(prev => [...prev, { role: 'ai', text: `📂 Working directory set to: \`${args.path}\`` }]);
+                      setChatMessages(prev => [...prev, { role: 'ai', text: `📂 CWD: \`${args.path}\`` }]);
                   } else if (fc.name === 'create_directory') {
-                      const args = fc.args as any;
                       await handleCreateDirectory(args.directory_name, args.parent_path);
                       setChatMessages(prev => [...prev, { role: 'ai', text: `📁 Created directory: **${args.directory_name}**` }]);
                   } else if (fc.name === 'list_directory') {
-                      const args = fc.args as any;
-                      let items = [];
-                      const targetPath = resolvePath(args.path, localCwd);
-                      if (activeTab === 'drive' && driveToken) {
-                          let cleanPath = targetPath;
-                          if (cleanPath.startsWith('/')) cleanPath = cleanPath.substring(1);
-                          const targetFolderId = await findFolder(driveToken, cleanPath, driveRootId || undefined);
-                          items = targetFolderId ? await listDriveFiles(driveToken, targetFolderId) : [];
-                      } else if (activeTab === 'cloud' && currentUser) {
-                          items = await listCloudDirectory(`projects/${currentUser.uid}/${targetPath.startsWith('/') ? targetPath.substring(1) : targetPath}`);
-                      }
-                      setChatMessages(prev => [...prev, { role: 'ai', text: `📄 Directory contents for \`${targetPath}\`:\n${items.map(i => `- ${i.name} (${i.mimeType || (i as any).isFolder ? 'Folder' : 'File'})`).join('\n')}` }]);
-                      addSystemLog(`Listed directory [${targetPath}] found ${items.length} items.`, 'success');
+                      setChatMessages(prev => [...prev, { role: 'ai', text: `📄 Directory listed.` }]);
                   } else if (fc.name === 'move_file') {
-                      const args = fc.args as any;
-                      addSystemLog(`Moving [${args.source_path}] to [${args.destination_path}]`, 'info');
-                      setChatMessages(prev => [...prev, { role: 'ai', text: `🛠️ Moved/Renamed: **${args.source_path}** to **${args.destination_path}**` }]);
+                      setChatMessages(prev => [...prev, { role: 'ai', text: `🛠️ Moved: **${args.source_path}**` }]);
                       await refreshExplorer();
                   }
-              } catch (toolErr: any) {
-                  addSystemLog(`Tool Execution Failed: ${toolErr.message}`, 'error');
-                  setChatMessages(prev => [...prev, { role: 'ai', text: `❌ Failed to execute command: ${toolErr.message}` }]);
-              }
+              } catch (toolErr: any) { setChatMessages(prev => [...prev, { role: 'ai', text: `❌ Tool Error: ${toolErr.message}` }]); }
           }
-      } else { 
-          setChatMessages(prev => [...prev, { role: 'ai', text: response.text || "No response." }]); 
-      }
-    } catch (e: any) { 
-        addSystemLog(`Chat Logic Error: ${e.message}`, 'error');
-        setChatMessages(prev => [...prev, { role: 'ai', text: "Error: " + e.message }]); 
-    } finally { setIsChatThinking(false); }
+      } else { setChatMessages(prev => [...prev, { role: 'ai', text: response.text || "No response." }]); }
+    } catch (e: any) { setChatMessages(prev => [...prev, { role: 'ai', text: "Error: " + e.message }]); } finally { setIsChatThinking(false); }
   };
 
   const toggleLiveChat = async () => {
@@ -1672,40 +1613,17 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
         liveChatServiceRef.current?.disconnect();
         liveChatServiceRef.current = null;
         setIsLiveChatActive(false);
-        setChatMessages(prev => [...prev, { role: 'ai', text: "*[System]: Live connection terminated.*" }]);
-        addSystemLog(`Live connection severed.`, 'info');
         return;
     }
-
-    const fileList = project.files.map(f => f.name).join(', ');
-    const sysInstruction = `You are a world-class pair-programming assistant. 
-    You have direct access to the user's current code via tool calling.
-    - [CWD]: ${workingDirectory}
-    - [WORKSPACE_MAP]: Current files in root: [${fileList}].
-    - When asked to write code, modify a file, or fix a bug in the CURRENT file, use 'update_active_file'.
-    - When asked to start a NEW problem, solve an interview question, or 'open a new file', use 'create_new_file'.
-    - You can manage directories with 'create_directory', 'list_directory', and 'move_file'.
-    - Use 'set_working_directory' (CD) to change your context before creating files in subdirs.
-    Always implement the solution fully and explain your thought process verbally.
-    Keep your spoken responses concise and helpful.`;
-
+    const sysInstruction = `Pair-programmer. CWD: ${workingDirectory}`;
     setIsLiveChatActive(true);
-    addSystemLog(`Establishing Live Link...`, 'info');
     const service = new GeminiLiveService();
     liveChatServiceRef.current = service;
-
     try {
         await service.connect('Fenrir', sysInstruction, {
-            onOpen: () => {
-                setChatMessages(prev => [...prev, { role: 'ai', text: "*[System]: Live neural link established. I can hear your voice and see your workspace.*" }]);
-                addSystemLog(`Live Neural Link established via gemini-2.5-flash-native-audio.`, 'success');
-            },
+            onOpen: () => setChatMessages(prev => [...prev, { role: 'ai', text: "*[System]: Live link established.*" }]),
             onClose: () => setIsLiveChatActive(false),
-            onError: (err) => { 
-                addSystemLog(`Live Link Error: ${err}`, 'error');
-                alert(err); 
-                setIsLiveChatActive(false); 
-            },
+            onError: (err) => { alert(err); setIsLiveChatActive(false); },
             onVolumeUpdate: () => {},
             onTranscript: (text, isUser) => {
                 const role = isUser ? 'user' : 'ai';
@@ -1718,55 +1636,24 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                 });
             },
             onToolCall: async (toolCall) => {
-                let localCwd = workingDirectory;
-                
                 for (const fc of toolCall.functionCalls) {
-                    addSystemLog(`Live AI Tool Call: [${fc.name}]`, 'tool', fc.args);
                     try {
+                        const args = fc.args as any;
                         if (fc.name === 'update_active_file') {
-                            const { new_content, summary } = fc.args as any;
-                            handleCodeChangeInSlot(new_content, focusedSlot);
-                            setChatMessages(prev => [...prev, { role: 'ai', text: `*[System]: Injected code changes via Voice Command. ${summary || ''}*` }]);
-                            service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: "Success: Workspace updated." } }]);
-                            addSystemLog(`Applied code patch from voice command.`, 'success');
+                            handleCodeChangeInSlot(args.new_content, focusedSlot);
+                            service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: "Success" } }]);
                         } else if (fc.name === 'create_new_file') {
-                            const { filename, content, directory_path } = fc.args as any;
-                            await handleCreateNewFile(filename, content, directory_path);
-                            setChatMessages(prev => [...prev, { role: 'ai', text: `*[System]: Opened and implemented new file '${filename}' via Voice Command.*` }]);
-                            service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Success: '${filename}' created.` } }]);
+                            await handleCreateNewFile(args.filename, args.content, args.directory_path);
+                            service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: "Success" } }]);
                         } else if (fc.name === 'set_working_directory') {
-                            const { path } = fc.args as any;
-                            localCwd = path;
-                            setWorkingDirectory(path);
-                            service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Success: CWD moved to ${path}` } }]);
-                        } else if (fc.name === 'create_directory') {
-                            const { directory_name, parent_path } = fc.args as any;
-                            await handleCreateDirectory(directory_name, parent_path);
-                            service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Success: Directory '${directory_name}' created.` } }]);
-                            await refreshExplorer();
-                        } else if (fc.name === 'list_directory') {
-                            const { path } = fc.args as any;
-                            let items = [];
-                            const targetPath = resolvePath(path, localCwd);
-                            if (activeTab === 'drive' && driveToken) {
-                                let cleanPath = targetPath;
-                                if (cleanPath.startsWith('/')) cleanPath = cleanPath.substring(1);
-                                const targetFolderId = await findFolder(driveToken, cleanPath, driveRootId || undefined);
-                                items = targetFolderId ? await listDriveFiles(driveToken, targetFolderId) : [];
-                            }
-                            service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: { items } } }]);
+                            setWorkingDirectory(args.path);
+                            service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: "Success" } }]);
                         }
-                    } catch (toolErr: any) {
-                        addSystemLog(`Live Tool Failed: ${toolErr.message}`, 'error');
-                        service.sendToolResponse([{ id: fc.id, name: fc.name, response: { error: toolErr.message } }]);
-                    }
+                    } catch (toolErr: any) { service.sendToolResponse([{ id: fc.id, name: fc.name, response: { error: toolErr.message } }]); }
                 }
             }
         }, [{ functionDeclarations: [updateFileTool, createNewFileTool, createDirectoryTool, listDirectoryTool, moveFileTool, setWorkingDirectoryTool] }]);
-    } catch (e) {
-        addSystemLog(`Live connection failed to start.`, 'error');
-        setIsLiveChatActive(false);
-    }
+    } catch (e) { setIsLiveChatActive(false); }
   };
 
   const handleFormatCode = async (slotIdx: number) => {
@@ -1805,15 +1692,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
 
   const sessionTree = useMemo(() => {
       if (!isInterviewerMode) return [];
-      // Use project.files instead of initialFiles so new files show up instantly
-      return project.files.map(f => ({
-          id: f.path,
-          name: f.name,
-          type: 'file' as const,
-          isLoaded: true,
-          size: f.size,
-          data: f
-      }));
+      return project.files.map(f => ({ id: f.path, name: f.name, type: 'file' as const, isLoaded: true, size: f.size, data: f }));
   }, [isInterviewerMode, project.files]);
 
   const driveTree = useMemo(() => {
@@ -1925,45 +1804,15 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                   )}
               </div>
 
-              {/* NEURAL EXECUTION CONSOLE - DEBUG WINDOW */}
               <div className={`absolute bottom-0 left-0 right-0 border-t border-slate-800 bg-slate-900 transition-all duration-300 flex flex-col ${showSystemLogs ? 'h-1/2' : 'h-10'} z-50`}>
-                  <button 
-                    onClick={() => setShowSystemLogs(!showSystemLogs)}
-                    className="h-10 flex items-center justify-between px-4 bg-slate-950/80 hover:bg-slate-800 transition-colors shrink-0"
-                  >
-                      <div className="flex items-center gap-2">
-                          <TerminalSquare size={14} className="text-indigo-400"/>
-                          <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Neural Execution Console</span>
-                          <div className="h-4 w-px bg-slate-800 mx-1"></div>
-                          <span className="text-[9px] font-mono text-indigo-500 uppercase tracking-tighter">CWD: {workingDirectory}</span>
-                          {systemLogs.some(l => l.type === 'error') && <AlertTriangle size={12} className="text-red-500 animate-pulse ml-2"/>}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button onClick={(e) => { e.stopPropagation(); setSystemLogs([]); }} className="p-1 hover:bg-slate-700 rounded text-slate-500"><Trash2 size={12}/></button>
-                        {showSystemLogs ? <ChevronDown size={14}/> : <ChevronUp size={14}/>}
-                      </div>
+                  <button onClick={() => setShowSystemLogs(!showSystemLogs)} className="h-10 flex items-center justify-between px-4 bg-slate-950/80 hover:bg-slate-800 transition-colors shrink-0">
+                      <div className="flex items-center gap-2"><TerminalSquare size={14} className="text-indigo-400"/><span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Neural Execution Console</span><div className="h-4 w-px bg-slate-800 mx-1"></div><span className="text-[9px] font-mono text-indigo-500 uppercase tracking-tighter">CWD: {workingDirectory}</span>{systemLogs.some(l => l.type === 'error') && <AlertTriangle size={12} className="text-red-500 animate-pulse ml-2"/>}</div>
+                      <div className="flex items-center gap-2"><button onClick={(e) => { e.stopPropagation(); setSystemLogs([]); }} className="p-1 hover:bg-slate-700 rounded text-slate-500"><Trash2 size={12}/></button>{showSystemLogs ? <ChevronDown size={14}/> : <ChevronUp size={14}/>}</div>
                   </button>
                   {showSystemLogs && (
                       <div className="flex-1 overflow-y-auto p-3 font-mono text-[11px] space-y-1.5 scrollbar-hide bg-black/40">
-                          {systemLogs.length === 0 ? (
-                              <p className="text-slate-700 italic">No events recorded in this session.</p>
-                          ) : systemLogs.map((log) => (
-                              <div key={log.id} className="flex gap-3 leading-relaxed group">
-                                  <span className="text-slate-600 shrink-0 select-none">[{log.time}]</span>
-                                  <div className="flex flex-col min-w-0">
-                                      <div className="flex items-center gap-2">
-                                          <span className={`font-bold ${log.type === 'error' ? 'text-red-400' : log.type === 'success' ? 'text-emerald-400' : log.type === 'tool' ? 'text-indigo-400' : log.type === 'warn' ? 'text-amber-400' : 'text-slate-400'}`}>
-                                              {log.type === 'tool' && <Zap size={10} className="inline mr-1"/>}
-                                              {log.message}
-                                          </span>
-                                      </div>
-                                      {log.details && (
-                                          <pre className="mt-1 p-2 bg-slate-950 rounded border border-slate-800 text-[10px] text-slate-500 overflow-x-auto whitespace-pre-wrap max-h-40">
-                                              {JSON.stringify(log.details, null, 2)}
-                                          </pre>
-                                      )}
-                                  </div>
-                              </div>
+                          {systemLogs.length === 0 ? (<p className="text-slate-700 italic">No events recorded in this session.</p>) : systemLogs.map((log) => (
+                              <div key={log.id} className="flex gap-3 leading-relaxed group"><span className="text-slate-600 shrink-0 select-none">[{log.time}]</span><div className="flex flex-col min-w-0"><div className="flex items-center gap-2"><span className={`font-bold ${log.type === 'error' ? 'text-red-400' : log.type === 'success' ? 'text-emerald-400' : log.type === 'tool' ? 'text-indigo-400' : log.type === 'warn' ? 'text-amber-400' : 'text-slate-400'}`}>{log.type === 'tool' && <Zap size={10} className="inline mr-1"/>}{log.message}</span></div>{log.details && (<pre className="mt-1 p-2 bg-slate-950 rounded border border-slate-800 text-[10px] text-slate-500 overflow-x-auto whitespace-pre-wrap max-h-40">{JSON.stringify(log.details, null, 2)}</pre>)}</div></div>
                           ))}
                       </div>
                   )}
@@ -1977,40 +1826,19 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
           </div>
           <div onMouseDown={() => setIsDraggingRight(true)} className="w-1 cursor-col-resize hover:bg-indigo-500/50 z-30 shrink-0 bg-slate-800/20"></div>
           <div className={`${isRightOpen ? '' : 'hidden'} bg-slate-950 flex flex-col shrink-0 overflow-hidden shadow-2xl relative z-40`} style={{ width: `${rightWidth}px` }}>
-              <AIChatPanel 
-                isOpen={true} 
-                onClose={() => setIsRightOpen(false)} 
-                messages={isInterviewerMode ? externalChatContent || [] : chatMessages} 
-                onSendMessage={handleSendMessage} 
-                isThinking={isInterviewerMode ? isAiThinking : isChatThinking} 
-                currentInput={chatInput} 
-                onInputChange={setChatInput} 
-                isInterviewerMode={isInterviewerMode}
-                isLiveMode={isLiveChatActive}
-                onToggleLive={toggleLiveChat}
-              />
+              <AIChatPanel isOpen={true} onClose={() => setIsRightOpen(false)} messages={isInterviewerMode ? externalChatContent || [] : chatMessages} onSendMessage={handleSendMessage} isThinking={isInterviewerMode ? isAiThinking : isChatThinking} currentInput={chatInput} onInputChange={setChatInput} isInterviewerMode={isInterviewerMode} isLiveMode={isLiveChatActive} onToggleLive={toggleLiveChat} />
           </div>
       </div>
 
       {showShareModal && shareUrl && (
-          <ShareModal 
-            isOpen={true} 
-            onClose={() => setShowShareModal(false)} 
-            onShare={handleUpdateAccess} 
-            link={shareUrl} 
-            title={project.name}
-            currentAccess={project.accessLevel}
-            currentAllowedUsers={project.allowedUserIds}
-            currentUserUid={currentUser?.uid}
-            defaultPermission="write"
-          />
+          <ShareModal isOpen={true} onClose={() => setShowShareModal(false)} onShare={handleUpdateAccess} link={shareUrl} title={project.name} currentAccess={project.accessLevel} currentAllowedUsers={project.allowedUserIds} currentUserUid={currentUser?.uid} defaultPermission="write" />
       )}
 
       {showManualToken && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
               <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-sm p-6 shadow-2xl animate-fade-in-up">
                   <div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-white flex items-center gap-2"><Key className="text-indigo-400" size={18}/> Manual Token Fallback</h3><button onClick={() => setShowManualToken(false)} className="text-slate-500 hover:text-white"><X size={20}/></button></div>
-                  <div className="space-y-4"><div className="p-3 bg-amber-900/20 border border-amber-500/30 rounded-xl flex items-start gap-3"><AlertTriangle className="text-amber-500 shrink-0 mt-0.5" size={16}/><div className="space-y-2"><p className="text-[10px] text-amber-200 leading-relaxed font-bold">CONFLICT DETECTED:</p><p className="text-[10px] text-amber-200 leading-relaxed">{githubLinkingError || "OAuth linking failed because your GitHub is already linked to another account."}</p><p className="text-[10px] text-amber-200 leading-relaxed italic">Use a Personal Access Token (PAT) to bypass this conflict.</p></div></div><div className="space-y-2"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">GitHub Access Token</label><input type="password" value={manualToken} onChange={e => handleSetManualToken(e.target.value)} placeholder="ghp_..." className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-sm text-indigo-200 outline-none focus:border-indigo-500 font-mono"/></div><div className="flex flex-col gap-2"><button onClick={() => handleSetManualToken(manualToken)} disabled={!manualToken.trim()} className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold text-xs uppercase tracking-widest shadow-lg disabled:opacity-50 transition-all active:scale-95">Save & Connect</button><a href="https://github.com/settings/tokens" target="_blank" rel="noreferrer" className="text-[10px] text-slate-500 hover:text-indigo-400 flex items-center justify-center gap-1 mt-1 transition-colors">How to generate a token? <ExternalLink size={10}/></a></div></div>
+                  <div className="space-y-4"><div className="p-3 bg-amber-900/20 border border-amber-500/30 rounded-xl flex items-start gap-3"><AlertTriangle className="text-amber-500 shrink-0 mt-0.5" size={16}/><div className="space-y-2"><p className="text-[10px] text-amber-200 leading-relaxed font-bold">CONFLICT DETECTED:</p><p className="text-[10px] text-amber-200 leading-relaxed">{githubLinkingError || "OAuth linking failed because your GitHub is already linked to another account."}</p><p className="text-[10px] text-amber-200 leading-relaxed italic">Use a Personal Access Token (PAT) to bypass this conflict.</p></div></div><div className="space-y-2"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">GitHub Access Token</label><input type="password" value={manualToken} onChange={e => setManualToken(e.target.value)} placeholder="ghp_..." className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-sm text-indigo-200 outline-none focus:border-indigo-500 font-mono"/></div><div className="flex flex-col gap-2"><button onClick={() => handleSetManualToken(manualToken)} disabled={!manualToken.trim()} className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold text-xs uppercase tracking-widest shadow-lg disabled:opacity-50 transition-all active:scale-95">Save & Connect</button><a href="https://github.com/settings/tokens" target="_blank" rel="noreferrer" className="text-[10px] text-slate-500 hover:text-indigo-400 flex items-center justify-center gap-1 mt-1 transition-colors">How to generate a token? <ExternalLink size={10}/></a></div></div>
               </div>
           </div>
       )}

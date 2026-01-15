@@ -336,12 +336,8 @@ export async function createDriveFolder(accessToken: string, name: string, paren
         const err = await res.json().catch(() => ({}));
         throw new Error(`Drive folder creation failed: ${err.error?.message || res.statusText}`);
     }
-    const folder = await createDriveFolderJson(res);
+    const folder = await res.json();
     return folder.id;
-}
-
-async function createDriveFolderJson(res: Response) {
-    return await res.json();
 }
 
 /**
