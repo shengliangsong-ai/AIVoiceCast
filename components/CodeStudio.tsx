@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { CodeProject, CodeFile, UserProfile, Channel, CursorPosition, CloudItem, TranscriptItem } from '../types';
 import { listCloudDirectory, saveProjectToCloud, deleteCloudItem, createCloudFolder, subscribeToCodeProject, saveCodeProject, updateCodeFile, updateCursor, claimCodeProjectLock, updateProjectActiveFile, deleteCodeFile, updateProjectAccess } from '../services/firestoreService';
@@ -1138,6 +1139,9 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       if (file) {
           const lang = getLanguageFromExt(file.name);
           setSlotViewModes(prev => ({ ...prev, [slotIndex]: ['markdown', 'pdf', 'whiteboard', 'video', 'audio', 'youtube'].includes(lang) ? 'preview' : 'code' }));
+          
+          // CRITICAL: Notify listeners that the active file has changed or loaded
+          if (onFileChange) onFileChange(file);
       }
   };
 
@@ -1149,6 +1153,10 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       newSlots[slotIdx] = updatedFile;
       setActiveSlots(newSlots);
       setSaveStatus('modified');
+      
+      // CRITICAL: Notify listeners about code changes immediately
+      if (onFileChange) onFileChange(updatedFile);
+      
       if (isLive && lockStatus === 'mine') updateCodeFile(project.id, updatedFile);
   };
 

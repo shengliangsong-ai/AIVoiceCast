@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, ErrorInfo, ReactNode, Component } from 'react';
 import { 
   Podcast, Search, LayoutGrid, RefreshCw, 
@@ -67,7 +66,7 @@ interface ErrorBoundaryState {
 
 class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   state: ErrorBoundaryState = { hasError: false, error: null };
-  declare props: ErrorBoundaryProps;
+  // Fixed: Standard class components should rely on generic types rather than explicit declare for props
 
   constructor(props: ErrorBoundaryProps) {
     super(props);
