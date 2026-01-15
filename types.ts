@@ -86,7 +86,6 @@ export interface SubTopic {
   title: string;
 }
 
-// Added missing Chapter interface and exported it
 export interface Chapter {
   id: string;
   title: string;
@@ -204,7 +203,8 @@ export interface CodeFile {
   sha?: string;
   treeSha?: string;
   childrenFetched?: boolean;
-  driveId?: string; // Cache the drive ID for media operations
+  driveId?: string; 
+  parentId?: string; // Tracks folder hierarchy
 }
 
 export interface CodeProject {
@@ -264,8 +264,8 @@ export interface WhiteboardElement {
   endY?: number;
   borderRadius?: number;
   rotation?: number;
-  startArrow?: boolean; // Legacy
-  endArrow?: boolean;   // Legacy
+  startArrow?: boolean; 
+  endArrow?: boolean;   
   startCap?: CapStyle;
   endCap?: CapStyle;
   text?: string;
@@ -521,12 +521,12 @@ export interface MockInterviewRecording {
   mode: 'coding' | 'system_design' | 'behavioral' | 'quick_screen' | 'assessment_30' | 'assessment_60';
   language?: string;
   jobDescription: string;
-  interviewerInfo?: string; // Target interviewer profile
-  intervieweeInfo?: string; // NEW: Candidate background/profile
+  interviewerInfo?: string; 
+  intervieweeInfo?: string; 
   timestamp: number;
-  videoUrl: string; // Drive Link
+  videoUrl: string; 
   transcript?: TranscriptItem[];
-  coachingTranscript?: TranscriptItem[]; // Persistent coaching history
+  coachingTranscript?: TranscriptItem[]; 
   feedback?: string;
   visibility?: 'public' | 'private';
 }
