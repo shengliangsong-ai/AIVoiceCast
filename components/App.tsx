@@ -66,7 +66,8 @@ interface ErrorBoundaryState {
 
 class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   state: ErrorBoundaryState = { hasError: false, error: null };
-  // Fixed: Standard class components should rely on generic types rather than explicit declare for props
+  // Standard class components in some TS configurations require explicit declare for props when extending React.Component
+  declare props: ErrorBoundaryProps;
 
   constructor(props: ErrorBoundaryProps) {
     super(props);

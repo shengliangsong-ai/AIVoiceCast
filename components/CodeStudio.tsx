@@ -790,6 +790,14 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
     }
   }, [initialFiles, currentSessionIdFromPaths, updateSlotsLRU]);
 
+  // CRITICAL: Watcher for focusedSlot to notify listeners when the active file changes
+  useEffect(() => {
+    const file = activeSlots[focusedSlot];
+    if (file && onFileChange) {
+        onFileChange(file);
+    }
+  }, [focusedSlot, onFileChange]);
+
   const [innerSplitRatio, setInnerSplitRatio] = useState(50);
   const [isDraggingInner, setIsDraggingInner] = useState(false);
   
@@ -1165,7 +1173,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       if (!file) return;
       setIsFormattingSlots(prev => ({ ...prev, [slotIdx]: true }));
       try {
-          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
           const response = await ai.models.generateContent({
               model: 'gemini-3-flash-preview',
               contents: `Reformat this ${file.language} code for production quality. Keep logic identical. Return ONLY code:\n\n${file.content}`
@@ -1183,7 +1191,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       setIsTerminalOpen(prev => ({ ...prev, [slotIdx]: true }));
       const updateTerminal = (msg: string, isError = false) => { setTerminalOutputs(prev => ({ ...prev, [slotIdx]: [...(prev[slotIdx] || []), `${isError ? '[ERROR] ' : ''}${msg}`] })); };
       try {
-          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
           const prompt = `Simulate output for: Lang: ${file.language}, Code: ${file.content}. Respond JSON: { "stdout": "string", "stderr": "string", "exitCode": number }`;
           const resp = await ai.models.generateContent({ model: 'gemini-3-flash-preview', contents: prompt, config: { responseMimeType: 'application/json' } });
           const result = JSON.parse(resp.text || '{}');
@@ -1197,7 +1205,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
     setChatMessages(prev => [...prev, { role: 'user', text }]);
     setIsChatThinking(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
       const response = await ai.models.generateContent({ 
           model: 'gemini-3-pro-preview', 
           contents: text,

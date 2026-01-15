@@ -58,7 +58,7 @@ interface MockInterviewProps {
 
 const getCodeTool: any = {
   name: "get_current_code",
-  description: "Read the current state of the workspace. ALWAYS use this before judging code or providing specific line-by-line feedback.",
+  description: "Read the current state of the workspace. ALWAYS use this before judging code or providing specific line-by-line feedback. This allows you to see the candidate's latest edits.",
   parameters: { 
     type: Type.OBJECT, 
     properties: {
@@ -81,7 +81,7 @@ const updateActiveFileTool: any = {
 
 const createInterviewFileTool: any = {
   name: "create_interview_file",
-  description: "Generate a new problem file in the workspace. This is the primary way to present technical challenges.",
+  description: "Generate a new problem file in the workspace. This is the primary way to present technical challenges. You can create multiple files with the same prefix.",
   parameters: {
     type: Type.OBJECT,
     properties: {
@@ -227,6 +227,10 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
 
+  // Tracks the active file path to avoid stale closures in Live API tool calls
+  const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
+  const activeFilePathRef = useRef<string | null>(null);
+
   const [isAiConnected, setIsAiConnected] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
@@ -264,7 +268,6 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
   const [currentSessionId, setCurrentSessionId] = useState<string>('');
   
   const activeCodeFilesMapRef = useRef<Map<string, CodeFile>>(new Map());
-  const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
 
   const [report, setReport] = useState<MockInterviewReport | null>(null);
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
@@ -323,7 +326,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       3. All files MUST be created in the session directory using path: "drive://${uuid}/filename".
       4. Do NOT provide the solution. Provide a clear problem statement and a starting template.
       5. Greet the candidate via voice AND start the technical evaluation immediately after the greeting.
-      6. You are encouraged to use 'get_current_code' frequently to track progress without interrupting.
+      6. MANDATORY: You MUST use 'get_current_code' frequently to track candidate progress. If you are reviewing code, you MUST use 'get_current_code' first.
       
       BEHAVIORAL RULE: If mode is behavioral, focus on voice dialogue and identifying 'STAR' stories.
       
@@ -378,11 +381,31 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                     const args = fc.args as any;
                     if (fc.name === 'get_current_code') {
                         const allFiles = Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[];
-                        let targetFile = allFiles.find(f => f.path === activeFilePath) || allFiles[0];
-                        service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: targetFile?.content || "// No code." } }]);
+                        const currentPath = activeFilePathRef.current;
+                        
+                        // Priority 1: Specific filename requested by AI
+                        let targetFile = null;
+                        if (args.filename) {
+                            targetFile = allFiles.find(f => f.name === args.filename || f.path === args.filename || f.path.endsWith(args.filename));
+                        }
+                        
+                        // Priority 2: Use currently focused file
+                        if (!targetFile) {
+                            targetFile = allFiles.find(f => f.path === currentPath);
+                        }
+                        
+                        // Priority 3: Use first available file
+                        if (!targetFile && allFiles.length > 0) {
+                            targetFile = allFiles[0];
+                        }
+
+                        service.sendToolResponse([{ id: fc.id, name: fc.name, response: { 
+                            result: targetFile?.content || "// No code content found in the requested file.",
+                            filename: targetFile?.name || "unknown"
+                        } }]);
                     } else if (fc.name === 'update_active_file') {
                         const allFiles = Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[];
-                        const targetFile = allFiles.find(f => f.path === activeFilePath) || allFiles[0];
+                        const targetFile = allFiles.find(f => f.path === activeFilePathRef.current) || allFiles[0];
                         if (targetFile) {
                             const updated = { ...targetFile, content: args.new_content };
                             activeCodeFilesMapRef.current.set(updated.path, updated);
@@ -403,6 +426,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                         activeCodeFilesMapRef.current.set(path, newFile);
                         setInitialStudioFiles(prev => [...prev.filter(f => f.path !== path), newFile]);
                         setActiveFilePath(path);
+                        activeFilePathRef.current = path;
                         service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Success: '${args.filename}' created in session workspace.` } }]);
                     }
                 }
@@ -451,6 +475,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       filesToInit.forEach(f => activeCodeFilesMapRef.current.set(f.path, f));
       setInitialStudioFiles(filesToInit);
       setActiveFilePath(filesToInit[0].path);
+      activeFilePathRef.current = filesToInit[0].path;
 
       const canvas = document.createElement('canvas'); canvas.width = 1280; canvas.height = 720;
       const drawCtx = canvas.getContext('2d', { alpha: false })!;
@@ -544,6 +569,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         const transcriptText = latestTranscript.map(t => `${t.role.toUpperCase()}: ${t.text}`).join('\n\n');
         const transcriptBlob = new Blob([transcriptText], { type: 'text/plain' });
 
+        // Save all N files created during the interview to the project record
         await saveCodeProject({ 
             id: interviewId, 
             name: `Interview_${mode}_${new Date().toLocaleDateString()}`, 
@@ -560,6 +586,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
             const historyText = latestTranscript.map(t => `${t.role.toUpperCase()}: ${t.text}`).join('\n');
             const codeText = currentFiles.map(f => `FILE: ${f.name}\nCONTENT:\n${f.content}`).join('\n\n');
 
+            // Corrected GoogleGenAI initialization by removing 'as string' cast on process.env.API_KEY
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
             const prompt = `Analyze this technical interview evaluation. 
             Mode: ${mode}. Candidate: ${intervieweeLinkedin}. Interviewer: ${interviewerLinkedin}. Job: ${jobDesc}.
@@ -627,13 +654,11 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
             if (token && typeof token === 'string' && videoChunksRef.current.length > 0) {
                 try {
                     const videoBlob = new Blob(videoChunksRef.current as BlobPart[], { type: 'video/webm' });
-                    // Explicitly cast to string to fix TS unknown type errors
-                    const driveTokenString = token as string;
-                    const folderId = await ensureCodeStudioFolder(driveTokenString) as string;
-                    const interviewsFolderId = await ensureFolder(driveTokenString, 'Interviews', folderId) as string;
-                    const driveVideoId = await uploadToDrive(driveTokenString, interviewsFolderId, `Interview_${interviewId}.webm`, videoBlob) as string;
+                    const folderId = await ensureCodeStudioFolder(token);
+                    const interviewsFolderId = await ensureFolder(token, 'Interviews', folderId);
+                    const driveVideoId = await uploadToDrive(token, interviewsFolderId, `Interview_${interviewId}.webm`, videoBlob);
                     const driveVideoUrl = `drive://${driveVideoId}`;
-                    const tFileId = await uploadToDrive(driveTokenString, folderId, `${recId}_transcript.txt`, transcriptBlob) as string;
+                    const tFileId = await uploadToDrive(token, folderId, `${recId}_transcript.txt`, transcriptBlob);
                     
                     await saveRecordingReference({
                         id: recId, userId: currentUser?.uid || 'guest', channelId: uuid, channelTitle, channelImage: 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=600&q=80', timestamp, mediaUrl: driveVideoUrl, driveUrl: driveVideoUrl, mediaType: 'video/webm', transcriptUrl: `drive://${tFileId}`
@@ -665,7 +690,8 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
     if (!text.trim() || !liveServiceRef.current) return;
     
     const allFiles = Array.from(activeCodeFilesMapRef.current.values()) as CodeFile[];
-    const currentFile = (allFiles.find(f => f.path === activeFilePath) || allFiles[0]) as CodeFile | undefined;
+    const currentPath = activeFilePathRef.current;
+    const currentFile = (allFiles.find(f => f.path === currentPath) || allFiles[0]) as CodeFile | undefined;
     
     // Construct text with explicit response request for Live API
     let messageToAi = `[USER_TEXT_PROMPT: Respond to this via voice] ${text}`;
@@ -849,7 +875,25 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
         {view === 'interview' && (
           <div className="h-full w-full flex flex-col overflow-hidden relative">
             <div className="flex-1 bg-slate-950 relative flex overflow-hidden w-full h-full">
-                <CodeStudio onBack={() => {}} currentUser={currentUser} userProfile={userProfile} onSessionStart={() => {}} onSessionStop={() => {}} onStartLiveSession={onStartLiveSession as any} initialFiles={initialStudioFiles} externalChatContent={transcript.map(t => ({ role: t.role, text: t.text }))} onSendExternalMessage={handleSendTextMessage} onSyncCodeWithAi={handleSyncCodeWithAi} isInterviewerMode={true} isAiThinking={isAiThinking} onFileChange={(f: CodeFile) => activeCodeFilesMapRef.current.set(f.path, f)}/>
+                <CodeStudio 
+                    onBack={() => {}} 
+                    currentUser={currentUser} 
+                    userProfile={userProfile} 
+                    onSessionStart={() => {}} 
+                    onSessionStop={() => {}} 
+                    onStartLiveSession={onStartLiveSession as any} 
+                    initialFiles={initialStudioFiles} 
+                    externalChatContent={transcript.map(t => ({ role: t.role, text: t.text }))} 
+                    onSendExternalMessage={handleSendTextMessage} 
+                    onSyncCodeWithAi={handleSyncCodeWithAi} 
+                    isInterviewerMode={true} 
+                    isAiThinking={isAiThinking} 
+                    onFileChange={(f: CodeFile) => {
+                        activeCodeFilesMapRef.current.set(f.path, f);
+                        activeFilePathRef.current = f.path; // Update persistent pointer
+                        setActiveFilePath(f.path); // Update UI state
+                    }}
+                />
             </div>
             
             <div className={`absolute bottom-24 left-6 w-64 aspect-video rounded-3xl overflow-hidden border-4 ${isAiConnected ? 'border-indigo-500/50 shadow-indigo-500/20' : 'border-red-500/50 animate-pulse'} shadow-2xl z-[100] bg-black group`}>
