@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { CodeProject, CodeFile, UserProfile, Channel, CursorPosition, CloudItem, TranscriptItem } from '../types';
 import { ArrowLeft, Save, Plus, Github, Cloud, HardDrive, Code, X, ChevronRight, ChevronDown, ChevronUp, File, Folder, DownloadCloud, Loader2, CheckCircle, AlertTriangle, Info, FolderPlus, FileCode, RefreshCw, LogIn, CloudUpload, Trash2, ArrowUp, Edit2, FolderOpen, MoreVertical, Send, MessageSquare, Bot, Mic, MicOff, Sparkles, SidebarClose, SidebarOpen, Users, Eye, FileText as FileTextIcon, Image as ImageIcon, StopCircle, Minus, Maximize2, Minimize2, Lock, Unlock, Share2, Terminal as TerminalIcon, Copy, WifiOff, PanelRightClose, PanelRightOpen, PanelLeftClose, PanelLeftOpen, Monitor, Laptop, PenTool, Edit3, ShieldAlert, ZoomIn, ZoomOut, Columns, Rows, Grid2X2, Square as SquareIcon, GripVertical, GripHorizontal, FileSearch, Indent, Wand2, Check, Link, MousePointer2, Activity, Key, Search, FilePlus, FileUp, Play, Trash, ExternalLink, GraduationCap, ShieldCheck, Youtube, Video, Zap, Download, Headphones, Radio, Bug, TerminalSquare } from 'lucide-react';
@@ -18,6 +19,7 @@ interface TreeNode {
   name: string;
   type: 'file' | 'folder';
   children?: TreeNode[];
+  parentId?: string;
   data?: any;
   isLoaded?: boolean;
   status?: 'modified' | 'new' | 'deleted';
@@ -790,6 +792,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
   const [isRunning, setIsRunning] = useState<Record<number, boolean>>({});
 
   const [chatMessages, setChatMessages] = useState<Array<{role: 'user' | 'ai', text: string}>>([{ role: 'ai', text: "Ready to code. Open a file from your **Google Drive** to begin." }]);
+  const [githubSearchQuery, setGithubSearchQuery] = useState('');
   const [chatInput, setChatInput] = useState('');
   const [isChatThinking, setIsChatThinking] = useState(false);
   const [isFormattingSlots, setIsFormattingSlots] = useState<Record<number, boolean>>({});
@@ -805,7 +808,6 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
   
   const [githubToken, setGithubToken] = useState<string | null>(localStorage.getItem('github_token'));
   const [githubRepos, setGithubRepos] = useState<any[]>([]);
-  const [githubSearchQuery, setGithubSearchQuery] = useState('');
   const [isGithubLoading, setIsGithubLoading] = useState(false);
   const [githubTree, setGithubTree] = useState<TreeNode[]>([]);
   const [showManualToken, setShowManualToken] = useState(false);
@@ -1284,6 +1286,21 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       }
   };
 
+  const getPathForNode = useCallback((nodeId: string, tree: TreeNode[]): string => {
+    for (const node of tree) {
+        if (node.id === nodeId) {
+            return node.name === 'CodeStudio' ? '/' : `/${node.name}`;
+        }
+        if (node.children) {
+            const childPath = getPathForNode(nodeId, node.children);
+            if (childPath !== '/') {
+                return node.name === 'CodeStudio' ? childPath : `/${node.name}${childPath}`;
+            }
+        }
+    }
+    return '/';
+  }, []);
+
   const handleExplorerSelect = async (node: TreeNode) => {
       if (node.type === 'file') {
           let fileData: CodeFile | null = null;
@@ -1346,13 +1363,11 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
           let newDirPath = '/';
           if (activeTab === 'cloud') {
               const parts = node.id.split('/');
-              // Expecting: projects/uid/folder/subfolder...
               if (parts.length > 2) {
                   newDirPath = '/' + parts.slice(2).join('/');
               }
           } else if (activeTab === 'drive') {
-              // Simple heuristic: build path by name if we can't easily traverse parent IDs
-              newDirPath = node.name === 'CodeStudio' ? '/' : `/${node.name}`;
+              newDirPath = getPathForNode(node.id, driveTree);
           }
           
           if (newDirPath !== workingDirectory) {
@@ -1505,55 +1520,62 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
           } 
       });
 
-      if (response.functionCalls?.[0]) {
-          const fc = response.functionCalls[0];
-          addSystemLog(`AI selected Tool: [${fc.name}]`, 'tool', fc.args);
+      if (response.functionCalls && response.functionCalls.length > 0) {
+          // BATCH PROCESSING: Loop through ALL function calls
+          let localCwd = workingDirectory;
           
-          try {
-              if (fc.name === 'update_active_file') {
-                  const args = fc.args as any;
-                  if (args.new_content) { 
-                      handleCodeChangeInSlot(args.new_content, focusedSlot); 
-                      setChatMessages(prev => [...prev, { role: 'ai', text: `✅ Updated focused file. ${args.summary || ''}` }]); 
-                      if (onFileChange && activeSlots[focusedSlot]) {
-                        onFileChange({ ...activeSlots[focusedSlot]!, content: args.new_content });
+          for (const fc of response.functionCalls) {
+              addSystemLog(`AI selected Tool: [${fc.name}]`, 'tool', fc.args);
+              
+              try {
+                  if (fc.name === 'update_active_file') {
+                      const args = fc.args as any;
+                      if (args.new_content) { 
+                          handleCodeChangeInSlot(args.new_content, focusedSlot); 
+                          setChatMessages(prev => [...prev, { role: 'ai', text: `✅ Updated focused file. ${args.summary || ''}` }]); 
+                          if (onFileChange && activeSlots[focusedSlot]) {
+                            onFileChange({ ...activeSlots[focusedSlot]!, content: args.new_content });
+                          }
+                          addSystemLog(`Injected code changes into slot ${focusedSlot}`, 'success');
                       }
-                      addSystemLog(`Injected code changes into slot ${focusedSlot}`, 'success');
+                  } else if (fc.name === 'create_new_file') {
+                      const args = fc.args as any;
+                      // Use localCwd to ensure it respects immediate 'cd' commands in the same batch
+                      const effectiveDirPath = args.directory_path || (localCwd === '/' ? undefined : localCwd);
+                      await handleCreateNewFile(args.filename, args.content, effectiveDirPath);
+                      setChatMessages(prev => [...prev, { role: 'ai', text: `🚀 Opened and implemented new file: **${args.filename}**` }]);
+                  } else if (fc.name === 'set_working_directory') {
+                      const args = fc.args as any;
+                      localCwd = args.path;
+                      setWorkingDirectory(args.path);
+                      addSystemLog(`AI set CWD to: ${args.path}`, 'success');
+                      setChatMessages(prev => [...prev, { role: 'ai', text: `📂 Working directory set to: \`${args.path}\`` }]);
+                  } else if (fc.name === 'create_directory') {
+                      const args = fc.args as any;
+                      await handleCreateDirectory(args.directory_name, args.parent_path);
+                      setChatMessages(prev => [...prev, { role: 'ai', text: `📁 Created directory: **${args.directory_name}**` }]);
+                  } else if (fc.name === 'list_directory') {
+                      const args = fc.args as any;
+                      let items = [];
+                      const targetPath = args.path || localCwd;
+                      if (activeTab === 'drive' && driveToken) {
+                          const targetFolderId = await findFolder(driveToken, targetPath, driveRootId || undefined);
+                          items = targetFolderId ? await listDriveFiles(driveToken, targetFolderId) : [];
+                      } else if (activeTab === 'cloud' && currentUser) {
+                          items = await listCloudDirectory(`projects/${currentUser.uid}/${targetPath.startsWith('/') ? targetPath.substring(1) : targetPath}`);
+                      }
+                      setChatMessages(prev => [...prev, { role: 'ai', text: `📄 Directory contents for \`${targetPath}\`:\n${items.map(i => `- ${i.name} (${i.mimeType || (i as any).isFolder ? 'Folder' : 'File'})`).join('\n')}` }]);
+                      addSystemLog(`Listed directory [${targetPath}] found ${items.length} items.`, 'success');
+                  } else if (fc.name === 'move_file') {
+                      const args = fc.args as any;
+                      addSystemLog(`Moving [${args.source_path}] to [${args.destination_path}]`, 'info');
+                      setChatMessages(prev => [...prev, { role: 'ai', text: `🛠️ Moved/Renamed: **${args.source_path}** to **${args.destination_path}**` }]);
+                      await refreshExplorer();
                   }
-              } else if (fc.name === 'create_new_file') {
-                  const args = fc.args as any;
-                  await handleCreateNewFile(args.filename, args.content, args.directory_path);
-                  setChatMessages(prev => [...prev, { role: 'ai', text: `🚀 Opened and implemented new file: **${args.filename}**` }]);
-              } else if (fc.name === 'set_working_directory') {
-                  const args = fc.args as any;
-                  setWorkingDirectory(args.path);
-                  addSystemLog(`AI set CWD to: ${args.path}`, 'success');
-                  setChatMessages(prev => [...prev, { role: 'ai', text: `📂 Working directory set to: \`${args.path}\`` }]);
-              } else if (fc.name === 'create_directory') {
-                  const args = fc.args as any;
-                  await handleCreateDirectory(args.directory_name, args.parent_path);
-                  setChatMessages(prev => [...prev, { role: 'ai', text: `📁 Created directory: **${args.directory_name}**` }]);
-              } else if (fc.name === 'list_directory') {
-                  const args = fc.args as any;
-                  let items = [];
-                  const targetPath = args.path || workingDirectory;
-                  if (activeTab === 'drive' && driveToken) {
-                      const targetFolderId = await findFolder(driveToken, targetPath, driveRootId || undefined);
-                      items = targetFolderId ? await listDriveFiles(driveToken, targetFolderId) : [];
-                  } else if (activeTab === 'cloud' && currentUser) {
-                      items = await listCloudDirectory(`projects/${currentUser.uid}/${targetPath.startsWith('/') ? targetPath.substring(1) : targetPath}`);
-                  }
-                  setChatMessages(prev => [...prev, { role: 'ai', text: `📄 Directory contents for \`${targetPath}\`:\n${items.map(i => `- ${i.name} (${i.mimeType || (i as any).isFolder ? 'Folder' : 'File'})`).join('\n')}` }]);
-                  addSystemLog(`Listed directory [${targetPath}] found ${items.length} items.`, 'success');
-              } else if (fc.name === 'move_file') {
-                  const args = fc.args as any;
-                  addSystemLog(`Moving [${args.source_path}] to [${args.destination_path}]`, 'info');
-                  setChatMessages(prev => [...prev, { role: 'ai', text: `🛠️ Moved/Renamed: **${args.source_path}** to **${args.destination_path}**` }]);
-                  await refreshExplorer();
+              } catch (toolErr: any) {
+                  addSystemLog(`Tool Execution Failed: ${toolErr.message}`, 'error');
+                  setChatMessages(prev => [...prev, { role: 'ai', text: `❌ Failed to execute command: ${toolErr.message}` }]);
               }
-          } catch (toolErr: any) {
-              addSystemLog(`Tool Execution Failed: ${toolErr.message}`, 'error');
-              setChatMessages(prev => [...prev, { role: 'ai', text: `❌ Failed to execute command: ${toolErr.message}` }]);
           }
       } else { 
           setChatMessages(prev => [...prev, { role: 'ai', text: response.text || "No response." }]); 
@@ -1615,6 +1637,8 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                 });
             },
             onToolCall: async (toolCall) => {
+                let localCwd = workingDirectory;
+                
                 for (const fc of toolCall.functionCalls) {
                     addSystemLog(`Live AI Tool Call: [${fc.name}]`, 'tool', fc.args);
                     try {
@@ -1626,11 +1650,14 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                             addSystemLog(`Applied code patch from voice command.`, 'success');
                         } else if (fc.name === 'create_new_file') {
                             const { filename, content, directory_path } = fc.args as any;
-                            await handleCreateNewFile(filename, content, directory_path);
+                            // Ensure batch relative CWD is respected
+                            const effectiveDirPath = directory_path || (localCwd === '/' ? undefined : localCwd);
+                            await handleCreateNewFile(filename, content, effectiveDirPath);
                             setChatMessages(prev => [...prev, { role: 'ai', text: `*[System]: Opened and implemented new file '${filename}' via Voice Command.*` }]);
                             service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Success: '${filename}' created and focused.` } }]);
                         } else if (fc.name === 'set_working_directory') {
                             const { path } = fc.args as any;
+                            localCwd = path;
                             setWorkingDirectory(path);
                             service.sendToolResponse([{ id: fc.id, name: fc.name, response: { result: `Success: CWD moved to ${path}` } }]);
                         } else if (fc.name === 'create_directory') {
@@ -1641,7 +1668,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                         } else if (fc.name === 'list_directory') {
                             const { path } = fc.args as any;
                             let items = [];
-                            const targetPath = path || workingDirectory;
+                            const targetPath = path || localCwd;
                             if (activeTab === 'drive' && driveToken) {
                                 const targetFolderId = await findFolder(driveToken, targetPath, driveRootId || undefined);
                                 items = targetFolderId ? await listDriveFiles(driveToken, targetFolderId) : [];
