@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Channel, Group, Chapter } from '../types';
 // Fixed: Added missing CheckCircle import and removed unused Clipboard
@@ -133,7 +132,7 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({ isOpen, 
       } else {
         alert("Neural refraction failed. Ensure the source is accessible.");
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
       alert("Error processing source.");
     } finally {

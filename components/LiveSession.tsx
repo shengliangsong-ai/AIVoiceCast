@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { Channel, TranscriptItem, GeneratedLecture, CommunityDiscussion, RecordingSession, Attachment, UserProfile } from '../types';
 import { GeminiLiveService } from '../services/geminiLive';
@@ -295,7 +294,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({
                         id: recId, userId: currentUser.uid, channelId: channel.id, channelTitle: channel.title, channelImage: channel.imageUrl, timestamp, mediaUrl: driveVideoUrl, driveUrl: driveVideoUrl, mediaType: 'video/webm', transcriptUrl: `drive://${tFileId}`
                     });
                 }
-            } catch(e) { console.error("Neural archive failed", e); } 
+            } catch(e: any) { console.error("Neural archive failed", e); } 
             finally { setIsUploadingRecording(false); onEndSession(); }
             userStream.getTracks().forEach(t => t.stop());
         };
@@ -303,7 +302,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({
         mediaRecorderRef.current = recorder;
         recorder.start(1000);
         addLog("Recording Active.");
-    } catch(e) { addLog("Recorder Init Error: Permissions declined.", "error"); }
+    } catch(e: any) { addLog("Recorder Init Error: Permissions declined.", "error"); }
   }, [recordingEnabled, currentUser, channel, onEndSession, addLog]);
 
   const handleStartSession = async () => {
@@ -317,13 +316,13 @@ export const LiveSession: React.FC<LiveSessionProps> = ({
               try {
                   screenStreamRef.current = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: "always" } as any, audio: true });
                   addLog("Screen sync active.");
-              } catch(e) { addLog("Screen sync declined.", "warn"); }
+              } catch(e: any) { addLog("Screen sync declined.", "warn"); }
           }
           if (cameraEnabled) {
               try {
                   cameraStreamRef.current = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
                   addLog("Camera sync active.");
-              } catch(e) { addLog("Camera sync declined.", "warn"); }
+              } catch(e: any) { addLog("Camera sync declined.", "warn"); }
           }
           await initializePersistentRecorder();
       }
@@ -498,7 +497,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({
          </div>
          <div className="flex items-center gap-2">
             <button onClick={() => handlePreemptiveRotation(true)} className="p-2 bg-indigo-600/10 hover:bg-indigo-600 text-indigo-400 hover:text-white rounded-lg border border-indigo-500/20 transition-all active:scale-95" title={t.forceRestart}><RefreshCw size={18}/></button>
-            <button onClick={handleStopLink} className="p-2 bg-red-600/10 hover:bg-red-600 text-red-400 hover:text-white rounded-lg border border-red-500/20 transition-all active:scale-95" title={t.stopLink}><Square size={18}/></button>
+            <button onClick={handleStopLink} className="p-2 bg-red-600/10 hover:bg-red-600 text-red-400 hover:text-white rounded-lg border border-indigo-500/20 transition-all active:scale-95" title={t.stopLink}><Square size={18}/></button>
             <div className="w-px h-6 bg-slate-800 mx-1"></div>
             <button onClick={() => setShowDiagnostics(!showDiagnostics)} className={`p-2 rounded-lg transition-colors ${showDiagnostics ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`} title={t.diagnostics}><Activity size={18}/></button>
             <button onClick={handleDisconnect} className="px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded-lg transition-colors">Terminate</button>

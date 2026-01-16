@@ -1,11 +1,10 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { Channel, Booking, UserProfile, UserAvailability } from '../types';
 import { Calendar, Clock, User, ArrowLeft, Search, Briefcase, Sparkles, CheckCircle, X, Loader2, Play, Users, Mail, Video, Mic, FileText, Download, Trash2, Monitor, UserPlus, Grid, List, ArrowDown, ArrowUp, Heart, Share2, Info, ShieldAlert, ChevronRight, Coins, Check as CheckIcon, HeartHandshake, Edit3, Timer, Coffee, Sunrise, Sun, Sunset } from 'lucide-react';
 import { auth } from '../services/firebaseConfig';
 // Fix: removed updateBookingInvite which is not exported by firestoreService
 import { createBooking, getUserBookings, cancelBooking, deleteBookingRecording, getAllUsers, getUserProfileByEmail, getUserProfile } from '../services/firestoreService';
-import { getDriveToken, signInWithGoogle } from '../services/authService';
+import { getDriveToken, signInWithGoogle, connectGoogleDrive } from '../services/authService';
 import { sendBookingEmail } from '../services/gmailService';
 
 interface MentorBookingProps {
@@ -71,7 +70,7 @@ export const MentorBooking: React.FC<MentorBookingProps> = ({ currentUser, userP
     try {
       const data = await getUserBookings(currentUser.uid, currentUser.email);
       setMyBookings(data.filter(b => b.status !== 'cancelled' && b.status !== 'rejected').sort((a,b) => b.createdAt - a.createdAt)); 
-    } catch(e) { console.error(e); } finally { setIsLoadingBookings(false); }
+    } catch(e: any) { console.error(e); } finally { setIsLoadingBookings(false); }
   };
 
   const loadMembers = async () => {
@@ -80,7 +79,7 @@ export const MentorBooking: React.FC<MentorBookingProps> = ({ currentUser, userP
       const users = await getAllUsers();
       // Keep everyone including current user so they can test their own booking page
       setMembers(users);
-    } catch(e) { console.error(e); } finally { setLoadingMembers(false); }
+    } catch(e: any) { console.error(e); } finally { setLoadingMembers(false); }
   };
 
   const filteredMembers = useMemo(() => {
@@ -130,8 +129,8 @@ export const MentorBooking: React.FC<MentorBookingProps> = ({ currentUser, userP
               slots.push({ start: `${hourStr}:05`, end: `${hourStr}:30`, duration: 25, isBusy: false });
               slots.push({ start: `${hourStr}:35`, end: `${(h + (35+25 >= 60 ? 1 : 0)).toString().padStart(2, '0')}:00`, duration: 25, isBusy: false });
           } else {
-              slots.push({ start: `${hourStr}:05`, end: `${(h + 1).toString().padStart(2, '0')}:00`, duration: 55, isBusy: false });
-              slots.push({ start: `${hourStr}:35`, end: `${(h + 1).toString().padStart(2, '0')}:30`, duration: 55, isBusy: false });
+              slots.push({ start: `${hourStr}:05`, end: `${h + 1}:00`, duration: 55, isBusy: false });
+              slots.push({ start: `${hourStr}:35`, end: `${h + 1}:30`, duration: 55, isBusy: false });
           }
       }
 
@@ -194,7 +193,7 @@ export const MentorBooking: React.FC<MentorBookingProps> = ({ currentUser, userP
         alert(isP2P ? "Request sent! Notification emails dispatched to both parties." : "AI session booked! Confirmation sent to your inbox.");
         setActiveTab('my_bookings');
         setSelectedMentor(null); setBookingMember(null); setTopic(''); setSelectedSlot(null);
-    } catch(e) { 
+    } catch(e: any) { 
         console.error(e);
         alert("Booking failed."); 
     } finally { setIsBooking(false); }
@@ -458,7 +457,7 @@ export const MentorBooking: React.FC<MentorBookingProps> = ({ currentUser, userP
                                 </div>
                                 <div className="flex gap-2">
                                     {b.status === 'scheduled' ? (
-                                        <button onClick={() => onStartLiveSession(channels.find(c => c.id === b.mentorId) || channels[0], b.topic, true, b.id)} className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black uppercase tracking-widest rounded-xl shadow-xl shadow-indigo-500/20 transition-all flex items-center gap-2 active:scale-95"><Play size={14} fill="currentColor"/> Join Session</button>
+                                        <button onClick={() => onStartLiveSession(channels.find(c => c.id === b.mentorId) || channels[0], b.topic, true, b.id)} className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black uppercase tracking-widest rounded-xl shadow-xl shadow-indigo-900/40 transition-all flex items-center gap-2 active:scale-95"><Play size={14} fill="currentColor"/> Join Session</button>
                                     ) : (
                                         <div className="text-xs text-slate-500 font-bold italic px-4">Pending Peer Acceptance...</div>
                                     )}

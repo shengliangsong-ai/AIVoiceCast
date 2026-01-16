@@ -432,7 +432,7 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
                 }
             }
         }, [{ functionDeclarations: [getCodeTool, updateActiveFileTool, createInterviewFileTool] }]);
-    } catch (e) {
+    } catch (e: any) {
         console.error("Neural link handshake failed", e);
         setIsReconnecting(false);
     }
@@ -448,8 +448,8 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
 
     let camStream: MediaStream | null = null;
     let screenStream: MediaStream | null = null;
-    try { screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: "always" } as any, audio: true }); } catch(e) {}
-    try { camStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true }); } catch(e) { alert("Camera/Mic mandatory."); setIsStarting(false); return; }
+    try { screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: "always" } as any, audio: true }); } catch(e: any) {}
+    try { camStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true }); } catch(e: any) { alert("Camera/Mic mandatory."); setIsStarting(false); return; }
 
     const audioCtx = getGlobalAudioContext();
     await warmUpAudioContext(audioCtx);
@@ -586,28 +586,47 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
             const historyText = latestTranscript.map(t => `${t.role.toUpperCase()}: ${t.text}`).join('\n');
             const codeText = currentFiles.map(f => `FILE: ${f.name}\nCONTENT:\n${f.content}`).join('\n\n');
 
-            // Corrected GoogleGenAI initialization by removing 'as string' cast on process.env.API_KEY
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-            const prompt = `Analyze this technical interview evaluation. 
-            Mode: ${mode}. Candidate: ${intervieweeLinkedin}. Interviewer: ${interviewerLinkedin}. Job: ${jobDesc}.
-            History: ${historyText}. Workspace: ${codeText}. 
-            Return JSON matching this schema: { 
+            const prompt = `You are a Senior Bar Raiser at a top tier tech company. Provide a extremely detailed and fair evaluation of the candidate based on the interview transcript and code provided.
+            
+            INTERVIEW CONTEXT:
+            Mode: ${mode.toUpperCase()}
+            Candidate Profile: ${intervieweeLinkedin}
+            Interviewer Profile: ${interviewerLinkedin}
+            Target Job: ${jobDesc}
+            
+            RAW TRANSCRIPT:
+            ${historyText}
+            
+            CANDIDATE WORKSPACE:
+            ${codeText}
+            
+            EVALUATION GUIDELINES:
+            1. Technical Skills: Assess correctness, complexity analysis, and edge cases.
+            2. Communication: Assess how well they explained their thought process.
+            3. Optimized STAR Stories: If behavioral, transform their answers into polished STAR format with coaching tips.
+            
+            Return ONLY a valid JSON object matching this schema precisely:
+            { 
                 "score": integer(0-100), 
-                "technicalSkills": "summary", 
-                "communication": "summary", 
-                "collaboration": "summary", 
-                "strengths": ["string"], 
-                "areasForImprovement": ["string"], 
-                "verdict": "string", 
-                "summary": "long text", 
+                "technicalSkills": "summary string", 
+                "communication": "summary string", 
+                "collaboration": "summary string", 
+                "strengths": ["string", "string"], 
+                "areasForImprovement": ["string", "string"], 
+                "verdict": "Strong Hire" | "Hire" | "No Hire" | "Strong No Hire", 
+                "summary": "long text summary of overall performance", 
                 "optimizedStarStories": [ { "title": "string", "situation": "string", "task": "string", "action": "string", "result": "string", "coachTip": "string" } ],
-                "learningMaterial": "Markdown" 
+                "learningMaterial": "Markdown string containing a personalized growth plan based on their performance." 
             }`;
 
             const response = await ai.models.generateContent({ 
                 model: 'gemini-3-flash-preview', 
                 contents: prompt, 
-                config: { responseMimeType: 'application/json' } 
+                config: { 
+                    responseMimeType: 'application/json',
+                    thinkingConfig: { thinkingBudget: 0 }
+                } 
             });
             
             const rawText = response.text || "";
@@ -720,14 +739,14 @@ export const MockInterview: React.FC<MockInterviewProps> = ({ onBack, userProfil
       ]);
       setMyInterviews(userData);
       setPublicInterviews(publicData);
-    } catch (e) {} finally { setLoading(false); }
+    } catch (e: any) {} finally { setLoading(false); }
   };
 
   useEffect(() => { loadInterviewsInternal(); }, [currentUser]);
 
   const parsedHistoricalReport = useMemo(() => {
     if (!activeRecording?.feedback) return null;
-    try { return JSON.parse(activeRecording.feedback) as MockInterviewReport; } catch(e) { return null; }
+    try { return JSON.parse(activeRecording.feedback) as MockInterviewReport; } catch(e: any) { return null; }
   }, [activeRecording]);
 
   const toggleBulkDelete = (id: string) => {

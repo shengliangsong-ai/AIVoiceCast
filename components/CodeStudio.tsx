@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { CodeProject, CodeFile, UserProfile, Channel, CursorPosition, CloudItem, TranscriptItem } from '../types';
 import { listCloudDirectory, saveProjectToCloud, deleteCloudItem, createCloudFolder, subscribeToCodeProject, saveCodeProject, updateCodeFile, updateCursor, claimCodeProjectLock, updateProjectActiveFile, deleteCodeFile, updateProjectAccess } from '../services/firestoreService';
@@ -784,11 +783,19 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
                 return s;
             }));
         }
+
+        // CRITICAL FIX: Ensure project.files state is updated when initialFiles change during mock interviews
+        if (isInterviewerMode) {
+            setProject(prev => ({
+                ...prev,
+                files: initialFiles
+            }));
+        }
     } else if (activeSlots.every(s => s === null)) {
         setActiveSlots([defaultFile, null, null, null]);
         setSlotViewModes({ 0: 'code' });
     }
-  }, [initialFiles, currentSessionIdFromPaths, updateSlotsLRU]);
+  }, [initialFiles, currentSessionIdFromPaths, updateSlotsLRU, isInterviewerMode]);
 
   // CRITICAL: Watcher for focusedSlot to notify listeners when the active file changes
   useEffect(() => {
@@ -943,7 +950,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
           const token = await connectGoogleDrive();
           setDriveToken(token);
           await refreshExplorer();
-      } catch(e) { console.error(e); }
+      } catch(e: any) { console.error(e); }
   };
 
   const refreshExplorer = async () => {
