@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { UserProfile, ReaderTheme, UserAvailability } from '../types';
-import { X, User, Shield, CreditCard, LogOut, CheckCircle, AlertTriangle, Bell, Lock, Database, Trash2, Edit2, Save, FileText, ExternalLink, Loader2, DollarSign, HelpCircle, ChevronDown, ChevronUp, Github, Heart, Hash, Cpu, Sparkles, MapPin, PenTool, Hash as HashIcon, Globe, Zap, Crown, Linkedin, Upload, FileUp, FileCheck, Check, Link, Type, Sun, Moon, Coffee, Palette, Code2, Youtube, HardDrive, Calendar, Clock, Info, Globe2 } from 'lucide-react';
+import { X, User, Shield, CreditCard, LogOut, CheckCircle, AlertTriangle, Bell, Lock, Database, Trash2, Edit2, Save, FileText, ExternalLink, Loader2, DollarSign, HelpCircle, ChevronDown, ChevronUp, ChevronRight, Github, Heart, Hash, Cpu, Sparkles, MapPin, PenTool, Hash as HashIcon, Globe, Zap, Crown, Linkedin, Upload, FileUp, FileCheck, Check, Link, Type, Sun, Moon, Coffee, Palette, Code2, Youtube, HardDrive, Calendar, Clock, Info, Globe2, Terminal } from 'lucide-react';
 import { logUserActivity, updateUserProfile, uploadFileToStorage } from '../services/firestoreService';
 import { signOut, getDriveToken, connectGoogleDrive } from '../services/authService';
 import { clearAudioCache } from '../services/tts';
@@ -16,6 +16,8 @@ interface SettingsModalProps {
   user: UserProfile;
   onUpdateProfile?: (updated: UserProfile) => void;
   onUpgradeClick?: () => void;
+  isSuperAdmin?: boolean;
+  onNavigateAdmin?: () => void;
 }
 
 const THEME_OPTIONS: { id: ReaderTheme, label: string, icon: any, desc: string }[] = [
@@ -28,7 +30,7 @@ const THEME_OPTIONS: { id: ReaderTheme, label: string, icon: any, desc: string }
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ 
-  isOpen, onClose, user, onUpdateProfile, onUpgradeClick 
+  isOpen, onClose, user, onUpdateProfile, onUpgradeClick, isSuperAdmin, onNavigateAdmin
 }) => {
   const [activeTab, setActiveTab] = useState<'general' | 'interests' | 'profile' | 'availability' | 'banking'>('general');
   const [isSaving, setIsSaving] = useState(false);
@@ -131,7 +133,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 if (token) {
                     const studioFolderId = await ensureFolder(token, 'CodeStudio');
                     const resumesFolderId = await ensureFolder(token, 'Resumes', studioFolderId);
-                    await uploadToDrive(token, resumesFolderId, `Resume_${user.displayName.replace(/\s/g, '_')}.pdf`, source.file);
+                    await uploadToDrive(token, resumesFolderId, `Resume_${user.displayName.replace(/\s+/g, '_')}.pdf`, source.file);
                 }
               } catch(driveErr) {}
           } else if (source.url) {
@@ -272,6 +274,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         <div className="space-y-4"><h4 className="text-xs font-bold text-slate-500 uppercase tracking-[0.2em] flex items-center gap-2"><HardDrive size={16} className="text-indigo-400"/> Recording</h4><div className="space-y-2"><label className={`flex items-center justify-between p-4 rounded-2xl border cursor-pointer transition-all ${recordingTarget === 'drive' ? 'bg-indigo-900/20 border-indigo-500 ring-1 ring-indigo-500' : 'bg-slate-950 border-slate-800'}`}><div className="flex items-center gap-3"><input type="radio" checked={recordingTarget === 'drive'} onChange={() => setRecordingTarget('drive')} className="accent-indigo-500 w-4 h-4"/><div><p className="text-sm font-bold text-white">Drive</p></div></div><HardDrive size={20} className={recordingTarget === 'drive' ? 'text-indigo-400' : 'text-slate-700'}/></label><label className={`flex items-center justify-between p-4 rounded-2xl border cursor-pointer transition-all ${recordingTarget === 'youtube' ? 'bg-red-900/20 border-red-500 ring-1 ring-red-500' : 'bg-slate-950 border-slate-800'}`}><div className="flex items-center gap-3"><input type="radio" checked={recordingTarget === 'youtube'} onChange={() => setRecordingTarget('youtube')} className="accent-red-500 w-4 h-4"/><div><p className="text-sm font-bold text-white">YouTube</p></div></div><Youtube size={20} className={recordingTarget === 'youtube' ? 'text-red-400' : 'text-slate-700'}/></label></div></div>
                         <div className="space-y-4"><h4 className="text-xs font-bold text-slate-500 uppercase tracking-[0.2em] flex items-center gap-2"><Cpu size={16}/> Engine</h4><div className="space-y-2"><label className={`flex items-center justify-between p-4 rounded-2xl border cursor-pointer transition-all ${aiProvider === 'gemini' ? 'bg-indigo-900/20 border-indigo-500 ring-1 ring-indigo-500' : 'bg-slate-950 border-slate-800'}`}><div className="flex items-center gap-3"><input type="radio" checked={aiProvider === 'gemini'} onChange={() => setAiProvider('gemini')} className="accent-indigo-500 w-4 h-4"/><div><p className="text-sm font-bold text-white">Gemini</p></div></div><Sparkles size={20} className={aiProvider === 'gemini' ? 'text-indigo-400' : 'text-slate-700'}/></label><label className={`flex items-center justify-between p-4 rounded-2xl border cursor-pointer transition-all ${aiProvider === 'openai' ? 'bg-emerald-900/20 border-emerald-500 ring-1 ring-emerald-500' : 'bg-slate-950 border-slate-800'}`}><div className="flex items-center gap-3"><input type="radio" checked={aiProvider === 'openai'} onChange={() => setAiProvider('openai')} className="accent-emerald-500 w-4 h-4"/><div><p className="text-sm font-bold text-white">GPT</p></div></div><Zap size={20} className={aiProvider === 'openai' ? 'text-emerald-400' : 'text-slate-700'}/></label></div></div>
                     </div>
+
+                    {isSuperAdmin && (
+                        <div className="pt-8 border-t border-slate-800 space-y-4">
+                            <h4 className="text-xs font-bold text-red-400 uppercase tracking-[0.2em] flex items-center gap-2"><Terminal size={16}/> Admin Spectrum</h4>
+                            <button 
+                                onClick={() => { onClose(); onNavigateAdmin?.(); }}
+                                className="w-full flex items-center justify-between p-4 bg-red-900/10 border border-red-900/30 rounded-2xl hover:bg-red-900/20 transition-all group"
+                            >
+                                <div className="flex items-center gap-3 text-red-200">
+                                    <Shield size={20}/>
+                                    <div className="text-left">
+                                        <p className="text-sm font-bold">Open Admin Inspector</p>
+                                        <p className="text-[10px] opacity-60">Manage system channels and user tiers.</p>
+                                    </div>
+                                </div>
+                                <ChevronRight className="text-red-900 group-hover:text-red-400 group-hover:translate-x-1 transition-all" size={20}/>
+                            </button>
+                        </div>
+                    )}
                 </div>
             )}
 

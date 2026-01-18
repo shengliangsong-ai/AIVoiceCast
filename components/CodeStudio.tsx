@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { CodeProject, CodeFile, UserProfile, Channel, CursorPosition, CloudItem, TranscriptItem } from '../types';
 import { listCloudDirectory, saveProjectToCloud, deleteCloudItem, createCloudFolder, subscribeToCodeProject, saveCodeProject, updateCodeFile, updateCursor, claimCodeProjectLock, updateProjectActiveFile, deleteCodeFile, updateProjectAccess } from '../services/firestoreService';
 import { ensureCodeStudioFolder, ensureFolder, listDriveFiles, readDriveFile, saveToDrive, deleteDriveFile, createDriveFolder, DriveFile, moveDriveFile, getDriveFileStreamUrl, getDrivePreviewUrl, findFolder, downloadDriveFileAsBlob } from '../services/googleDriveService';
-import { connectGoogleDrive, getDriveToken, signInWithGoogle, signInWithGitHub } from '../services/authService';
+import { connectGoogleDrive, getDriveToken, signInWithGoogle, signInWithGitHub, clearGitHubToken } from '../services/authService';
 import { fetchRepoInfo, fetchRepoContents, fetchFileContent, updateRepoFile, fetchUserRepos, fetchRepoSubTree, deleteRepoFile, renameRepoFile } from '../services/githubService';
 import { GeminiLiveService } from '../services/geminiLive';
 import { MarkdownView } from './MarkdownView';
@@ -723,7 +723,8 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
   
   const internalFileContentRef = useRef<Map<string, string>>(new Map());
   const lastSessionIdRef = useRef<string | null>(null);
-  const lastFilePathsRef = useRef<Set<string>>(new Set());
+  const lastOpenedPathRef = useRef<string | null>(null);
+  const initialFilesLengthRef = useRef<number>(0);
 
   const currentSessionIdFromPaths = useMemo(() => {
       const firstPath = initialFiles?.[0]?.path;
@@ -752,27 +753,20 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
     if (initialFiles && initialFiles.length > 0) {
         const sid = currentSessionIdFromPaths;
         const isNewSession = sid !== lastSessionIdRef.current;
+        const hasGrown = initialFiles.length > initialFilesLengthRef.current;
 
         if (isNewSession) {
             setActiveSlots([null, null, null, null]);
             internalFileContentRef.current.clear();
-            lastFilePathsRef.current.clear();
+            lastOpenedPathRef.current = null;
             lastSessionIdRef.current = sid;
         }
 
-        let fileToOpen: CodeFile | null = null;
-        initialFiles.forEach(file => {
-            if (!lastFilePathsRef.current.has(file.path)) {
-                fileToOpen = file;
-                lastFilePathsRef.current.add(file.path);
-            }
-            if (!internalFileContentRef.current.has(file.path) || internalFileContentRef.current.get(file.path) !== file.content) {
-                internalFileContentRef.current.set(file.path, file.content);
-            }
-        });
-
-        if (fileToOpen) {
-            updateSlotsLRU(fileToOpen);
+        const newestFile = [...initialFiles].reverse()[0];
+        
+        if (newestFile && (newestFile.path !== lastOpenedPathRef.current || hasGrown)) {
+            updateSlotsLRU(newestFile);
+            lastOpenedPathRef.current = newestFile.path;
         } else {
             setActiveSlots(prev => prev.map((s) => {
                 if (!s) return null;
@@ -784,20 +778,17 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
             }));
         }
 
-        // CRITICAL FIX: Ensure project.files state is updated when initialFiles change during mock interviews
-        if (isInterviewerMode) {
-            setProject(prev => ({
-                ...prev,
-                files: initialFiles
-            }));
-        }
+        initialFilesLengthRef.current = initialFiles.length;
+        setProject(prev => ({
+            ...prev,
+            files: initialFiles
+        }));
     } else if (activeSlots.every(s => s === null)) {
         setActiveSlots([defaultFile, null, null, null]);
         setSlotViewModes({ 0: 'code' });
     }
-  }, [initialFiles, currentSessionIdFromPaths, updateSlotsLRU, isInterviewerMode]);
+  }, [initialFiles, currentSessionIdFromPaths, updateSlotsLRU]);
 
-  // CRITICAL: Watcher for focusedSlot to notify listeners when the active file changes
   useEffect(() => {
     const file = activeSlots[focusedSlot];
     if (file && onFileChange) {
@@ -968,8 +959,16 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
               if (project.github && githubTree.length === 0) {
                    await handleAutoLoadDefaultRepo(githubToken, `${project.github.owner}/${project.github.repo}`);
               } else {
-                  const repos = await fetchUserRepos(githubToken);
-                  setGithubRepos(repos);
+                  try {
+                      const repos = await fetchUserRepos(githubToken);
+                      setGithubRepos(repos);
+                  } catch (e: any) {
+                      if (e.message.includes('401') || e.message.includes('403')) {
+                          clearGitHubToken();
+                          setGithubToken(null);
+                      }
+                      throw e;
+                  }
               }
           }
       } finally { setIsExplorerLoading(false); }
@@ -996,6 +995,10 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
           }));
       } catch (e: any) {
           addSystemLog("Failed to load repo: " + e.message, 'error');
+          if (e.message.includes('401') || e.message.includes('403')) {
+              clearGitHubToken();
+              setGithubToken(null);
+          }
       } finally {
           setIsGithubLoading(false);
       }
@@ -1021,6 +1024,10 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
           }));
       } catch (e: any) {
           alert("Failed to load repository tree: " + e.message);
+          if (e.message.includes('401') || e.message.includes('403')) {
+              clearGitHubToken();
+              setGithubToken(null);
+          }
       } finally {
           setIsGithubLoading(false);
       }
@@ -1049,6 +1056,10 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
     } catch(e: any) { 
         setSaveStatus('modified'); 
         addSystemLog(`Save Failed: ${e.message}`, 'error');
+        if (e.message.includes('401') || e.message.includes('403')) {
+            clearGitHubToken();
+            setGithubToken(null);
+        }
     }
   };
 
@@ -1077,25 +1088,34 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       if (node.type === 'file') {
           setLoadingIds(prev => ({ ...prev, [node.id]: true }));
           try {
-              let fileData: CodeFile | null = null;
-              if (activeTab === 'drive' && driveToken) {
-                  const text = await readDriveFile(driveToken, node.id);
-                  fileData = { name: node.name, path: `drive://${node.id}`, content: text || "", language: getLanguageFromExt(node.name), loaded: true, isDirectory: false, isModified: false, driveId: node.id };
-              } else if (activeTab === 'session') {
-                  const match = project.files.find(f => f.path === node.id);
-                  if (match) fileData = match;
-              } else if (activeTab === 'github' && project.github) {
-                  const { owner, repo, branch } = project.github;
-                  const text = await fetchFileContent(githubToken, owner, repo, node.id, branch);
-                  fileData = { name: node.name, path: node.id, content: text || "", language: getLanguageFromExt(node.name), size: node.size, loaded: true, isDirectory: false, isModified: false, sha: node.data?.sha };
-              } else if (activeTab === 'cloud' && node.data?.url) {
-                  const res = await fetch(node.data.url);
-                  const text = await res.text();
-                  fileData = { name: node.name, path: node.id, content: text || "", language: getLanguageFromExt(node.name), size: node.size, loaded: true, isDirectory: false, isModified: false };
+              let fileData = project.files.find(f => f.path === node.id || f.path === `drive://${node.id}`);
+              
+              if (!fileData) {
+                  if (activeTab === 'drive' && driveToken) {
+                      const text = await readDriveFile(driveToken, node.id);
+                      fileData = { name: node.name, path: `drive://${node.id}`, content: text || "", language: getLanguageFromExt(node.name), loaded: true, isDirectory: false, isModified: false, driveId: node.id };
+                  } else if (activeTab === 'github' && project.github) {
+                      const { owner, repo, branch } = project.github;
+                      const text = await fetchFileContent(githubToken, owner, repo, node.id, branch);
+                      fileData = { name: node.name, path: node.id, content: text || "", language: getLanguageFromExt(node.name), size: node.size, loaded: true, isDirectory: false, isModified: false, sha: node.data?.sha };
+                  } else if (activeTab === 'cloud' && node.data?.url) {
+                      const res = await fetch(node.data.url);
+                      const text = await res.text();
+                      fileData = { name: node.name, path: node.id, content: text || "", language: getLanguageFromExt(node.name), size: node.size, loaded: true, isDirectory: false, isModified: false };
+                  }
+                  
+                  if (fileData) {
+                      setProject(prev => ({ ...prev, files: [...prev.files, fileData!] }));
+                  }
               }
+              
               if (fileData) updateSlotFile(fileData, focusedSlot);
           } catch(e: any) { 
               alert(`Error opening file: ${e.message}`); 
+              if (e.message.includes('401') || e.message.includes('403')) {
+                  clearGitHubToken();
+                  setGithubToken(null);
+              }
           } finally {
               setLoadingIds(prev => ({ ...prev, [node.id]: false }));
           }
@@ -1107,7 +1127,6 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
   const toggleFolder = async (node: TreeNode) => {
       setExpandedIds(prev => ({ ...prev, [node.id]: !prev[node.id] }));
       
-      // Load Children if not already loaded
       if (!expandedIds[node.id] && !node.isLoaded) {
           setLoadingIds(prev => ({ ...prev, [node.id]: true }));
           try {
@@ -1139,6 +1158,10 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
               }
           } catch (e: any) {
               addSystemLog(`Failed to expand folder: ${e.message}`, 'error');
+              if (e.message.includes('401') || e.message.includes('403')) {
+                  clearGitHubToken();
+                  setGithubToken(null);
+              }
           } finally {
               setLoadingIds(prev => ({ ...prev, [node.id]: false }));
           }
@@ -1154,8 +1177,6 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       if (file) {
           const lang = getLanguageFromExt(file.name);
           setSlotViewModes(prev => ({ ...prev, [slotIndex]: ['markdown', 'pdf', 'whiteboard', 'video', 'audio', 'youtube'].includes(lang) ? 'preview' : 'code' }));
-          
-          // CRITICAL: Notify listeners that the active file has changed or loaded
           if (onFileChange) onFileChange(file);
       }
   };
@@ -1164,14 +1185,20 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       const file = activeSlots[slotIdx];
       if (!file) return;
       const updatedFile = { ...file, content: newCode, isModified: true };
-      const newSlots = [...activeSlots];
-      newSlots[slotIdx] = updatedFile;
-      setActiveSlots(newSlots);
+      
+      setActiveSlots(prev => {
+          const next = [...prev];
+          next[slotIdx] = updatedFile;
+          return next.map(s => s?.path === updatedFile.path ? updatedFile : s);
+      });
+      
+      setProject(prev => ({
+          ...prev,
+          files: prev.files.map(f => f.path === updatedFile.path ? updatedFile : f)
+      }));
+
       setSaveStatus('modified');
-      
-      // CRITICAL: Notify listeners about code changes immediately
       if (onFileChange) onFileChange(updatedFile);
-      
       if (isLive && lockStatus === 'mine') updateCodeFile(project.id, updatedFile);
   };
 
@@ -1180,12 +1207,17 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       if (!file) return;
       setIsFormattingSlots(prev => ({ ...prev, [slotIdx]: true }));
       try {
-          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
           const response = await ai.models.generateContent({
               model: 'gemini-3-flash-preview',
-              contents: `Reformat this ${file.language} code for production quality. Keep logic identical. Return ONLY code:\n\n${file.content}`
+              contents: `Reformat this ${file.language} code for production quality. Keep logic identical. Return ONLY the code content, with no markdown delimiters or extra text:\n\n${file.content}`
           });
-          if (response.text) handleCodeChangeInSlot(response.text, slotIdx);
+          if (response.text) {
+              const cleaned = response.text.trim().replace(/^```[a-z]*\n/i, '').replace(/\n```$/i, '');
+              handleCodeChangeInSlot(cleaned, slotIdx);
+          }
+      } catch (e: any) {
+          console.error("Format error:", e);
       } finally {
           setIsFormattingSlots(prev => ({ ...prev, [slotIdx]: false }));
       }
@@ -1198,13 +1230,15 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
       setIsTerminalOpen(prev => ({ ...prev, [slotIdx]: true }));
       const updateTerminal = (msg: string, isError = false) => { setTerminalOutputs(prev => ({ ...prev, [slotIdx]: [...(prev[slotIdx] || []), `${isError ? '[ERROR] ' : ''}${msg}`] })); };
       try {
-          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
           const prompt = `Simulate output for: Lang: ${file.language}, Code: ${file.content}. Respond JSON: { "stdout": "string", "stderr": "string", "exitCode": number }`;
           const resp = await ai.models.generateContent({ model: 'gemini-3-flash-preview', contents: prompt, config: { responseMimeType: 'application/json' } });
           const result = JSON.parse(resp.text || '{}');
           if (result.stdout) updateTerminal(result.stdout);
           if (result.stderr) updateTerminal(result.stderr, true);
-      } catch (e: any) { updateTerminal(`Execution failed: ${e.message}`, true); } finally { setIsRunning(prev => ({ ...prev, [slotIdx]: false })); }
+      } catch (e: any) { 
+          updateTerminal(`Execution failed: ${e.message}`, true); 
+      } finally { setIsRunning(prev => ({ ...prev, [slotIdx]: false })); }
   };
 
   const handleSendMessage = async (text: string) => {
@@ -1212,7 +1246,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
     setChatMessages(prev => [...prev, { role: 'user', text }]);
     setIsChatThinking(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const response = await ai.models.generateContent({ 
           model: 'gemini-3-pro-preview', 
           contents: text,
@@ -1225,6 +1259,8 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
               else if (fc.name === 'create_new_file') await handleCreateNewFile(args.filename, args.content);
           }
       } else { setChatMessages(prev => [...prev, { role: 'ai', text: response.text || "..." }]); }
+    } catch (e: any) {
+        console.error("Chat error:", e);
     } finally { setIsChatThinking(false); }
   };
 
@@ -1268,17 +1304,16 @@ export const CodeStudio: React.FC<CodeStudioProps> = ({
   }, [driveItems]);
 
   const sessionTree = useMemo(() => {
-      if (!isInterviewerMode) return [];
       return project.files.map(f => ({ id: f.path, name: f.name, type: 'file' as const, isLoaded: true, size: f.size, data: f }));
-  }, [isInterviewerMode, project.files]);
+  }, [project.files]);
 
   return (
     <div className="flex h-full w-full bg-slate-950 text-slate-100 overflow-hidden">
       <div className={`${isLeftOpen ? '' : 'hidden'} bg-slate-900 border-r border-slate-800 flex flex-col shrink-0 overflow-hidden`} style={{ width: `${leftWidth}px` }}>
           <div className="flex border-b border-slate-800 shrink-0">
-              {isInterviewerMode && <button onClick={() => setActiveTab('session')} className={`flex-1 py-3 transition-colors ${activeTab === 'session' ? 'border-b-2 border-indigo-500 bg-slate-800' : ''}`}>
+              <button onClick={() => setActiveTab('session')} className={`flex-1 py-3 transition-colors ${activeTab === 'session' ? 'border-b-2 border-indigo-500 bg-slate-800 text-white' : 'text-slate-500 hover:text-white'}`}>
                 <Activity size={18}/>
-              </button>}
+              </button>
               <button onClick={() => setActiveTab('drive')} className={`flex-1 py-3 transition-colors ${activeTab === 'drive' ? 'border-b-2 border-indigo-500 bg-slate-800 text-white' : 'text-slate-500 hover:text-white'}`}>
                 <HardDrive size={18}/>
               </button>

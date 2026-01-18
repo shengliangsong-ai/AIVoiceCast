@@ -51,7 +51,7 @@ export class GeminiLiveService {
     this.nextStartTime = this.outputAudioContext.currentTime;
   }
 
-  async connect(voiceName: string, systemInstruction: string, callbacks: LiveConnectionCallbacks, tools?: any[]) {
+  async connect(voiceName: string, systemInstruction: string, callbacks: LiveConnectionCallbacks, tools?: any[], externalStream?: MediaStream) {
     try {
       this.isActive = true;
       registerAudioOwner(`Live_${this.id}`, () => this.disconnect());
@@ -66,7 +66,10 @@ export class GeminiLiveService {
         await this.initializeAudio();
       }
 
-      if (!this.stream) {
+      // Priority: use the provided merged stream (mic + system audio)
+      if (externalStream) {
+          this.stream = externalStream;
+      } else if (!this.stream) {
           this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       }
 

@@ -158,6 +158,8 @@ export interface RecordingSession {
   driveUrl?: string; 
   mediaType?: string;
   transcriptUrl: string;
+  blob?: Blob; // Persisted binary for local revival
+  size?: number; // File size in bytes
 }
 
 export interface Group {
@@ -511,7 +513,7 @@ export interface Booking {
   transcriptUrl?: string | null;
 }
 
-export type ViewState = 'directory' | 'podcast_detail' | 'live_session' | 'docs' | 'code_studio' | 'whiteboard' | 'blog' | 'chat' | 'careers' | 'calendar' | 'groups' | 'mentorship' | 'recordings' | 'check_designer' | 'check_viewer' | 'shipping_labels' | 'shipping_viewer' | 'icon_generator' | 'icon_viewer' | 'notebook_viewer' | 'card_workshop' | 'card_viewer' | 'mission' | 'firestore_debug' | 'coin_wallet' | 'mock_interview' | 'graph_studio';
+export type ViewState = 'directory' | 'podcast_detail' | 'live_session' | 'docs' | 'code_studio' | 'whiteboard' | 'blog' | 'chat' | 'careers' | 'calendar' | 'groups' | 'mentorship' | 'recordings' | 'check_designer' | 'check_viewer' | 'shipping_labels' | 'shipping_viewer' | 'icon_generator' | 'icon_viewer' | 'notebook_viewer' | 'card_workshop' | 'card_viewer' | 'mission' | 'firestore_debug' | 'coin_wallet' | 'mock_interview' | 'graph_studio' | 'story' | 'privacy' | 'user_guide';
 
 export interface MockInterviewRecording {
   id: string;

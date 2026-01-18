@@ -1,8 +1,9 @@
+
 import React, { useState, useEffect, useMemo, ErrorInfo, ReactNode, Component } from 'react';
 import { 
   Podcast, Search, LayoutGrid, RefreshCw, 
   Home, Video, User, ArrowLeft, Play, Gift, 
-  Calendar, Briefcase, Users, Disc, FileText, Code, Wand2, PenTool, Rss, Loader2, MessageSquare, AppWindow, Square, Menu, X, Shield, Plus, Rocket, Book, AlertTriangle, Terminal, Trash2, LogOut, Truck, Maximize2, Minimize2, Wallet, Sparkles, Coins, Cloud, ChevronDown, Command, Activity
+  Calendar, Briefcase, Users, Disc, FileText, Code, Wand2, PenTool, Rss, Loader2, MessageSquare, AppWindow, Square, Menu, X, Shield, Plus, Rocket, Book, AlertTriangle, Terminal, Trash2, LogOut, Truck, Maximize2, Minimize2, Wallet, Sparkles, Coins, Cloud, ChevronDown, Command, Activity, BookOpen
 } from 'lucide-react';
 
 import { Channel, UserProfile, ViewState, TranscriptItem, CodeFile } from '../types';
@@ -44,6 +45,7 @@ import { BrandLogo } from './BrandLogo';
 import { CoinWallet } from './CoinWallet';
 import { MockInterview } from './MockInterview';
 import { GraphStudio } from './GraphStudio';
+import { ProjectStory } from './ProjectStory';
 
 import { getCurrentUser, getDriveToken } from '../services/authService';
 import { auth, db } from '../services/firebaseConfig';
@@ -53,7 +55,7 @@ import { ensureCodeStudioFolder, loadAppStateFromDrive, saveAppStateToDrive } fr
 import { getUserChannels, saveUserChannel } from '../utils/db';
 import { HANDCRAFTED_CHANNELS } from '../utils/initialData';
 import { stopAllPlatformAudio } from '../utils/audioUtils';
-import { subscribeToPublicChannels, voteChannel, addCommentToChannel, deleteCommentFromChannel, updateCommentInChannel, getUserProfile, claimCoinCheck, syncUserProfile, publishChannelToFirestore } from '../services/firestoreService';
+import { subscribeToPublicChannels, voteChannel, addCommentToChannel, deleteCommentFromChannel, updateCommentInChannel, getUserProfile, claimCoinCheck, syncUserProfile, publishChannelToFirestore, isUserAdmin } from '../services/firestoreService';
 
 interface ErrorBoundaryProps {
   children?: ReactNode;
@@ -66,7 +68,6 @@ interface ErrorBoundaryState {
 
 class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   state: ErrorBoundaryState = { hasError: false, error: null };
-  // Standard class components in some TS configurations require explicit declare for props when extending React.Component
   declare props: ErrorBoundaryProps;
 
   constructor(props: ErrorBoundaryProps) {
@@ -122,7 +123,7 @@ const UI_TEXT = {
     calendar: "Schedule",
     mentorship: "Experts",
     groups: "Communities",
-    recordings: "History",
+    recordings: "Recordings",
     docs: "Paperwork",
     lectures: "Guided Learning",
     podcasts: "Knowledge Hub",
@@ -140,7 +141,8 @@ const UI_TEXT = {
     fullscreen: "Toggle Immersion",
     wallet: "Neural Assets",
     mockInterview: "Career Prep",
-    graph: "Logic Visualizer"
+    graph: "Logic Visualizer",
+    story: "Project Story"
   },
   zh: {
     appTitle: "神经棱镜",
@@ -157,7 +159,7 @@ const UI_TEXT = {
     calendar: "日程安排",
     mentorship: "专家导师",
     groups: "社区群组",
-    recordings: "历史存档",
+    recordings: "录音存档",
     docs: "文档空间",
     lectures: "引导式学习",
     podcasts: "知识中心",
@@ -175,7 +177,8 @@ const UI_TEXT = {
     fullscreen: "沉浸模式",
     wallet: "神经资产",
     mockInterview: "职业准备",
-    graph: "逻辑可视化"
+    graph: "逻辑可视化",
+    story: "项目故事"
   }
 };
 
@@ -217,13 +220,24 @@ const App: React.FC = () => {
   const [createModalInitialDate, setCreateModalInitialDate] = useState<Date | null>(null);
   const [isVoiceCreateOpen, setIsVoiceCreateOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
-  const [isPrivacyOpen, setIsPrivacyOpen] = useState(false);
-  const [isUserGuideOpen, setIsUserGuideOpen] = useState(false);
   const [isPricingModalOpen, setIsPricingModalOpen] = useState(false);
   const [globalVoice, setGlobalVoice] = useState('Auto');
   const [channelToComment, setChannelToComment] = useState<Channel | null>(null);
   const [channelToEdit, setChannelToEdit] = useState<Channel | null>(null);
   const [initialStudioFiles, setInitialStudioFiles] = useState<CodeFile[]>([]);
+
+  // Memoized Admin Status with Strict Developer Email Bypass
+  const isSuperAdmin = useMemo(() => {
+      if (!currentUser) return false;
+      // 1. Hardcoded Owner Bypass (The Ultimate Root)
+      const ownerEmails = ['shengliang.song.ai@gmail.com'];
+      if (ownerEmails.includes(currentUser.email)) return true;
+      // 2. Check Firestore Profile (Group Membership admin_neural_prism)
+      if (isUserAdmin(userProfile)) return true;
+      // 3. Local Override for debugging
+      if (localStorage.getItem('debug_admin_override') === 'true') return true;
+      return false;
+  }, [userProfile, currentUser]);
 
   const [liveSessionParams, setLiveSessionParams] = useState<{
     channel: Channel;
@@ -238,28 +252,43 @@ const App: React.FC = () => {
     returnTo?: ViewState;
   } | null>(null);
 
-  const allApps = useMemo(() => [
-    { id: 'podcasts', label: t.podcasts, icon: Podcast, action: () => { handleSetViewState('directory'); }, color: 'text-indigo-400' },
-    { id: 'mock_interview', label: t.mockInterview, icon: Video, action: () => handleSetViewState('mock_interview'), color: 'text-red-500' },
-    { id: 'graph_studio', label: t.graph, icon: Activity, action: () => handleSetViewState('graph_studio'), color: 'text-emerald-400' },
-    { id: 'wallet', label: t.wallet, icon: Coins, action: () => handleSetViewState('coin_wallet'), color: 'text-amber-400' },
-    { id: 'docs', label: t.docs, icon: FileText, action: () => handleSetViewState('docs'), color: 'text-emerald-400' },
-    { id: 'check_designer', label: t.checks, icon: Wallet, action: () => handleSetViewState('check_designer'), color: 'text-orange-400' },
-    { id: 'chat', label: t.chat, icon: MessageSquare, action: () => handleSetViewState('chat'), color: 'text-blue-400' },
-    { id: 'mentorship', label: t.mentorship, icon: Briefcase, action: () => handleSetViewState('mentorship'), color: 'text-emerald-400' },
-    { id: 'shipping_labels', label: t.shipping, icon: Truck, action: () => handleSetViewState('shipping_labels'), color: 'text-emerald-400' },
-    { id: 'icon_lab', label: t.icons, icon: AppWindow, action: () => handleSetViewState('icon_generator'), color: 'text-cyan-400' },
-    { id: 'code_studio', label: t.code, icon: Code, action: () => handleSetViewState('code_studio'), color: 'text-blue-400' },
-    { id: 'notebook_viewer', label: t.notebooks, icon: Book, action: () => handleSetViewState('notebook_viewer'), color: 'text-orange-300' },
-    { id: 'whiteboard', label: t.whiteboard, icon: PenTool, action: () => handleSetViewState('whiteboard'), color: 'text-pink-400' },
-    { id: 'groups', label: t.groups, icon: Users, action: () => handleSetViewState('groups'), color: 'text-purple-400' },
-    { id: 'recordings', label: t.recordings, icon: Disc, action: () => handleSetViewState('recordings'), color: 'text-red-400' },
-    { id: 'calendar', label: t.calendar, icon: Calendar, action: () => handleSetViewState('calendar'), color: 'text-emerald-400' },
-    { id: 'careers', label: t.careers, icon: Briefcase, action: () => handleSetViewState('careers'), color: 'text-yellow-400' },
-    { id: 'blog', label: t.blog, icon: Rss, action: () => handleSetViewState('blog'), color: 'text-orange-400' },
-    { id: 'card_workshop', label: t.cards, icon: Gift, action: () => handleSetViewState('card_workshop'), color: 'text-red-400' },
-    { id: 'mission', label: t.mission, icon: Rocket, action: () => handleSetViewState('mission'), color: 'text-orange-500' },
-  ], [t]);
+  const allApps = useMemo(() => {
+    const baseApps = [
+        { id: 'podcasts', label: t.podcasts, icon: Podcast, action: () => { handleSetViewState('directory'); }, color: 'text-indigo-400' },
+        { id: 'mock_interview', label: t.mockInterview, icon: Video, action: () => handleSetViewState('mock_interview'), color: 'text-red-500' },
+        { id: 'graph_studio', label: t.graph, icon: Activity, action: () => handleSetViewState('graph_studio'), color: 'text-emerald-400' },
+        { id: 'wallet', label: t.wallet, icon: Coins, action: () => handleSetViewState('coin_wallet'), color: 'text-amber-400' },
+        { id: 'docs', label: t.docs, icon: FileText, action: () => handleSetViewState('docs'), color: 'text-emerald-400' },
+        { id: 'check_designer', label: t.checks, icon: Wallet, action: () => handleSetViewState('check_designer'), color: 'text-orange-400' },
+        { id: 'chat', label: t.chat, icon: MessageSquare, action: () => handleSetViewState('chat'), color: 'text-blue-400' },
+        { id: 'mentorship', label: t.mentorship, icon: Briefcase, action: () => handleSetViewState('mentorship'), color: 'text-emerald-400' },
+        { id: 'shipping_labels', label: t.shipping, icon: Truck, action: () => handleSetViewState('shipping_labels'), color: 'text-emerald-400' },
+        { id: 'icon_lab', label: t.icons, icon: AppWindow, action: () => handleSetViewState('icon_generator'), color: 'text-cyan-400' },
+        { id: 'code_studio', label: t.code, icon: Code, action: () => handleSetViewState('code_studio'), color: 'text-blue-400' },
+        { id: 'notebook_viewer', label: t.notebooks, icon: Book, action: () => handleSetViewState('notebook_viewer'), color: 'text-orange-300' },
+        { id: 'whiteboard', label: t.whiteboard, icon: PenTool, action: () => handleSetViewState('whiteboard'), color: 'text-pink-400' },
+        { id: 'groups', label: t.groups, icon: Users, action: () => handleSetViewState('groups'), color: 'text-purple-400' },
+        { id: 'recordings', label: t.recordings, icon: Disc, action: () => handleSetViewState('recordings'), color: 'text-red-400' },
+        { id: 'calendar', label: t.calendar, icon: Calendar, action: () => handleSetViewState('calendar'), color: 'text-emerald-400' },
+        { id: 'careers', label: t.careers, icon: Briefcase, action: () => handleSetViewState('careers'), color: 'text-yellow-400' },
+        { id: 'blog', label: t.blog, icon: Rss, action: () => handleSetViewState('blog'), color: 'text-orange-400' },
+        { id: 'card_workshop', label: t.cards, icon: Gift, action: () => handleSetViewState('card_workshop'), color: 'text-red-400' },
+        { id: 'mission', label: t.mission, icon: Rocket, action: () => handleSetViewState('mission'), color: 'text-orange-500' },
+        { id: 'story', label: t.story, icon: BookOpen, action: () => handleSetViewState('story'), color: 'text-cyan-400' },
+    ];
+
+    if (isSuperAdmin) {
+        baseApps.push({ 
+            id: 'firestore_debug', 
+            label: 'Admin Inspector', 
+            icon: Terminal, 
+            action: () => handleSetViewState('firestore_debug'), 
+            color: 'text-red-500' 
+        });
+    }
+
+    return baseApps;
+  }, [t, isSuperAdmin]);
 
   const handleSetViewState = (newState: ViewState, params: Record<string, string> = {}) => {
     stopAllPlatformAudio(`NavigationTransition:${viewState}->${newState}`);
@@ -414,10 +443,14 @@ const App: React.FC = () => {
       );
   }
 
-  const isPublicView = ['mission', 'careers', 'user_guide', 'card_workshop', 'card_viewer', 'icon_viewer', 'shipping_viewer', 'check_viewer'].includes(viewState as string);
+  const isPublicView = ['mission', 'careers', 'user_guide', 'card_workshop', 'card_viewer', 'icon_viewer', 'shipping_viewer', 'check_viewer', 'story', 'privacy', 'user_guide'].includes(viewState as string);
 
   if (!currentUser && !isPublicView) {
-      return <LoginPage onMissionClick={() => handleSetViewState('mission')} onPrivacyClick={() => setIsPrivacyOpen(true)} />;
+      return <LoginPage 
+        onMissionClick={() => handleSetViewState('mission')} 
+        onStoryClick={() => handleSetViewState('story')} 
+        onPrivacyClick={() => handleSetViewState('privacy')} 
+      />;
   }
 
   const activeChannel = allChannels.find(c => c.id === activeChannelId);
@@ -460,7 +493,7 @@ const App: React.FC = () => {
                         ))}
                       </div>
                       <div className="p-3 bg-slate-950 border-t border-slate-800 flex justify-center">
-                        <p className="text-[8px] font-black text-slate-600 uppercase tracking-[0.2em]">Neural Prism v5.0.0</p>
+                        <p className="text-[8px] font-black text-slate-600 uppercase tracking-[0.2em]">Neural Prism v5.1.0</p>
                       </div>
                     </div>
                   </>
@@ -515,7 +548,7 @@ const App: React.FC = () => {
                  <button onClick={() => { setIsUserMenuOpen(!isUserMenuOpen); setIsAppsMenuOpen(false); }} className="w-10 h-10 rounded-full border-2 border-slate-700 overflow-hidden hover:border-indigo-500 transition-colors">
                     <img src={currentUser?.photoURL || `https://ui-avatars.com/api/?name=Guest`} alt="Profile" className="w-full h-full object-cover" />
                  </button>
-                 <StudioMenu isUserMenuOpen={isUserMenuOpen} setIsUserMenuOpen={setIsUserMenuOpen} currentUser={currentUser} userProfile={userProfile} setUserProfile={setUserProfile} globalVoice={globalVoice} setGlobalVoice={setGlobalVoice} setIsCreateModalOpen={setIsCreateModalOpen} setIsVoiceCreateOpen={setIsVoiceCreateOpen} onUpgradeClick={() => setIsPricingModalOpen(true)} setIsSyncModalOpen={() => {}} setIsSettingsModalOpen={setIsSettingsModalOpen} onOpenUserGuide={() => setIsUserGuideOpen(true)} onNavigate={(v) => handleSetViewState(v as any)} onOpenPrivacy={() => setIsPrivacyOpen(true)} t={t} language={language} setLanguage={setLanguage} channels={allChannels} />
+                 <StudioMenu isUserMenuOpen={isUserMenuOpen} setIsUserMenuOpen={setIsUserMenuOpen} currentUser={currentUser} userProfile={userProfile} setUserProfile={setUserProfile} globalVoice={globalVoice} setGlobalVoice={setGlobalVoice} setIsCreateModalOpen={setIsCreateModalOpen} setIsVoiceCreateOpen={setIsVoiceCreateOpen} onUpgradeClick={() => setIsPricingModalOpen(true)} setIsSyncModalOpen={() => {}} setIsSettingsModalOpen={setIsSettingsModalOpen} onOpenUserGuide={() => handleSetViewState('user_guide')} onNavigate={(v) => handleSetViewState(v as any)} onOpenPrivacy={() => handleSetViewState('privacy')} t={t} language={language} setLanguage={setLanguage} channels={allChannels} isSuperAdmin={isSuperAdmin} />
               </div>
            </div>
         </header>
@@ -554,19 +587,20 @@ const App: React.FC = () => {
             {viewState === 'notebook_viewer' && ( <NotebookViewer onBack={() => handleSetViewState('directory')} currentUser={currentUser} notebookId={activeItemId || undefined} /> )}
             {(viewState === 'card_workshop' || viewState === 'card_viewer') && ( <CardWorkshop onBack={() => handleSetViewState('directory')} cardId={activeItemId || undefined} isViewer={viewState === 'card_viewer' || !!activeItemId} /> )}
             {viewState === 'mission' && ( <MissionManifesto onBack={() => handleSetViewState('directory')} /> )}
-            {viewState === 'firestore_debug' && ( <FirestoreInspector onBack={() => handleSetViewState('directory')} /> )}
+            {viewState === 'firestore_debug' && ( <FirestoreInspector onBack={() => handleSetViewState('directory')} userProfile={userProfile} /> )}
             {viewState === 'coin_wallet' && ( <CoinWallet onBack={() => handleSetViewState('directory')} user={userProfile} /> )}
             {viewState === 'mock_interview' && ( <MockInterview onBack={() => handleSetViewState('directory')} userProfile={userProfile} onStartLiveSession={handleStartLiveSession} /> )}
             {viewState === 'graph_studio' && ( <GraphStudio onBack={() => handleSetViewState('directory')} /> )}
+            {viewState === 'story' && ( <ProjectStory onBack={() => handleSetViewState('directory')} /> )}
+            {viewState === 'privacy' && ( <PrivacyPolicy onBack={() => handleSetViewState('directory')} /> )}
+            {viewState === 'user_guide' && ( <UserManual onBack={() => handleSetViewState('directory')} /> )}
         </main>
 
         <CreateChannelModal isOpen={isCreateModalOpen} onClose={() => { setIsCreateModalOpen(false); setCreateModalInitialDate(null); }} onCreate={handleCreateChannel} currentUser={currentUser} initialDate={createModalInitialDate} />
         <VoiceCreateModal isOpen={isVoiceCreateOpen} onClose={() => setIsVoiceCreateOpen(false)} onCreate={handleCreateChannel} />
-        {currentUser && ( <SettingsModal isOpen={isSettingsModalOpen} onClose={() => setIsSettingsModalOpen(false)} user={userProfile || { uid: currentUser.uid, email: currentUser.email, displayName: currentUser.displayName, photoURL: currentUser.photoURL, groups: [], coinBalance: 0, createdAt: Date.now(), lastLogin: Date.now(), subscriptionTier: 'free', apiUsageCount: 0 } as UserProfile} onUpdateProfile={setUserProfile} onUpgradeClick={() => setIsPricingModalOpen(true)} /> )}
+        {currentUser && ( <SettingsModal isOpen={isSettingsModalOpen} onClose={() => setIsSettingsModalOpen(false)} user={userProfile || { uid: currentUser.uid, email: currentUser.email, displayName: currentUser.displayName, photoURL: currentUser.photoURL, groups: [], coinBalance: 0, createdAt: Date.now(), lastLogin: Date.now(), subscriptionTier: 'free', apiUsageCount: 0 } as UserProfile} onUpdateProfile={setUserProfile} onUpgradeClick={() => setIsPricingModalOpen(true)} isSuperAdmin={isSuperAdmin} onNavigateAdmin={() => handleSetViewState('firestore_debug')} /> )}
         {channelToComment && ( <CommentsModal isOpen={true} onClose={() => setChannelToComment(null)} channel={channelToComment} onAddComment={handleAddComment} onDeleteComment={(cid) => deleteCommentFromChannel(channelToComment.id, cid)} onEditComment={(cid, txt, att) => updateCommentInChannel(channelToComment.id, { id: cid, userId: currentUser.uid, user: currentUser.displayName || 'Anonymous', text: txt, timestamp: Date.now(), attachments: att })} currentUser={currentUser} /> )}
         {channelToEdit && ( <ChannelSettingsModal isOpen={true} onClose={() => setChannelToEdit(null)} channel={channelToEdit} onUpdate={handleUpdateChannel} /> )}
-        {isPrivacyOpen && ( <div className="fixed inset-0 z-[100] animate-fade-in"> <PrivacyPolicy onBack={() => setIsPrivacyOpen(false)} /> </div> )}
-        {isUserGuideOpen && ( <div className="fixed inset-0 z-[100] animate-fade-in"> <UserManual onBack={() => setIsUserGuideOpen(false)} /> </div> )}
         <PricingModal isOpen={isPricingModalOpen} onClose={() => setIsPricingModalOpen(false)} user={userProfile} onSuccess={(tier) => { if(userProfile) setUserProfile({...userProfile, subscriptionTier: tier}); }} />
       </div>
     </ErrorBoundary>
