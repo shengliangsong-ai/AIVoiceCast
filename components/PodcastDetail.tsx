@@ -1,6 +1,7 @@
+
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Channel, GeneratedLecture, Chapter, SubTopic, Attachment, UserProfile } from '../types';
-import { ArrowLeft, BookOpen, FileText, Download, Loader2, ChevronDown, ChevronRight, ChevronLeft, Check, Printer, FileDown, Info, Sparkles, Book, CloudDownload, Music, Package, FileAudio, Zap, Radio, CheckCircle, ListTodo, Share2, Play, Pause, Square, Volume2, RefreshCcw, Wand2, Edit3, Save, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, BookOpen, FileText, Download, Loader2, ChevronDown, ChevronRight, ChevronLeft, Check, Printer, FileDown, Info, Sparkles, Book, CloudDownload, Music, Package, FileAudio, Zap, Radio, CheckCircle, ListTodo, Share2, Play, Pause, Square, Volume2, RefreshCcw, Wand2, Edit3, Save, ShieldCheck, ImageIcon, Lock } from 'lucide-react';
 import { generateLectureScript } from '../services/lectureGenerator';
 import { generateCurriculum } from '../services/curriculumGenerator';
 import { synthesizeSpeech } from '../services/tts';
@@ -32,6 +33,7 @@ interface PodcastDetailProps {
   onUpdateChannel?: (updated: Channel) => void;
   currentUser: any;
   userProfile?: UserProfile | null;
+  isProMember?: boolean;
 }
 
 const UI_TEXT = {
@@ -47,7 +49,8 @@ const UI_TEXT = {
     regenLecture: "Re-synthesize Selected Lecture",
     editScript: "Edit Script Manually",
     saveScript: "Save Script Override",
-    editChannel: "Edit Channel Settings"
+    editChannel: "Edit Channel Settings",
+    proToRefract: "Pro Required to Refract"
   },
   zh: {
     back: "返回", curriculum: "课程大纲", selectTopic: "选择一个课程开始阅读",
@@ -61,12 +64,13 @@ const UI_TEXT = {
     regenLecture: "重新合成当前讲座",
     editScript: "手动编辑文稿",
     saveScript: "保存文稿修改",
-    editChannel: "编辑频道设置"
+    editChannel: "编辑频道设置",
+    proToRefract: "需要 Pro 权限进行重构"
   }
 };
 
 export const PodcastDetail: React.FC<PodcastDetailProps> = ({ 
-    channel, onBack, language, currentUser, onStartLiveSession, userProfile, onUpdateChannel, onEditChannel
+    channel, onBack, language, currentUser, onStartLiveSession, userProfile, onUpdateChannel, onEditChannel, isProMember
 }) => {
   const t = UI_TEXT[language];
   const [activeLecture, setActiveLecture] = useState<GeneratedLecture | null>(null);
@@ -90,17 +94,20 @@ export const PodcastDetail: React.FC<PodcastDetailProps> = ({
   const activeSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const MY_TOKEN = useMemo(() => `PodcastDetail:${channel.id}:${activeSubTopicId}`, [channel.id, activeSubTopicId]);
 
-  const isAdmin = isUserAdmin(userProfile);
+  const isAdmin = isUserAdmin(userProfile || null);
   const isOwner = currentUser && (channel.ownerId === currentUser.uid || isAdmin);
 
-  // DEBUG: Detail Permission Logging
-  useEffect(() => {
-    if (currentUser) {
-      console.log(`[Neural Debug] Detail View Permission Check: ${currentUser.email}`);
-      console.log(`[Neural Debug] Is Admin? ${isAdmin}`);
-      console.log(`[Neural Debug] Is Owner? ${isOwner} (Channel Owner: ${channel.ownerId})`);
-    }
-  }, [currentUser, channel, isAdmin, isOwner]);
+  const isThirdParty = useCallback((url?: string) => {
+    if (!url) return true;
+    const lowUrl = url.toLowerCase();
+    return (
+        lowUrl.includes('ui-avatars.com') || 
+        lowUrl.includes('placehold.co') || 
+        lowUrl.includes('placeholder') || 
+        lowUrl.includes('dummyimage.com') ||
+        lowUrl.includes('pravatar.cc')
+    );
+  }, []);
 
   const [chapters, setChapters] = useState<Chapter[]>(() => {
     if (channel.chapters && channel.chapters.length > 0) return channel.chapters;
@@ -148,6 +155,14 @@ export const PodcastDetail: React.FC<PodcastDetailProps> = ({
             setEditBuffer(JSON.stringify(cached, null, 2));
             return; 
         }
+        
+        // AUTO-REFRACT CHECK: Only pro members can trigger initial generation for custom content
+        if (!isProMember && channel.id !== OFFLINE_CHANNEL_ID && !SPOTLIGHT_DATA[channel.id]) {
+            alert(t.proToRefract);
+            setIsLoadingLecture(false);
+            return;
+        }
+
         const script = await generateLectureScript(topicTitle, channel.description, language, channel.id, channel.voiceName);
         if (script) { 
             setActiveLecture(script); 
@@ -159,6 +174,7 @@ export const PodcastDetail: React.FC<PodcastDetailProps> = ({
 
   const handleRegenerateLecture = async () => {
     if (!activeSubTopicId || !activeSubTopicTitle) return;
+    if (!isProMember) return alert(t.proToRefract);
     
     const confirmMsg = language === 'zh' 
         ? "确定要重新生成当前选中的讲座内容吗？这将会覆盖现有的缓存。" 
@@ -199,6 +215,7 @@ export const PodcastDetail: React.FC<PodcastDetailProps> = ({
   };
 
   const handleRegenerateCurriculum = async () => {
+    if (!isProMember) return alert(t.proToRefract);
     const confirmMsg = language === 'zh'
         ? "确定要重新生成整个课程大纲吗？这将会彻底改变现有的章节结构并清除现有脚本缓存。"
         : "Are you sure you want to re-synthesize the entire curriculum? This will completely rebuild the chapter structure.";
@@ -308,11 +325,19 @@ export const PodcastDetail: React.FC<PodcastDetailProps> = ({
       setShowShareModal(true);
   };
 
+  const hasValidHeaderImage = channel.imageUrl && !isThirdParty(channel.imageUrl);
+
   return (
     <div className="h-full bg-slate-950 text-slate-100 flex flex-col relative overflow-y-auto pb-24">
       <div className="relative h-48 md:h-64 w-full shrink-0">
         <div className="absolute inset-0">
-            <img src={channel.imageUrl} className="w-full h-full object-cover opacity-40" alt={channel.title}/>
+            {hasValidHeaderImage ? (
+                <img src={channel.imageUrl} className="w-full h-full object-cover opacity-40" alt={channel.title}/>
+            ) : (
+                <div className="w-full h-full bg-slate-900 flex items-center justify-center text-slate-800">
+                    <ImageIcon size={64} className="opacity-10"/>
+                </div>
+            )}
             <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/60 to-transparent" />
         </div>
         <div className="absolute top-4 left-4 z-20 flex items-center gap-3">
@@ -347,21 +372,21 @@ export const PodcastDetail: React.FC<PodcastDetailProps> = ({
                         {isOwner && activeSubTopicId && (
                             <button 
                               onClick={handleRegenerateLecture}
-                              disabled={isRegenerating}
-                              className={`p-1.5 bg-indigo-600 text-white hover:bg-indigo-500 rounded-lg border border-indigo-400 shadow-lg transition-all ${isRegenerating ? 'animate-pulse' : ''}`}
-                              title={t.regenLecture}
+                              disabled={isRegenerating || !isProMember}
+                              className={`p-1.5 bg-indigo-600 text-white hover:bg-indigo-500 rounded-lg border border-indigo-400 shadow-lg transition-all ${isRegenerating ? 'animate-pulse' : ''} ${!isProMember ? 'opacity-40 grayscale cursor-not-allowed' : ''}`}
+                              title={isProMember ? t.regenLecture : t.proToRefract}
                             >
-                              {isRegenerating ? <Loader2 size={16} className="animate-spin"/> : <Wand2 size={16}/>}
+                              {!isProMember ? <Lock size={16}/> : isRegenerating ? <Loader2 size={16} className="animate-spin"/> : <Wand2 size={16}/>}
                             </button>
                         )}
                         {isOwner && (
                             <button 
                               onClick={handleRegenerateCurriculum}
-                              disabled={isRegeneratingCurriculum}
-                              className={`p-1.5 bg-indigo-600 text-white hover:bg-indigo-500 rounded-lg border border-indigo-400 shadow-lg transition-all ${isRegeneratingCurriculum ? 'animate-pulse opacity-50' : ''}`}
-                              title={t.regenCurriculum}
+                              disabled={isRegeneratingCurriculum || !isProMember}
+                              className={`p-1.5 bg-indigo-600 text-white hover:bg-indigo-500 rounded-lg border border-indigo-400 shadow-lg transition-all ${isRegeneratingCurriculum ? 'animate-pulse opacity-50' : ''} ${!isProMember ? 'opacity-40 grayscale cursor-not-allowed' : ''}`}
+                              title={isProMember ? t.regenCurriculum : t.proToRefract}
                             >
-                              {isRegeneratingCurriculum ? <Loader2 size={16} className="animate-spin"/> : <RefreshCcw size={16}/>}
+                              {!isProMember ? <Lock size={16}/> : isRegeneratingCurriculum ? <Loader2 size={16} className="animate-spin"/> : <RefreshCcw size={16}/>}
                             </button>
                         )}
                     </div>
@@ -475,7 +500,12 @@ export const PodcastDetail: React.FC<PodcastDetailProps> = ({
                     </div>
                 )}
             </div>
-          ) : (<div className="h-64 flex flex-col items-center justify-center text-slate-500 border border-dashed border-slate-800 rounded-2xl bg-slate-900/30"><Info size={32} className="mb-2 opacity-20" /><h3 className="text-lg font-bold text-slate-400">{t.selectTopic}</h3></div>)}
+          ) : (
+            <div className="h-64 flex flex-col items-center justify-center text-slate-500 border border-dashed border-slate-800 rounded-2xl bg-slate-900/30">
+              <Info size={32} className="mb-2 opacity-20" />
+              <h3 className="text-lg font-bold text-slate-400">{t.selectTopic}</h3>
+            </div>
+          )}
         </div>
       </main>
 
