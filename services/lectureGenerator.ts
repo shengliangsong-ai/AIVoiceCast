@@ -3,14 +3,7 @@ import { GoogleGenAI } from '@google/genai';
 import { GeneratedLecture, TranscriptItem } from '../types';
 import { getCloudCachedLecture, saveCloudCachedLecture, deductCoins, AI_COSTS, incrementApiUsage } from './firestoreService';
 import { auth } from './firebaseConfig';
-
-async function generateContentUid(topic: string, context: string, lang: string): Promise<string> {
-    const data = `${topic}|${context}|${lang}`;
-    const msgBuffer = new TextEncoder().encode(data);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 32);
-}
+import { generateContentUid } from '../utils/idUtils';
 
 export async function generateLectureScript(
   topic: string, 
@@ -34,6 +27,7 @@ export async function generateLectureScript(
       }
     }
 
+    // Fix: Using process.env.API_KEY directly as per guidelines
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     
     // RESOLVE TUNED MODELS
@@ -109,6 +103,7 @@ export async function summarizeDiscussionAsSection(
   language: 'en' | 'zh' = 'en'
 ): Promise<{ speaker: string; text: string } | null> {
   try {
+    // Fix: Using process.env.API_KEY directly as per guidelines
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     const fullTranscript = transcript.map(t => `${t.role.toUpperCase()}: ${t.text}`).join('\n');
     const langInstruction = language === 'zh' ? 'Output Language: Chinese.' : 'Output Language: English.';
@@ -133,6 +128,7 @@ export async function generateDesignDocFromTranscript(
   language: 'en' | 'zh' = 'en'
 ): Promise<string | null> {
   try {
+    // Fix: Using process.env.API_KEY directly as per guidelines
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     const fullTranscript = transcript.map(t => `${t.role.toUpperCase()}: ${t.text}`).join('\n');
     const langInstruction = language === 'zh' ? 'Output Language: Chinese.' : 'Output Language: English.';

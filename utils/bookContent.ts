@@ -16,7 +16,7 @@ export const NEURAL_PRISM_BOOK: BookData = {
   title: "The Neural Prism Platform",
   subtitle: "Refracting Super-Intelligence into Human Utility",
   author: "Prism Architect Team",
-  version: "v6.5.0-MASTER",
+  version: "v6.6.1-MASTER",
   pages: [
     {
       title: "I. The Refractive Philosophy",
@@ -207,17 +207,22 @@ Knowledge moves too fast for books. The Prism ensures your learning material is 
       `
     },
     {
-      title: "XIII. Observability: The Matrix",
+      title: "XIII. Judge Review: Site Architecture",
       content: `
-# 🐞 Observability: Diagnostic Matrix
+# 🏗️ Judge Review: Site Architecture
 
-Maintaining a multi-model real-time system requires deep visibility.
+Neural Prism is architected for **Extreme Resilience** and **User Sovereignty**.
 
-### Throttled Neural Log Buffer
-Standard logging can lag the UI during high-frequency AI turns. Our console uses a **Throttled Log Buffer** that batches handshake metadata and terminal traces, updating the UI at 800ms intervals to preserve frame-rate integrity.
+### Multi-Model Orchestration
+The platform is not a wrapper; it is an orchestrator. We use **Gemini 3 Pro** for complex reasoning and **Gemini 3 Flash** for low-latency simulation. This dual-model approach allows us to maintain a "Responsive Dream Machine" state where the AI is always ready to act.
 
-### Raw Trace Access
-Architects can access the **Raw JSON Trace** of every Gemini handshake, allowing for sub-second debugging of logic-drift or connectivity faults.
+### The Diagnostic Matrix
+Observability is a first-class citizen. Our custom event bus tracks every AI handshake, bundling traces with user feedback to enable autonomous self-improvement of the system prompts.
+
+### Technical Excellence
+- **React 19**: Utilizing the latest concurrent rendering features.
+- **Web Crypto API**: Implementing decentralized identity.
+- **High-DPI Rasterization**: Ensuring professional-grade document output.
       `
     },
     {
@@ -342,17 +347,25 @@ High-fidelity AI software is not typed; it is *orchestrated* through resilient h
       `
     },
     {
-      title: "XXIII. Roadmap to v7.0",
+      title: "XXIII. Refractive Persistence & JIT Logic",
       content: `
-# 🚀 Future: Federated Refraction
+# 💎 Strategy: Data Persistence & Hybrid JIT
 
-The current Prism is curated. v7.0 will move toward **Decentralized Refraction**.
+To balance speed and cost, Neural Prism utilizes a **Triple-Layer Refractive Strategy** for data handling.
 
-### Community Refractions
-Members will be able to define their own "Activity Refractions", creating an infinite library of custom AI tools. 
+### 1. The Cloud Control Plane (Firestore)
+Stores the **Registry of Metadata**. This allows the community to share curriculums and activity nodes instantly while maintaining a shared ledger of VoiceCoin transactions.
 
-### Autonomous Refactoring
-The system will begin monitoring its own diagnostic logs to suggest architectural improvements, creating a truly self-evolving Intelligence Hub.
+### 2. The Neural Archive (Firebase Storage)
+Acts as a high-fidelity **Vault for JSON Corpus** data. Every generated lecture is saved as a raw artifact, ensuring long-term recovery and auditability independent of database state.
+
+### 3. The Local Data Plane (IndexedDB)
+The "Prism Cache." Heavy media like **Neural Audio** and session-specific logic are stored on-device to enable zero-latency, skip-free playback and offline resilience.
+
+### Hybrid Just-In-Time (JIT) Generation
+We generate curriculums at creation time, but **actual scripts are generated on-click**. 
+- **Pros**: Zero waste of tokens, context-aware content injection, and instant channel spawning.
+- **Mitigation**: The **Shared Ledger** ensures that if any member has refracted a lesson once, it is stored in the Registry for all others to access instantly.
       `
     },
     {
@@ -365,7 +378,7 @@ The Neural Prism is the final bridge between superhuman AI capacity and daily hu
 We make complexity invisible and intelligence colorful. We believe AI should be an extension of the human soul—a spectrum of tools that empower you to build, learn, and grow every single day.
 
 ---
-**Neural Prism Platform v6.5.0**
+**Neural Prism Platform v6.6.1**
 *Refracted by Intelligence. Built for Humanity.*
       `
     }
