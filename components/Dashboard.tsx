@@ -1,10 +1,11 @@
+
 import React, { useMemo, useState, useEffect } from 'react';
 import { 
   Terminal, Code, Video, LayoutGrid, FileText, Wallet, MessageSquare, 
   Briefcase, Truck, AppWindow, Book, PenTool, Rss, Gift, Rocket, BookOpen, 
   Activity, Scroll, GraduationCap, Cpu, Star, Coins, Zap, ShieldCheck,
   Globe, Users, Clock, Sparkles, ChevronRight, Crown, Lock, Radio,
-  Disc, Calendar, History, FolderOpen, BookText, FileUp, FileSignature, IdCard, Info, TrendingUp, BarChart3, Binary, Github, Scale, Thermometer, Shield, Play
+  Disc, Calendar, History, FolderOpen, BookText, FileUp, FileSignature, IdCard, Info, TrendingUp, BarChart3, Binary, Github, Scale, Thermometer, Shield, Play, Layout, UserCircle, Target, Beaker
 } from 'lucide-react';
 import { ViewID, UserProfile, PlatformMetrics } from '../types';
 import { Visualizer } from './Visualizer';
@@ -38,11 +39,17 @@ const UI_TEXT = {
     metricsHumanoid: "Optimus Hubs Deployed",
     metricsEfficiency: "Distributed Index",
     thermoFloor: "Cost-to-Zero Floor",
-    judgeHeroTitle: "🏆 Hackathon Auditor's Portal",
-    judgeHeroDesc: "Launch the v8.0.0-COMPLETE Technical Audit for an interactive project evaluation.",
+    judgeHeroTitle: "🔭 Neural Lens: Verification Node",
+    judgeHeroDesc: "Instrumentation for frontier reasoning and intelligence observability. Deploying the 1.0 Harmony Ratio.",
     judgeAction: "Run Audit",
+    pitchAction: "Startup Pitch",
+    judgePitchAction: "The Manifest",
+    visionAction: "2036 Vision",
+    techBookAction: "Tech Book",
     featuredTitle: "Featured Lab",
-    featuredDesc: "Socratic Interrogation Studio"
+    featuredDesc: "Active Sector",
+    reasoningAction: "Reasoning",
+    verificationAction: "Verify"
   },
   zh: {
     greeting: "欢迎回来，",
@@ -63,11 +70,17 @@ const UI_TEXT = {
     metricsHumanoid: "Optimus 枢纽已部署",
     metricsEfficiency: "分布式指数",
     thermoFloor: "成本归零底线",
-    judgeHeroTitle: "🏆 参赛审计门户",
-    judgeHeroDesc: "启动 v8.0.0-COMPLETE 技术审计，进行交互式项目评估。",
+    judgeHeroTitle: "🔭 神经透镜：验证节点",
+    judgeHeroDesc: "前沿推理与智能观测仪器。部署 1.0 和谐率。",
     judgeAction: "运行审计",
+    pitchAction: "启动推介",
+    judgePitchAction: "宣言",
+    visionAction: "愿景",
+    techBookAction: "技术书籍",
     featuredTitle: "精选实验室",
-    featuredDesc: "苏格拉底式面试工作室"
+    featuredDesc: "活跃扇区",
+    reasoningAction: "推理",
+    verificationAction: "验证"
   }
 };
 
@@ -117,6 +130,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ userProfile, isProMember, 
       title: t.logicSector,
       apps: [
         { id: 'code_studio', label: 'Builder Studio', sub: 'Neural IDE', description: 'Advanced IDE with heuristic code simulation. Execute C++, Python.', icon: Terminal, color: 'text-indigo-400', bg: 'bg-indigo-900/30', restricted: true },
+        { id: 'neural_lens', label: 'Neural Lens', sub: 'Observability', description: 'Dedicated instrumentation for AI reasoning and logic drift audit.', icon: ShieldCheck, color: 'text-indigo-400', bg: 'bg-indigo-900/30', restricted: false },
         { id: 'notebook_viewer', label: 'Research Lab', sub: 'Interactive Docs', description: 'Experiment with complex prompts in a specialized AI scratchpad.', icon: Book, color: 'text-orange-400', bg: 'bg-orange-900/30', restricted: true },
         { id: 'graph_studio', label: 'Logic Visualizer', sub: 'Math Rendering', description: 'Convert complex math into hardware-accelerated 3D visualizations.', icon: Activity, color: 'text-emerald-400', bg: 'bg-emerald-900/30', restricted: true }
       ]
@@ -142,7 +156,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ userProfile, isProMember, 
     {
       title: t.careerSector,
       apps: [
-        { id: 'mock_interview', label: 'Career Eval', sub: 'Simulation Lab', description: 'Practice with rigorous AI interviewer personas.', icon: Video, color: 'text-red-500', bg: 'bg-red-950/40', restricted: true },
+        { id: 'mock_interview', label: 'DyadAI Hub', sub: 'Staff Eval', description: 'Staff-level technical evaluation using the Shadow-Critic Dyad pattern.', icon: Video, color: 'text-red-500', bg: 'bg-red-900/30', restricted: true },
         { id: 'mentorship', label: 'Expert Hub', sub: 'Knowledge Match', description: 'Book 1-on-1 sessions with human domain experts.', icon: Users, color: 'text-emerald-400', bg: 'bg-emerald-900/30', restricted: true },
         { id: 'careers', label: 'Talent Hub', sub: 'Hiring Registry', description: 'Showcase your portfolio and browse roles in the community.', icon: Briefcase, color: 'text-yellow-400', bg: 'bg-yellow-900/30', restricted: true }
       ]
@@ -152,7 +166,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ userProfile, isProMember, 
       apps: [
         { id: 'scribe_studio', label: 'Neural Scribe', sub: 'Audio to MD', description: 'Minimalist real-time audio-to-markdown transcription.', icon: Disc, color: 'text-red-500', bg: 'bg-red-900/30', restricted: true },
         { id: 'chat', label: 'Team Space', sub: 'Neural Messaging', description: 'Secure real-time workspace messaging and code sharing.', icon: MessageSquare, color: 'text-blue-400', bg: 'bg-blue-900/30', restricted: true },
-        { id: 'blog', label: 'Voice Feed', sub: 'Community Blog', description: 'Publish technical insights to the community stream.', icon: Rss, color: 'text-orange-400', bg: 'bg-orange-900/30', restricted: true },
+        { id: 'blog', label: 'Voice Feed', sub: 'Community Blog', description: 'Publish technical insights to the community stream.', icon: Rss, color: 'text-orange-400', bg: 'bg-blue-900/30', restricted: true },
         { id: 'recordings', label: 'Recordings', sub: 'Archive', description: 'Sovereign vault for video logs and neural artifacts.', icon: Video, color: 'text-red-400', bg: 'bg-red-900/30', restricted: true },
         { id: 'docs', label: 'Paperwork', sub: 'Docs', description: 'Professional specification registry for managing design docs.', icon: FileText, color: 'text-emerald-400', bg: 'bg-emerald-900/30', restricted: true },
         { id: 'calendar', label: 'Schedule', sub: 'Activity', description: 'Scheduler for bookings and platform activities.', icon: Calendar, color: 'text-cyan-400', bg: 'bg-cyan-900/30', restricted: true },
@@ -242,24 +256,26 @@ export const Dashboard: React.FC<DashboardProps> = ({ userProfile, isProMember, 
             </section>
         </div>
 
-        {/* HACKATHON JUDGE HERO */}
+        {/* NEURAL LENS HERO SECTION */}
         <section className="bg-gradient-to-r from-emerald-900/40 via-indigo-900/40 to-slate-900 border border-emerald-500/30 rounded-[3.5rem] p-10 shadow-2xl relative overflow-hidden group">
             <div className="absolute top-0 right-0 p-32 bg-emerald-500/10 blur-[100px] rounded-full group-hover:scale-110 transition-transform duration-1000"></div>
             <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-10">
                 <div className="space-y-4 text-center md:text-left flex-1">
                     <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-500/20 border border-emerald-500/30 rounded-full text-emerald-400 text-[9px] font-black uppercase tracking-widest">
-                        <Shield size={10} fill="currentColor"/> v8.0.0-COMPLETE Manifest
+                        <Shield size={10} fill="currentColor"/> v10.8.0-ABUNDANCE
                     </div>
                     <h2 className="text-4xl font-black text-white italic tracking-tighter uppercase leading-none">{t.judgeHeroTitle}</h2>
                     <p className="text-slate-400 text-lg leading-relaxed font-medium">{t.judgeHeroDesc}</p>
                 </div>
-                <div className="flex flex-col sm:flex-row gap-4 shrink-0">
-                    <button onClick={() => onNavigate('podcast_detail', { channelId: 'judge-deep-dive' })} className="px-10 py-5 bg-white text-slate-900 font-black uppercase tracking-[0.2em] rounded-2xl shadow-xl transition-all hover:scale-105 active:scale-95 flex items-center justify-center gap-3">
-                        {/* Fix: Play icon component was used but not imported */}
-                        <Play size={20} fill="currentColor"/> {t.judgeAction}
+                <div className="flex flex-wrap gap-4 shrink-0 justify-center">
+                    <button onClick={() => onNavigate('story', { section: 'reasoning' })} className="px-8 py-5 bg-cyan-600 text-white font-black uppercase tracking-[0.2em] rounded-2xl shadow-xl transition-all hover:bg-cyan-500 active:scale-95 flex items-center justify-center gap-3">
+                        <Beaker size={20} fill="currentColor"/> {t.reasoningAction}
                     </button>
-                    <button onClick={() => onNavigate('book_studio')} className="px-10 py-5 bg-slate-950 text-white font-black uppercase tracking-[0.2em] rounded-2xl border border-white/10 shadow-xl transition-all hover:bg-slate-800 active:scale-95 flex items-center justify-center gap-3">
-                        <BookOpen size={20}/> Technical Book
+                    <button onClick={() => onNavigate('story', { section: 'verification' })} className="px-8 py-5 bg-emerald-600 text-white font-black uppercase tracking-[0.2em] rounded-2xl shadow-xl transition-all hover:bg-emerald-500 active:scale-95 flex items-center justify-center gap-3">
+                        <BarChart3 size={20}/> {t.verificationAction}
+                    </button>
+                    <button onClick={() => onNavigate('neural_lens')} className="px-8 py-5 bg-indigo-600 text-white font-black uppercase tracking-[0.2em] rounded-2xl border border-white/10 shadow-xl transition-all hover:bg-indigo-500 active:scale-95 flex items-center justify-center gap-3">
+                        <Activity size={20} /> {t.judgeAction}
                     </button>
                 </div>
             </div>
@@ -267,17 +283,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ userProfile, isProMember, 
 
         {/* FEATURED APPS SUB-GRID */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <section onClick={() => onNavigate('mock_interview')} className="bg-slate-900 border border-slate-800 rounded-[3rem] p-8 hover:border-red-500/40 transition-all cursor-pointer group shadow-xl flex items-center gap-8">
-                <div className="p-6 bg-red-950/40 text-red-500 rounded-[2rem] border border-red-500/20 group-hover:scale-110 transition-transform duration-500">
-                    <Video size={40}/>
-                </div>
-                <div>
-                    <h3 className="text-xs font-black text-red-500 uppercase tracking-widest mb-1">{t.featuredTitle}</h3>
-                    <h4 className="text-2xl font-black text-white uppercase italic tracking-tighter">{t.featuredDesc}</h4>
-                    <p className="text-xs text-slate-500 font-medium mt-2 leading-relaxed">Staff-level technical interrogation using real-time audio and logic simulation.</p>
-                </div>
-            </section>
-            <section onClick={() => onNavigate('code_studio')} className="bg-slate-900 border border-slate-800 rounded-[3rem] p-8 hover:border-indigo-500/40 transition-all cursor-pointer group shadow-xl flex items-center gap-8">
+            <section onClick={() => onNavigate('code_studio')} className="bg-slate-900 border border-slate-800 rounded-[3rem] p-8 hover:border-indigo-500/40 transition-all cursor-pointer group shadow-xl flex items-center gap-8 col-span-2">
                 <div className="p-6 bg-indigo-950/40 text-indigo-400 rounded-[2rem] border border-indigo-500/20 group-hover:scale-110 transition-transform duration-500">
                     <Code size={40}/>
                 </div>
@@ -333,17 +339,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ userProfile, isProMember, 
             </section>
         ))}
 
-        <footer className="pt-20 flex flex-col items-center gap-8 border-t border-slate-900/50">
+        <footer className="pt-20 flex flex-col items-center gap-8 border-t border-slate-800/50">
             <div className="flex flex-wrap justify-center items-center gap-12 text-slate-500 text-[10px] font-black uppercase tracking-widest">
+                <button onClick={() => onNavigate('mission')} className="flex items-center gap-2 hover:text-indigo-400 transition-colors">
+                    <Rocket size={16}/> Vision
+                </button>
+                <button onClick={() => onNavigate('story')} className="flex items-center gap-2 hover:text-indigo-400 transition-colors">
+                    <BookOpen size={16}/> Story
+                </button>
+                <button onClick={() => onNavigate('resume')} className="flex items-center gap-2 hover:text-indigo-400 transition-colors">
+                    <UserCircle size={16}/> Architect
+                </button>
                 <a href="https://github.com/aivoicecast/AIVoiceCast" target="_blank" rel="noreferrer" className="flex items-center gap-2 hover:text-indigo-400 transition-colors">
-                    <Github size={16}/> Open Source
+                    <Github size={16}/> Source
                 </a>
-                <div className="flex items-center gap-2">
-                    <Scale size={16}/> MIT License
-                </div>
-                <div className="flex items-center gap-2">
-                    <Sparkles size={16}/> Refracted by Neural Prism v8.0.0
-                </div>
+                <button onClick={() => onNavigate('privacy')} className="flex items-center gap-2 hover:text-indigo-400 transition-colors">
+                    <Shield size={16}/> Privacy
+                </button>
             </div>
             <div className="text-center space-y-2">
                 <p className="text-[10px] font-black text-slate-700 uppercase tracking-[0.5em]">Sovereign 2036 Hub • 10:1 Resident/Hub Ratio Enabled</p>

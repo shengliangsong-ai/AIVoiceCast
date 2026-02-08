@@ -20,6 +20,57 @@ export interface TranscriptItem {
   timestamp: number;
 }
 
+export interface DependencyNode {
+  id: string;
+  label: string;
+  type: 'concept' | 'metric' | 'component';
+}
+
+export interface DependencyLink {
+  source: string;
+  target: string;
+  label: string;
+}
+
+export interface AdversarialProbe {
+  question: string;
+  answer: string;
+  status: 'passed' | 'failed' | 'warning';
+}
+
+export interface NeuralLensAudit {
+  graph: {
+    nodes: DependencyNode[];
+    links: DependencyLink[];
+  };
+  probes: AdversarialProbe[];
+  coherenceScore: number;
+  driftRisk: 'Low' | 'Medium' | 'High';
+  robustness: 'Low' | 'Medium' | 'High';
+  timestamp: number;
+}
+
+export interface GeneratedLecture {
+  uid?: string;
+  topic: string;
+  professorName: string;
+  studentName: string;
+  sections: { speaker: string; text: string }[];
+  readingMaterial?: string;
+  homework?: string;
+  audit?: NeuralLensAudit;
+}
+
+// ... remaining interfaces ...
+export interface Comment {
+  id: string;
+  userId: string;
+  user: string;
+  text: string;
+  timestamp: number;
+  attachments?: Attachment[];
+}
+
 export interface UserFeedback {
     id: string;
     userId: string;
@@ -95,16 +146,6 @@ export interface DualVerse {
   audioZhUrl?: string;
 }
 
-export interface GeneratedLecture {
-  uid?: string;
-  topic: string;
-  professorName: string;
-  studentName: string;
-  sections: { speaker: string; text: string }[];
-  readingMaterial?: string;
-  homework?: string;
-}
-
 export interface Channel {
   id: string;
   title: string;
@@ -127,6 +168,13 @@ export interface Channel {
   fullBookUrl?: string;
   appendix?: Attachment[];
   shares?: number;
+}
+
+export interface ChannelStats {
+  likes: number;
+  dislikes: number;
+  shares: number;
+  comments?: number;
 }
 
 export interface Chapter {
@@ -157,6 +205,41 @@ export interface CommunityDiscussion {
   groupIds?: string[];
 }
 
+export interface Booking {
+  id: string;
+  userId: string;
+  hostName: string;
+  mentorId: string;
+  mentorName: string;
+  mentorImage?: string;
+  date: string;
+  time: string;
+  duration: number;
+  endTime: string;
+  topic: string;
+  invitedEmail: string;
+  status: 'pending' | 'scheduled' | 'rejected' | 'cancelled' | 'completed';
+  type: 'p2p' | 'group';
+  createdAt: number;
+  recordingUrl?: string;
+}
+
+export interface Invitation {
+  id: string;
+  fromUserId: string;
+  fromName: string;
+  toEmail: string;
+  toUserId?: string;
+  groupId?: string;
+  groupName?: string;
+  status: 'pending' | 'accepted' | 'rejected';
+  type: 'group' | 'coin' | 'session';
+  amount?: number;
+  memo?: string;
+  link?: string;
+  createdAt: number;
+}
+
 export interface RecordingSession {
   id: string;
   userId: string;
@@ -181,7 +264,7 @@ export interface Attachment {
   name?: string;
 }
 
-export type ViewID = 'dashboard' | 'directory' | 'podcast_detail' | 'live_session' | 'docs' | 'code_studio' | 'whiteboard' | 'blog' | 'chat' | 'careers' | 'calendar' | 'mentorship' | 'recordings' | 'check_designer' | 'check_viewer' | 'shipping_labels' | 'icon_generator' | 'notebook_viewer' | 'card_workshop' | 'card_viewer' | 'mission' | 'firestore_debug' | 'coin_wallet' | 'mock_interview' | 'graph_studio' | 'story' | 'privacy' | 'user_guide' | 'bible_study' | 'scripture_ingest' | 'groups' | 'book_studio' | 'feedback_manager' | 'firestore_inspector' | 'public_channel_inspector' | 'my_channel_inspector' | 'cloud_debug' | 'debug_view' | 'pdf_signer' | 'badge_studio' | 'badge_viewer' | 'resume' | 'scribe_studio';
+export type ViewID = 'dashboard' | 'directory' | 'podcast_detail' | 'live_session' | 'docs' | 'code_studio' | 'whiteboard' | 'blog' | 'chat' | 'careers' | 'calendar' | 'mentorship' | 'recordings' | 'check_designer' | 'check_viewer' | 'shipping_labels' | 'icon_generator' | 'notebook_viewer' | 'card_workshop' | 'card_viewer' | 'mission' | 'firestore_debug' | 'coin_wallet' | 'graph_studio' | 'story' | 'privacy' | 'user_guide' | 'bible_study' | 'scripture_ingest' | 'groups' | 'book_studio' | 'feedback_manager' | 'firestore_inspector' | 'public_channel_inspector' | 'my_channel_inspector' | 'cloud_debug' | 'debug_view' | 'pdf_signer' | 'badge_studio' | 'badge_viewer' | 'resume' | 'scribe_studio' | 'cloud_sql_inspector' | 'mock_interview' | 'neural_lens';
 
 export interface Group {
   id: string;
@@ -190,6 +273,25 @@ export interface Group {
   memberIds: string[];
   createdAt: number;
   visibility: 'public' | 'private';
+}
+
+export interface ChatChannel {
+  id: string;
+  name: string;
+  type: string;
+  memberIds: string[];
+  createdAt: number;
+}
+
+export interface RealTimeMessage {
+  id: string;
+  text: string;
+  senderId: string;
+  senderName: string;
+  senderImage?: string;
+  timestamp: any;
+  replyTo?: any;
+  attachments?: any[];
 }
 
 export interface CodeFile {
@@ -204,133 +306,7 @@ export interface CodeFile {
   treeSha?: string;
   childrenFetched?: boolean;
   driveId?: string;
-}
-
-export interface AgentMemory {
-  id?: string;
-  ownerId?: string;
-  recipientName: string;
-  senderName: string;
-  occasion: string;
-  cardMessage: string;
-  context: string;
-  theme: 'festive' | 'minimal' | 'cyberpunk' | 'chinese-poem' | 'abstract';
-  customThemePrompt?: string;
-  userImages: string[];
-  generatedAt: string;
-  fontFamily?: string;
-  fontSizeScale?: number;
-  coverImageUrl?: string;
-  backImageUrl?: string;
-  voiceMessageUrl?: string;
-  songLyrics?: string;
-  songUrl?: string;
-  googlePhotosUrl?: string;
-}
-
-export interface ChannelStats {
-  likes: number;
-  dislikes: number;
-  shares: number;
-}
-
-export interface Comment {
-  id: string;
-  userId: string;
-  user: string;
-  text: string;
-  timestamp: number;
-  attachments?: Attachment[];
-}
-
-export interface ChatChannel {
-  id: string;
-  name: string;
-  type: 'dm' | 'group' | 'public';
-  memberIds: string[];
-  createdAt: number;
-}
-
-export interface RealTimeMessage {
-  id: string;
-  text: string;
-  senderId: string;
-  senderName: string;
-  senderImage?: string;
-  timestamp: any;
-  replyTo?: {
-    id: string;
-    text: string;
-    senderName: string;
-  };
-  attachments?: Attachment[];
-}
-
-export interface Booking {
-  id: string;
-  userId: string;
-  hostName: string;
-  mentorId: string;
-  mentorName: string;
-  mentorImage?: string;
-  date: string;
-  time: string;
-  duration: number;
-  endTime: string;
-  topic: string;
-  invitedEmail: string;
-  status: 'pending' | 'scheduled' | 'completed' | 'rejected' | 'cancelled';
-  type: 'p2p' | 'system';
-  createdAt: number;
-  recordingUrl?: string;
-  transcriptUrl?: string;
-}
-
-export interface Invitation {
-  id: string;
-  fromUserId: string;
-  fromName: string;
-  toEmail: string;
-  toUserId?: string;
-  groupId?: string;
-  groupName?: string;
-  status: 'pending' | 'accepted' | 'rejected';
-  createdAt: number;
-  type: 'group' | 'session' | 'coin';
-  link?: string;
-  amount?: number;
-  memo?: string;
-}
-
-export interface DigitalReceipt {
-    id: string;
-    senderId: string;
-    senderName: string;
-    receiverId: string;
-    receiverName: string;
-    amount: number;
-    memo: string;
-    status: 'pending' | 'confirmed' | 'claimed';
-    createdAt: number;
-    confirmedAt?: number;
-    claimedAt?: number;
-}
-
-export interface CodeProject {
-  id: string;
-  name: string;
-  files: CodeFile[];
-  lastModified: number;
-  activeFilePath?: string;
-  accessLevel?: 'public' | 'restricted';
-  allowedUserIds?: string[];
-  activeClientId?: string;
-  github?: {
-    owner: string;
-    repo: string;
-    branch: string;
-    sha: string;
-  };
+  isModified?: boolean;
 }
 
 export interface CursorPosition {
@@ -339,6 +315,8 @@ export interface CursorPosition {
   line: number;
   ch: number;
   timestamp: number;
+  color: string;
+  fileName: string;
 }
 
 export interface WhiteboardElement {
@@ -458,6 +436,28 @@ export interface GeneratedIcon {
   ownerId: string;
 }
 
+export interface AgentMemory {
+  id?: string;
+  ownerId?: string;
+  recipientName: string;
+  senderName: string;
+  occasion: string;
+  cardMessage: string;
+  context: string;
+  theme: 'festive' | 'cozy' | 'minimal' | 'chinese-poem' | 'cyberpunk' | 'abstract';
+  customThemePrompt: string;
+  userImages: string[];
+  googlePhotosUrl: string;
+  generatedAt: string;
+  fontFamily?: string;
+  fontSizeScale?: number;
+  coverImageUrl?: string;
+  backImageUrl?: string;
+  voiceMessageUrl?: string;
+  songLyrics?: string;
+  songUrl?: string;
+}
+
 export interface BankingCheck {
   id: string;
   payee: string;
@@ -489,6 +489,20 @@ export interface InsurancePolicy {
   maxAmount: number;
   validWindows: { start: number, end: number }[];
   recipientUid?: string;
+}
+
+export interface DigitalReceipt {
+  id: string;
+  senderId: string;
+  senderName: string;
+  receiverId: string;
+  receiverName: string;
+  amount: number;
+  memo: string;
+  status: 'pending' | 'confirmed' | 'claimed';
+  createdAt: number;
+  confirmedAt?: number;
+  claimedAt?: number;
 }
 
 export interface ShippingLabel {
@@ -556,8 +570,8 @@ export interface MockInterviewRecording {
   transcript: TranscriptItem[];
   visibility: ChannelVisibility;
   language: string;
-  // Support for local video blobs and resolving type errors in MockInterview component
   blob?: Blob;
+  report?: any;
 }
 
 export interface TodoItem {
@@ -601,7 +615,7 @@ export interface BookPage {
   content: string;
 }
 
-export type BookCategory = 'Platform' | 'Methodology' | 'Evaluation' | 'Architecture' | 'Daily';
+export type BookCategory = 'Platform' | 'Methodology' | 'Architecture' | 'Daily' | 'Evaluation';
 
 export interface BookData {
   id: string;
@@ -614,4 +628,35 @@ export interface BookData {
   coverImage?: string;
   ownerId?: string;
   isCustom?: boolean;
+}
+
+export interface CloudItem {
+  name: string;
+  fullPath: string;
+  url?: string;
+  size?: number;
+  timeCreated?: string;
+  contentType?: string;
+  isFolder?: boolean;
+}
+
+export interface CodeProject {
+  id: string;
+  name: string;
+  files: CodeFile[];
+  lastModified: number;
+  activeFilePath?: string;
+  accessLevel?: 'public' | 'restricted';
+  allowedUserIds?: string[];
+  activeClientId?: string;
+  ownerId?: string;
+  github?: {
+    owner: string;
+    repo: string;
+    branch: string;
+    sha: string;
+  };
+  layoutMode?: 'single' | 'split-v' | 'split-h' | 'quad';
+  activeSlots?: (CodeFile | null)[];
+  cursors?: Record<string, CursorPosition>;
 }

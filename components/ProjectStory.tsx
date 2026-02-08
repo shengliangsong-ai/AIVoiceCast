@@ -1,9 +1,20 @@
-
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { ArrowLeft, BookOpen, Rocket, Sparkles, Globe, ShieldCheck, Play, Pause, Volume2, Clock, Loader2, FileText, LayoutList, Speaker, ChevronDown, Check, Zap, Trophy } from 'lucide-react';
+import { ArrowLeft, BookOpen, Rocket, Sparkles, Globe, ShieldCheck, Play, Pause, Volume2, Clock, Loader2, FileText, LayoutList, Speaker, ChevronDown, Check, Zap, Trophy, Layout, Target, Beaker, BarChart3 } from 'lucide-react';
 import { BrandLogo } from './BrandLogo';
 import { MarkdownView } from './MarkdownView';
-import { STORY_VISION_PITCH_MD, STORY_DEEP_DIVE_MD, STORY_VISION_SPEAKER_SCRIPT, STORY_JUDGE_PITCH_MD, STORY_JUDGE_SPEAKER_SCRIPT } from '../utils/storyContent';
+import { 
+    STORY_VISION_PITCH_MD, 
+    STORY_DEEP_DIVE_MD, 
+    STORY_VISION_SPEAKER_SCRIPT, 
+    STORY_JUDGE_PITCH_MD, 
+    STORY_JUDGE_SPEAKER_SCRIPT, 
+    STORY_HACKATHON_PITCH_MD, 
+    STORY_HACKATHON_SPEAKER_SCRIPT,
+    STORY_REASONING_MD,
+    STORY_REASONING_SPEAKER_SCRIPT,
+    STORY_VERIFICATION_MD,
+    STORY_VERIFICATION_SPEAKER_SCRIPT
+} from '../utils/storyContent';
 import { synthesizeSpeech, speakSystem, TtsProvider } from '../services/tts';
 import { stopAllPlatformAudio, syncPrimeSpeech, registerAudioOwner, getGlobalAudioContext, warmUpAudioContext, connectOutput } from '../utils/audioUtils';
 import { Visualizer } from './Visualizer';
@@ -12,8 +23,10 @@ interface ProjectStoryProps {
   onBack: () => void;
 }
 
+type PitchVersion = 'hackathon' | 'judge' | 'vision' | 'deep-dive' | 'reasoning' | 'verification';
+
 export const ProjectStory: React.FC<ProjectStoryProps> = ({ onBack }) => {
-  const [activeVersion, setActiveVersion] = useState<'judge' | 'vision' | 'deep-dive'>('judge');
+  const [activeVersion, setActiveVersion] = useState<PitchVersion>('hackathon');
   const [isReading, setIsReading] = useState(false);
   const [isBuffering, setIsBuffering] = useState(false);
   const [liveVolume, setLiveVolume] = useState(0);
@@ -24,15 +37,25 @@ export const ProjectStory: React.FC<ProjectStoryProps> = ({ onBack }) => {
   const activeSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
 
   const currentContent = useMemo(() => {
-      if (activeVersion === 'judge') return STORY_JUDGE_PITCH_MD;
-      if (activeVersion === 'vision') return STORY_VISION_PITCH_MD;
-      return STORY_DEEP_DIVE_MD;
+      switch(activeVersion) {
+          case 'hackathon': return STORY_HACKATHON_PITCH_MD;
+          case 'judge': return STORY_JUDGE_PITCH_MD;
+          case 'vision': return STORY_VISION_PITCH_MD;
+          case 'reasoning': return STORY_REASONING_MD;
+          case 'verification': return STORY_VERIFICATION_MD;
+          default: return STORY_DEEP_DIVE_MD;
+      }
   }, [activeVersion]);
 
   const estimatedDuration = useMemo(() => {
-      if (activeVersion === 'judge') return '2m 30s';
-      if (activeVersion === 'vision') return '3m 0s';
-      return '12m 30s';
+      switch(activeVersion) {
+          case 'hackathon': return '5m 15s';
+          case 'judge': return '5m 30s';
+          case 'vision': return '5m 0s';
+          case 'reasoning': return '4m 30s';
+          case 'verification': return '4m 0s';
+          default: return '15m 0s';
+      }
   }, [activeVersion]);
 
   const stopAudioLocal = useCallback(() => {
@@ -71,8 +94,15 @@ export const ProjectStory: React.FC<ProjectStoryProps> = ({ onBack }) => {
       await warmUpAudioContext(ctx);
 
       try {
-          if (activeVersion === 'judge' || activeVersion === 'vision') {
-              const script = activeVersion === 'judge' ? STORY_JUDGE_SPEAKER_SCRIPT : STORY_VISION_SPEAKER_SCRIPT;
+          if (activeVersion !== 'deep-dive') {
+              let script: string[] = [];
+              switch(activeVersion) {
+                  case 'hackathon': script = STORY_HACKATHON_SPEAKER_SCRIPT; break;
+                  case 'judge': script = STORY_JUDGE_SPEAKER_SCRIPT; break;
+                  case 'vision': script = STORY_VISION_SPEAKER_SCRIPT; break;
+                  case 'reasoning': script = STORY_REASONING_SPEAKER_SCRIPT; break;
+                  case 'verification': script = STORY_VERIFICATION_SPEAKER_SCRIPT; break;
+              }
               
               for (let i = 0; i < script.length; i++) {
                   if (localSession !== playbackSessionRef.current) break;
@@ -166,31 +196,43 @@ export const ProjectStory: React.FC<ProjectStoryProps> = ({ onBack }) => {
                     </button>
                     <div className="hidden sm:block">
                         <h1 className="text-lg font-black tracking-widest uppercase text-white flex items-center gap-2 italic">
-                            <BookOpen size={20} className="text-indigo-400"/> Project Manifest
+                            <Layout size={20} className="text-indigo-400"/> Refractive Deck
                         </h1>
-                        <p className="text-[9px] text-slate-500 font-black uppercase tracking-[0.3em]">Refraction v7.0.0-ULTRA</p>
+                        <p className="text-[9px] text-slate-500 font-black uppercase tracking-[0.3em]">Story Spectrums v10.8.0</p>
                     </div>
                 </div>
 
-                <div className="flex flex-wrap items-center justify-center gap-4">
-                    <div className="flex bg-slate-900 p-1 rounded-2xl border border-slate-800 shadow-inner">
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                    <div className="flex bg-slate-900 p-1 rounded-2xl border border-slate-800 shadow-inner overflow-x-auto no-scrollbar">
+                        <button 
+                            onClick={() => setActiveVersion('reasoning')}
+                            className={`flex items-center gap-2 px-4 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${activeVersion === 'reasoning' ? 'bg-cyan-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
+                        >
+                            <Beaker size={14}/> Reasoning
+                        </button>
+                        <button 
+                            onClick={() => setActiveVersion('verification')}
+                            className={`flex items-center gap-2 px-4 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${activeVersion === 'verification' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
+                        >
+                            <BarChart3 size={14}/> Verification
+                        </button>
+                        <button 
+                            onClick={() => setActiveVersion('hackathon')}
+                            className={`flex items-center gap-2 px-4 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${activeVersion === 'hackathon' ? 'bg-red-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
+                        >
+                            <Target size={14}/> Hackathon
+                        </button>
                         <button 
                             onClick={() => setActiveVersion('judge')}
-                            className={`flex items-center gap-2 px-4 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${activeVersion === 'judge' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
+                            className={`flex items-center gap-2 px-4 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${activeVersion === 'judge' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
                         >
-                            <Trophy size={14}/> Judge Pitch
+                            <Trophy size={14}/> Startup
                         </button>
                         <button 
                             onClick={() => setActiveVersion('vision')}
-                            className={`flex items-center gap-2 px-4 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${activeVersion === 'vision' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
+                            className={`flex items-center gap-2 px-4 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${activeVersion === 'vision' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
                         >
-                            <Rocket size={14}/> 2036 Vision
-                        </button>
-                        <button 
-                            onClick={() => setActiveVersion('deep-dive')}
-                            className={`flex items-center gap-2 px-4 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${activeVersion === 'deep-dive' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
-                        >
-                            <FileText size={14}/> Technical
+                            <Rocket size={14}/> 2036
                         </button>
                     </div>
 
@@ -213,7 +255,7 @@ export const ProjectStory: React.FC<ProjectStoryProps> = ({ onBack }) => {
                                         <button 
                                             key={p} 
                                             onClick={() => { setTtsProvider(p); setShowProviderMenu(false); }}
-                                            className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-[9px] font-black uppercase transition-all ${ttsProvider === p ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}
+                                            className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-[9px] font-black uppercase transition-all ${ttsProvider === p ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-800'}`}
                                         >
                                             <div className="flex items-center gap-2">
                                                 <Zap size={12} className={ttsProvider === p ? 'text-white' : 'text-indigo-500'}/>
@@ -241,7 +283,7 @@ export const ProjectStory: React.FC<ProjectStoryProps> = ({ onBack }) => {
                             className={`flex items-center gap-2 px-5 py-1 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg active:scale-95 ${isReading ? 'bg-red-600 text-white animate-pulse' : 'bg-white text-slate-900 hover:bg-indigo-50'}`}
                         >
                             {isBuffering ? <Loader2 size={12} className="animate-spin"/> : isReading ? <Pause size={12} fill="currentColor"/> : <Play size={12} fill="currentColor"/>}
-                            <span>{isReading ? 'Stop' : 'Play'}</span>
+                            <span>{isReading ? 'Stop' : 'Play Pitch'}</span>
                         </button>
                     </div>
                 </div>
@@ -254,7 +296,7 @@ export const ProjectStory: React.FC<ProjectStoryProps> = ({ onBack }) => {
                             <BrandLogo size={64} className="transform hover:rotate-12 transition-transform duration-700" />
                         </div>
                         <h2 className="text-5xl sm:text-7xl font-black italic tracking-tighter uppercase leading-none text-slate-950">
-                            {activeVersion === 'judge' ? 'Technical' : activeVersion === 'vision' ? '2036 Vision' : 'Deep Dive'} <br/>
+                            {activeVersion === 'reasoning' ? 'Frontier Reasoning' : activeVersion === 'verification' ? 'Intelligence Verification' : activeVersion === 'hackathon' ? 'Judge' : activeVersion === 'judge' ? 'Startup' : activeVersion === 'vision' ? '2036 Vision' : 'Deep Dive'} <br/>
                             <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-600 via-indigo-600 to-purple-600">
                                 Refraction
                             </span>
@@ -294,8 +336,8 @@ export const ProjectStory: React.FC<ProjectStoryProps> = ({ onBack }) => {
                             <Globe size={20} className="text-slate-900" />
                         </div>
                         <div className="text-center">
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.5em]">Neural Prism v7.0.0-ULTRA</p>
-                            <p className="text-[9px] text-slate-400 font-bold italic mt-2 uppercase tracking-widest">Powered by Google Gemini // Refracted by Neural Prism.</p>
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.5em]">Neural Lens v10.8.0-COMPLETE</p>
+                            <p className="text-[9px] text-slate-400 font-bold italic mt-2 uppercase tracking-widest">Powered by Google Gemini // Refracted by Neural Lens.</p>
                         </div>
                     </footer>
                 </div>
