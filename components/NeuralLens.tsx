@@ -8,7 +8,7 @@ import {
   FileText, Wand2, Layers, Cpu, Sparkles, FileSearch,
   Filter, ZapOff, Fingerprint, SearchCode, Beaker, Terminal, Download, FileCode, FileDown,
   Layout, BookOpen, ChevronDown, Signal, Library, BookText, Gauge, BarChart, History,
-  Maximize2, Share2, Clipboard, Share, Palette, Eye, Code, Copy
+  Maximize2, Share2, Clipboard, Share, Palette, Eye, Code, Copy, ExternalLink
 } from 'lucide-react';
 import { collection, query, getDocs, limit, orderBy, where } from 'firebase/firestore';
 import { db, auth } from '../services/firebaseConfig';
@@ -23,13 +23,9 @@ import { SYSTEM_BOOKS } from '../utils/bookContent';
 import { saveCloudCachedLecture } from '../services/firestoreService';
 import { generateContentUid, safeJsonStringify } from '../utils/idUtils';
 import { MarkdownView } from './MarkdownView';
+import { encodePlantUML } from '../utils/plantuml';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
-
-interface NeuralLensProps {
-  onBack: () => void;
-  onOpenManual?: () => void;
-}
 
 interface HierarchyNode {
     id: string;
@@ -42,7 +38,7 @@ interface HierarchyNode {
 
 type GraphTheme = 'neon-void' | 'solarized' | 'monokai-plus';
 
-export const NeuralLens: React.FC<NeuralLensProps> = ({ onBack, onOpenManual }) => {
+export const NeuralLens: React.FC<{ onBack: () => void; onOpenManual?: () => void }> = ({ onBack, onOpenManual }) => {
   const [cloudAudits, setCloudAudits] = useState<GeneratedLecture[]>([]);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [loading, setLoading] = useState(true);
@@ -112,15 +108,14 @@ export const NeuralLens: React.FC<NeuralLensProps> = ({ onBack, onOpenManual }) 
   const generatePlantUMLFromGraph = (nodes: DependencyNode[], links: DependencyLink[]): string => {
       if (!nodes || nodes.length === 0) return '';
       
-      let puml = '```plantuml\n@startuml\n';
+      let puml = '@startuml\n';
       puml += 'skinparam backgroundColor transparent\n';
       puml += 'skinparam defaultFontName "JetBrains Mono"\n';
       puml += 'skinparam defaultFontSize 12\n';
       puml += 'skinparam roundcorner 20\n';
       puml += 'skinparam shadowing false\n';
-      puml += 'skinparam ArrowThickness 3.5\n'; // Ultra clear lines
+      puml += 'skinparam ArrowThickness 3.5\n'; 
 
-      // Theme-specific logic
       if (graphTheme === 'neon-void') {
           puml += 'skinparam ArrowColor #00f2ff\n';
           puml += 'skinparam ArrowFontColor #00f2ff\n';
@@ -146,8 +141,9 @@ export const NeuralLens: React.FC<NeuralLensProps> = ({ onBack, onOpenManual }) 
       }[graphTheme];
 
       nodes.forEach(node => {
-          const cleanLabel = node.label.replace(/"/g, "'");
-          const safeId = node.id.replace(/[^a-zA-Z0-9]/g, '_');
+          // SAFE PROPERTY ACCESS: Added fallback for label and id
+          const cleanLabel = (node.label || "Untitled Node").replace(/"/g, "'");
+          const safeId = (node.id || Math.random().toString(36).substring(7)).replace(/[^a-zA-Z0-9]/g, '_');
           const color = nodeColors[node.type as keyof typeof nodeColors] || nodeColors.concept;
           
           if (node.type === 'component') {
@@ -162,11 +158,14 @@ export const NeuralLens: React.FC<NeuralLensProps> = ({ onBack, onOpenManual }) 
       puml += '\n';
 
       links.forEach(link => {
-          const src = link.source.replace(/[^a-zA-Z0-9]/g, '_');
-          const tgt = link.target.replace(/[^a-zA-Z0-9]/g, '_');
+          // SAFE PROPERTY ACCESS: Added fallback for source and target
+          const src = (link.source || "").replace(/[^a-zA-Z0-9]/g, '_');
+          const tgt = (link.target || "").replace(/[^a-zA-Z0-9]/g, '_');
+          
+          if (!src || !tgt) return; // Skip invalid links that would break PlantUML syntax
+
           const lbl = link.label ? ` : "${link.label}"` : '';
           
-          // Apply bold high-contrast arrows
           const arrowColor = {
               'neon-void': '#00f2ff',
               'solarized': '#cb4b16',
@@ -176,26 +175,35 @@ export const NeuralLens: React.FC<NeuralLensProps> = ({ onBack, onOpenManual }) 
           puml += `${src} -[${arrowColor},bold]-> ${tgt}${lbl}\n`;
       });
 
-      puml += '@enduml\n```';
+      puml += '@enduml';
       return puml;
   };
 
   const activePlantUML = useMemo(() => {
-      if (!activeAudit?.audit?.graph) return '';
-      return generatePlantUMLFromGraph(activeAudit.audit.graph.nodes, activeAudit.audit.graph.links);
-  }, [activeAudit, graphTheme]);
+      let rawPuml = '';
+      const audit = activeAudit?.audit;
+      if (!audit) return '';
+
+      // SAFE PROPERTY ACCESS: Verified plantuml is a string before calling replace
+      if (typeof audit.plantuml === 'string') {
+          rawPuml = audit.plantuml.replace(/```plantuml\n|```/g, '');
+      } else if (audit.graph) {
+          rawPuml = generatePlantUMLFromGraph(audit.graph.nodes, audit.graph.links);
+      }
+      return rawPuml ? `\`\`\`plantuml\n${rawPuml}\n\`\`\`` : '';
+  }, [activeAudit, graphTheme, generatePlantUMLFromGraph]);
 
   const hierarchy = useMemo(() => {
     const sectors: Record<string, HierarchyNode> = {};
     const allAvailableChannels = [...HANDCRAFTED_CHANNELS, ...channels];
 
     allAvailableChannels.forEach(c => {
-        if (!sectors[c.id]) {
+        if (c && !sectors[c.id]) {
             sectors[c.id] = { id: c.id, title: c.title, description: c.description, shards: [], type: 'podcast', priority: c.id === 'judge-deep-dive' ? 100 : 0 };
         }
     });
     SYSTEM_BOOKS.forEach(b => {
-        if (!sectors[b.id]) {
+        if (b && !sectors[b.id]) {
             sectors[b.id] = { id: b.id, title: b.title, description: b.subtitle, shards: [], type: 'book', priority: b.id === 'platform-core' ? 100 : 0 };
         }
     });
@@ -206,6 +214,7 @@ export const NeuralLens: React.FC<NeuralLensProps> = ({ onBack, onOpenManual }) 
     });
 
     const findParentIdByTopic = (topic: string): string => {
+        if (!topic) return 'system-artifacts';
         for (const [id, data] of Object.entries(SPOTLIGHT_DATA)) {
             if (data.lectures[topic]) return id;
             if (data.curriculum.some(ch => ch.subTopics.some(st => st.title === topic))) return id;
@@ -237,8 +246,8 @@ export const NeuralLens: React.FC<NeuralLensProps> = ({ onBack, onOpenManual }) 
     allAvailableChannels.forEach(chan => {
         chan.chapters?.forEach(chapter => {
             chapter.subTopics.forEach(sub => {
-                const alreadyIn = sectors[chan.id].shards.some(s => s.topic === sub.title);
-                if (!alreadyIn) {
+                const alreadyIn = sectors[chan.id]?.shards.some(s => s.topic === sub.title);
+                if (!alreadyIn && sectors[chan.id]) {
                     const auditData = neuralRegistryMap.get(sub.title);
                     sectors[chan.id].shards.push({ topic: sub.title, status: auditData ? 'audited' : 'ghost', audit: auditData?.audit, sections: auditData?.sections });
                 }
@@ -257,7 +266,7 @@ export const NeuralLens: React.FC<NeuralLensProps> = ({ onBack, onOpenManual }) 
     });
 
     return Object.values(sectors)
-        .filter(s => s.shards.length > 0)
+        .filter(s => s && s.shards.length > 0)
         .sort((a, b) => {
             if (a.type !== b.type) return a.type === 'book' ? -1 : 1;
             return b.priority - a.priority || a.title.localeCompare(b.title);
@@ -265,12 +274,12 @@ export const NeuralLens: React.FC<NeuralLensProps> = ({ onBack, onOpenManual }) 
   }, [cloudAudits, channels]);
 
   const filteredHierarchy = useMemo(() => {
-    const q = searchQuery.toLowerCase().trim();
+    const q = (searchQuery || "").toLowerCase().trim();
     if (!q) return hierarchy;
     return hierarchy.map(sector => ({
         ...sector,
-        shards: sector.shards.filter(s => s.topic.toLowerCase().includes(q))
-    })).filter(sector => sector.shards.length > 0 || sector.title.toLowerCase().includes(q));
+        shards: sector.shards.filter(s => (s.topic || "").toLowerCase().includes(q))
+    })).filter(sector => sector.shards.length > 0 || (sector.title || "").toLowerCase().includes(q));
   }, [hierarchy, searchQuery]);
 
   const sectorIntegrity = useMemo(() => {
@@ -278,27 +287,30 @@ export const NeuralLens: React.FC<NeuralLensProps> = ({ onBack, onOpenManual }) 
       const audited = selectedSector.shards.filter(s => !!s.audit);
       
       const score = audited.length === 0 ? 0 : Math.round(audited.reduce((acc, curr) => {
-          const s = curr.audit.coherenceScore || 0;
+          const s = curr.audit.coherenceScore || curr.audit.StructuralCoherenceScore || 0;
           const normalized = s <= 1 ? s * 100 : s;
           return acc + normalized;
       }, 0) / audited.length);
       
-      const risks = audited.map(s => s.audit.driftRisk);
+      const risks = audited.map(s => s.audit.driftRisk || s.audit.LogicalDriftRisk);
       const worstRisk = risks.includes('High') ? 'High' : risks.includes('Medium') ? 'Medium' : 'Low';
       
-      const robustness = audited.map(s => s.audit.robustness);
+      const robustness = audited.map(s => s.audit.robustness || s.audit.AdversarialRobustness);
       const avgRobustness = robustness.filter(r => r === 'High').length >= audited.length / 2 ? 'High' : 'Medium';
 
-      // Aggregating unique nodes and links for the composite mesh
       const allNodesMap = new Map<string, DependencyNode>();
       const allLinksMap = new Map<string, DependencyLink>();
 
       audited.forEach(shard => {
           if (shard.audit?.graph) {
-              shard.audit.graph.nodes.forEach((n: DependencyNode) => allNodesMap.set(n.id, n));
+              shard.audit.graph.nodes.forEach((n: DependencyNode) => {
+                  if (n && n.id) allNodesMap.set(n.id, n);
+              });
               shard.audit.graph.links.forEach((l: DependencyLink) => {
-                  const linkKey = `${l.source}-${l.target}-${l.label}`;
-                  allLinksMap.set(linkKey, l);
+                  if (l && l.source && l.target) {
+                    const linkKey = `${l.source}-${l.target}-${l.label || ''}`;
+                    allLinksMap.set(linkKey, l);
+                  }
               });
           }
       });
@@ -313,15 +325,30 @@ export const NeuralLens: React.FC<NeuralLensProps> = ({ onBack, onOpenManual }) 
               nodes: Array.from(allNodesMap.values()),
               links: Array.from(allLinksMap.values())
           },
-          history: audited.map(s => ({ topic: s.topic, score: s.audit.coherenceScore }))
+          history: audited.map(s => ({ topic: s.topic, score: s.audit.coherenceScore || s.audit.StructuralCoherenceScore }))
       };
   }, [selectedSector]);
 
   const holisticPlantUML = useMemo(() => {
       if (!sectorIntegrity?.mesh) return '';
-      // Slice for performance on composite view
-      return generatePlantUMLFromGraph(sectorIntegrity.mesh.nodes.slice(0, 35), sectorIntegrity.mesh.links.slice(0, 45));
-  }, [sectorIntegrity, graphTheme]);
+      const puml = generatePlantUMLFromGraph(sectorIntegrity.mesh.nodes.slice(0, 35), sectorIntegrity.mesh.links.slice(0, 45));
+      return puml ? `\`\`\`plantuml\n${puml}\n\`\`\`` : '';
+  }, [sectorIntegrity, graphTheme, generatePlantUMLFromGraph]);
+
+  const handleOpenExternalGraph = async (pumlString: string) => {
+      if (!pumlString || typeof pumlString !== 'string') return;
+      const cleanPuml = pumlString.replace(/```plantuml\n|```/g, '').trim();
+      try {
+          dispatchLog("Refracting external SVG window...", "info");
+          const encoded = await encodePlantUML(cleanPuml);
+          if (encoded) {
+              const url = `https://www.plantuml.com/plantuml/svg/${encoded}`;
+              window.open(url, '_blank');
+          }
+      } catch (e) {
+          dispatchLog("External refraction failed.", "error");
+      }
+  };
 
   const handleSelectSector = (sector: HierarchyNode) => {
       setSelectedSector(sector);
@@ -358,7 +385,7 @@ export const NeuralLens: React.FC<NeuralLensProps> = ({ onBack, onOpenManual }) 
             
             let lecture: GeneratedLecture | null = null;
             if (node.sections && node.sections.length > 0) {
-                lecture = { topic: node.topic, sections: node.sections, professorName: 'Auditor', studentName: 'System' };
+                lecture = { topic: node.topic, sections: node.sections, professorName: 'Auditor', studentName: 'System', uid: node.uid };
             }
 
             if (!lecture) {
@@ -369,18 +396,27 @@ export const NeuralLens: React.FC<NeuralLensProps> = ({ onBack, onOpenManual }) 
             if (lecture) {
                 const audit = await performNeuralLensAudit(lecture);
                 if (audit) {
-                    const finalized = { ...lecture, audit };
+                    const finalized: GeneratedLecture = { ...lecture, audit };
                     shards[i] = { ...node, audit, status: 'audited' };
-                    const contentUid = await generateContentUid(node.topic, selectedSector.description || '', 'en');
+                    
+                    const contentUid = lecture.uid || await generateContentUid(node.topic, selectedSector.description || '', 'en');
                     await saveCloudCachedLecture(selectedSector.id, contentUid, 'en', finalized);
-                    dispatchLog(`Verified & Vaulted: ${node.topic}`, 'success');
+                    
+                    setCloudAudits(prev => {
+                        const next = [...prev];
+                        const idx = next.findIndex(a => a.topic === lecture?.topic);
+                        if (idx > -1) next[idx] = finalized;
+                        else next.push(finalized);
+                        return next;
+                    });
+
+                    dispatchLog(`Verified & Vaulted [${finalized.audit?.StructuralCoherenceScore}%]: ${node.topic}`, 'success');
                 }
             }
             await new Promise(r => setTimeout(r, 600));
         }
         
         setSelectedSector({ ...selectedSector, shards });
-        await loadData();
         dispatchLog(`Spectrum Integrity Finalized for ${selectedSector.title}.`, 'success');
     } catch (e: any) {
         dispatchLog(`Batch Fault: ${e.message}`, 'error');
@@ -426,7 +462,7 @@ export const NeuralLens: React.FC<NeuralLensProps> = ({ onBack, onOpenManual }) 
           <div className="flex items-center gap-3">
               <button onClick={cycleTheme} className="flex items-center gap-2 px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-[10px] font-black uppercase transition-all shadow-lg border border-slate-700">
                   <Palette size={14} className="text-indigo-400"/>
-                  <span className="hidden sm:inline">Scheme: {graphTheme.replace('-', ' ')}</span>
+                  <span className="hidden sm:inline">Scheme: {(graphTheme || "neon-void").replace('-', ' ')}</span>
               </button>
               <button onClick={loadData} className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition-all"><RefreshCw size={18} className={loading ? 'animate-spin' : ''} /></button>
               {onOpenManual && <button onClick={onOpenManual} className="p-2 text-slate-400 hover:text-white" title="Lens Manual"><Info size={18}/></button>}
@@ -438,7 +474,7 @@ export const NeuralLens: React.FC<NeuralLensProps> = ({ onBack, onOpenManual }) 
               <div className="p-4 border-b border-slate-800 space-y-4 bg-slate-950/40">
                   <div className="relative group">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600 group-focus-within:text-indigo-400" size={14}/>
-                      <input type="text" placeholder="Search sectors or shards..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-3 py-2.5 text-sm text-white outline-none focus:ring-1 focus:ring-indigo-500 shadow-inner"/>
+                      <input type="text" placeholder="Search sectors or shards..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-3 py-2.5 text-sm text-white focus:ring-1 focus:ring-indigo-500 shadow-inner"/>
                   </div>
               </div>
 
@@ -484,7 +520,7 @@ export const NeuralLens: React.FC<NeuralLensProps> = ({ onBack, onOpenManual }) 
                                                           <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${hasAudit ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.5)]' : shard.status === 'staged' ? 'bg-amber-500' : 'bg-slate-800'}`}></div>
                                                           <span className="text-[10px] font-bold uppercase truncate">{shard.topic}</span>
                                                       </div>
-                                                      {hasAudit && <span className="text-[8px] font-mono font-bold opacity-60 ml-2">{formatScore(shard.audit?.coherenceScore)}%</span>}
+                                                      {hasAudit && <span className="text-[8px] font-mono font-bold opacity-60 ml-2">{formatScore(shard.audit?.coherenceScore || shard.audit?.StructuralCoherenceScore)}%</span>}
                                                   </button>
                                               );
                                           })}
@@ -528,7 +564,7 @@ export const NeuralLens: React.FC<NeuralLensProps> = ({ onBack, onOpenManual }) 
                               <h2 className="text-5xl font-black text-white italic tracking-tighter uppercase leading-none">{selectedSector.title}</h2>
                               <p className="text-slate-400 text-lg max-w-xl">{selectedSector.description}</p>
                               <div className="pt-2 flex gap-4">
-                                  <button onClick={handleRegenerateSector} disabled={isBatchAuditing} className="flex items-center gap-2 px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg transition-all active:scale-95 disabled:opacity-50">
+                                  <button onClick={handleRegenerateSector} disabled={isBatchAuditing} className="flex items-center gap-2 px-6 py-2.5 bg-indigo-600 hover:bg-indigo-50 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg transition-all active:scale-95 disabled:opacity-50">
                                       <Zap size={14} fill="currentColor"/> Regenerate Sector Integrity
                                   </button>
                                   <button onClick={cycleTheme} className="flex items-center gap-2 px-6 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all">
@@ -541,7 +577,7 @@ export const NeuralLens: React.FC<NeuralLensProps> = ({ onBack, onOpenManual }) 
                               <p className="text-[10px] font-black text-slate-500 uppercase mb-2 tracking-widest relative z-10">Aggregate Integrity</p>
                               <p className="text-7xl font-black text-emerald-400 italic tracking-tighter relative z-10">{sectorIntegrity.score}%</p>
                               <div className="w-full h-1 bg-slate-800 rounded-full mt-6 overflow-hidden relative z-10">
-                                  <div className="h-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)] transition-all duration-1000" style={{ width: `${sectorIntegrity.score}%` }}></div>
+                                  <div className="h-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)] transition-all duration-1000" style={{ width: `${sectorIntegrity.score}%` }}></div>
                               </div>
                           </div>
                       </div>
@@ -572,6 +608,13 @@ export const NeuralLens: React.FC<NeuralLensProps> = ({ onBack, onOpenManual }) 
                                 <Network size={18} className="text-indigo-400"/> Composite Dependency Mesh (Holistic)
                             </h4>
                             <div className="flex items-center gap-2">
+                                <button 
+                                    onClick={() => handleOpenExternalGraph(holisticPlantUML)}
+                                    className="p-2 bg-slate-950 border border-slate-800 text-indigo-400 hover:text-white rounded-lg transition-all shadow-lg active:scale-95"
+                                    title="Open in Zoomable New Window"
+                                >
+                                    <ExternalLink size={16}/>
+                                </button>
                                 <button onClick={() => setShowPumlSource(!showPumlSource)} className={`p-2 rounded-lg transition-all border ${showPumlSource ? 'bg-indigo-600 border-indigo-400 text-white' : 'bg-slate-950 border-slate-800 text-slate-500 hover:text-white'}`} title="View PlantUML Source">
                                     {showPumlSource ? <Eye size={16}/> : <Code size={16}/>}
                                 </button>
@@ -584,7 +627,7 @@ export const NeuralLens: React.FC<NeuralLensProps> = ({ onBack, onOpenManual }) 
                               {holisticPlantUML ? (
                                   showPumlSource ? (
                                     <pre className="p-6 bg-black/60 rounded-2xl text-[10px] font-mono text-indigo-300 whitespace-pre-wrap overflow-x-auto shadow-inner leading-relaxed border border-indigo-500/20 animate-fade-in">
-                                        {holisticPlantUML.replace(/```plantuml\n|```/g, '')}
+                                        {(holisticPlantUML || "").replace(/```plantuml\n|```/g, '')}
                                     </pre>
                                   ) : (
                                     <div className="animate-fade-in">
@@ -598,21 +641,6 @@ export const NeuralLens: React.FC<NeuralLensProps> = ({ onBack, onOpenManual }) 
                                   </div>
                               )}
                           </div>
-                          {sectorIntegrity.history?.length > 0 && (
-                              <div className="mt-12 pt-8 border-t border-slate-800 grid grid-cols-2 md:grid-cols-4 gap-4">
-                                  {sectorIntegrity.history.map((h, i) => (
-                                      <div key={i} className="bg-black/20 p-4 rounded-2xl border border-white/5 space-y-2">
-                                          <p className="text-[9px] font-bold text-slate-500 truncate uppercase">{h.topic}</p>
-                                          <div className="flex items-end gap-2">
-                                              <div className="flex-1 h-1 bg-slate-800 rounded-full overflow-hidden">
-                                                  <div className="h-full bg-indigo-500" style={{ width: `${formatScore(h.score)}%` }}></div>
-                                              </div>
-                                              <span className="text-[10px] font-mono font-black text-indigo-400">{formatScore(h.score)}%</span>
-                                          </div>
-                                      </div>
-                                  ))}
-                              </div>
-                          )}
                       </div>
                   </div>
               ) : activeAudit?.audit ? (
@@ -627,6 +655,13 @@ export const NeuralLens: React.FC<NeuralLensProps> = ({ onBack, onOpenManual }) 
                                       <button onClick={() => setActiveTab('holistic')} className="px-4 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all text-slate-500 hover:text-slate-300">Sector Home</button>
                                   </div>
                                   <div className="flex gap-1">
+                                    <button 
+                                        onClick={() => handleOpenExternalGraph(activePlantUML)}
+                                        className="p-2 bg-slate-900 border border-slate-700 text-indigo-400 hover:text-white rounded-xl transition-all shadow-lg active:scale-95"
+                                        title="Open External Zoom View"
+                                    >
+                                        <ExternalLink size={16}/>
+                                    </button>
                                     <button onClick={cycleTheme} className="p-2 bg-slate-900 hover:bg-slate-800 text-indigo-400 rounded-xl transition-all border border-slate-700" title="Cycle Graph Colors">
                                         <Palette size={16}/>
                                     </button>
@@ -638,7 +673,7 @@ export const NeuralLens: React.FC<NeuralLensProps> = ({ onBack, onOpenManual }) 
                           </div>
                           <div className="bg-slate-900 border border-slate-800 px-8 py-4 rounded-[2.5rem] shadow-inner text-center">
                               <p className="text-[8px] font-black text-slate-600 uppercase mb-1 tracking-widest">Node Integrity</p>
-                              <p className="text-4xl font-black text-emerald-400 italic tracking-tighter">{formatScore(activeAudit.audit.coherenceScore)}%</p>
+                              <p className="text-4xl font-black text-emerald-400 italic tracking-tighter">{formatScore(activeAudit.audit.StructuralCoherenceScore || activeAudit.audit.coherenceScore)}%</p>
                           </div>
                       </div>
 
@@ -646,14 +681,14 @@ export const NeuralLens: React.FC<NeuralLensProps> = ({ onBack, onOpenManual }) 
                         <div className="space-y-12 animate-fade-in text-left">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-8 shadow-xl flex flex-col items-center text-center gap-4">
-                                    <div className="p-3 bg-indigo-900/30 text-indigo-400 rounded-2xl"><Activity size={24}/></div>
+                                    <div className="p-3 bg-indigo-900/20 text-indigo-400 rounded-2xl"><Activity size={24}/></div>
                                     <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Logical Drift Risk</h4>
-                                    <div className={`px-6 py-2 rounded-xl text-xs font-black uppercase tracking-widest border ${activeAudit.audit.driftRisk === 'Low' ? 'bg-emerald-950/20 text-emerald-400 border-emerald-500/30' : 'bg-amber-950/20 text-amber-400'}`}>{activeAudit.audit.driftRisk} Risk</div>
+                                    <div className={`px-6 py-2 rounded-xl text-xs font-black uppercase tracking-widest border ${ (activeAudit.audit.LogicalDriftRisk || activeAudit.audit.driftRisk) === 'Low' ? 'bg-emerald-950/20 text-emerald-400 border-emerald-500/30' : 'bg-amber-950/20 text-amber-400'}`}>{activeAudit.audit.LogicalDriftRisk || activeAudit.audit.driftRisk} Risk</div>
                                 </div>
                                 <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-8 shadow-xl flex flex-col items-center text-center gap-4">
                                     <div className="p-3 bg-purple-900/20 text-purple-400 rounded-2xl"><ShieldCheck size={24}/></div>
                                     <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Model Robustness</h4>
-                                    <div className={`px-6 py-2 rounded-xl text-xs font-black uppercase tracking-widest border ${activeAudit.audit.robustness === 'High' ? 'bg-emerald-950/20 text-emerald-400 border-emerald-500/30' : 'bg-amber-950/20 text-amber-400'}`}>{activeAudit.audit.robustness} Rank</div>
+                                    <div className={`px-6 py-2 rounded-xl text-xs font-black uppercase tracking-widest border ${ (activeAudit.audit.AdversarialRobustness || activeAudit.audit.robustness) === 'High' ? 'bg-emerald-950/20 text-emerald-400 border-emerald-500/30' : 'bg-amber-950/20 text-amber-400'}`}>{activeAudit.audit.AdversarialRobustness || activeAudit.audit.robustness} Rank</div>
                                 </div>
                             </div>
 
@@ -666,25 +701,22 @@ export const NeuralLens: React.FC<NeuralLensProps> = ({ onBack, onOpenManual }) 
                                             <Layers size={18} className="text-indigo-400"/> Logic Topology (PlantUML)
                                         </h4>
                                         <div className="flex items-center gap-2">
+                                            <button 
+                                                onClick={() => handleOpenExternalGraph(activePlantUML)}
+                                                className="p-2 bg-slate-950 border border-slate-800 text-indigo-400 hover:text-white rounded-lg transition-all shadow-lg active:scale-95"
+                                                title="Open External Zoom View"
+                                            >
+                                                <ExternalLink size={16}/>
+                                            </button>
                                             <button onClick={() => setShowPumlSource(!showPumlSource)} className={`p-2 rounded-lg transition-all border ${showPumlSource ? 'bg-indigo-600 border-indigo-400 text-white' : 'bg-slate-950 border-slate-800 text-slate-500 hover:text-white'}`} title="Show Source">
                                                 {showPumlSource ? <Eye size={16}/> : <Code size={16}/>}
-                                            </button>
-                                            <button 
-                                                onClick={() => {
-                                                    const blob = new Blob([activePlantUML.replace(/```plantuml\n|```/g, '')], { type: 'text/plain' });
-                                                    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `${activeAudit.topic}_topology.puml`; a.click();
-                                                }}
-                                                className="p-2 bg-slate-950 border border-slate-800 text-slate-500 hover:text-white rounded-lg transition-all"
-                                                title="Download .puml Source"
-                                            >
-                                                <FileCode size={16}/>
                                             </button>
                                         </div>
                                     </div>
                                     <div className={`relative z-10 ${containerBg} rounded-3xl p-8 shadow-inner overflow-hidden border border-white/5 transition-colors duration-500`}>
                                         {showPumlSource ? (
-                                            <pre className="p-6 bg-black/40 rounded-2xl text-[10px] font-mono text-emerald-400 whitespace-pre-wrap overflow-x-auto shadow-inner leading-relaxed border border-emerald-500/20 animate-fade-in">
-                                                {activePlantUML.replace(/```plantuml\n|```/g, '')}
+                                            <pre className="p-6 bg-black/60 rounded-2xl text-[10px] font-mono text-emerald-400 whitespace-pre-wrap overflow-x-auto shadow-inner leading-relaxed border border-emerald-500/20 animate-fade-in">
+                                                {(activePlantUML || "").replace(/```plantuml\n|```/g, '')}
                                             </pre>
                                         ) : (
                                             <div className="flex justify-center animate-fade-in">
@@ -702,7 +734,7 @@ export const NeuralLens: React.FC<NeuralLensProps> = ({ onBack, onOpenManual }) 
                                     {activeAudit.audit.graph.nodes.map((node: any, idx: number) => (
                                         <div key={idx} className="bg-slate-950 border border-slate-800 px-6 py-4 rounded-[1.5rem] shadow-xl flex flex-col items-center hover:border-indigo-500 transition-all group/node">
                                             <span className="text-[8px] font-black text-slate-600 uppercase mb-1 group-hover/node:text-indigo-400 transition-colors">{node.type}</span>
-                                            <span className="text-xs font-bold text-white uppercase">{node.label}</span>
+                                            <span className="text-xs font-bold text-white uppercase">{(node.label || "Untranslated Node")}</span>
                                         </div>
                                     ))}
                                 </div>
@@ -716,7 +748,7 @@ export const NeuralLens: React.FC<NeuralLensProps> = ({ onBack, onOpenManual }) 
                                     <div><h3 className="font-bold text-white uppercase tracking-tight">Technical Transcript</h3><p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">Logic sequence archive</p></div>
                                 </div>
                                 <div className="flex items-center gap-3">
-                                    <button onClick={handleExportPDF} disabled={isExportingPDF} className="flex items-center gap-2 px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg transition-all active:scale-95 disabled:opacity-50">{isExportingPDF ? <Loader2 size={14} className="animate-spin"/> : <FileDown size={14}/>} <span>PDF Export</span></button>
+                                    <button onClick={handleExportPDF} disabled={isExportingPDF} className="flex items-center gap-2 px-6 py-2.5 bg-indigo-600 hover:bg-indigo-50 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg transition-all active:scale-95 disabled:opacity-50">{isExportingPDF ? <Loader2 size={14} className="animate-spin"/> : <FileDown size={14}/>} <span>PDF Export</span></button>
                                 </div>
                             </div>
                             <div className="space-y-8 max-w-2xl mx-auto pb-40">
@@ -751,7 +783,7 @@ export const NeuralLens: React.FC<NeuralLensProps> = ({ onBack, onOpenManual }) 
                        <button 
                          onClick={handleRegenerateSector} 
                          disabled={isBatchAuditing}
-                         className="px-12 py-5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black uppercase tracking-[0.2em] shadow-2xl shadow-indigo-900/40 transition-all active:scale-95 flex items-center gap-4"
+                         className="px-12 py-5 bg-indigo-600 hover:bg-indigo-50 text-white rounded-2xl font-black uppercase tracking-[0.2em] shadow-2xl shadow-indigo-900/40 transition-all active:scale-95 flex items-center gap-4"
                        >
                            {isBatchAuditing ? <Loader2 className="animate-spin" size={24}/> : <Sparkles size={24}/>}
                            <span>Regenerate Spectrum Integrity</span>
